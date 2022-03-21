@@ -1,0 +1,11 @@
+site_name: mmv-tracking-napari
+site_description: A simple plugin to use with napari
+site_author: lennart kowitz
+
+theme: readthedocs
+
+
+repo_url: https://github.com/MMV-Lab/mmv-tracking-napari
+
+pages:
+- Home: index.md
