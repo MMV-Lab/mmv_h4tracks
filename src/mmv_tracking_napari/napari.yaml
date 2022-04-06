@@ -1,21 +1,11 @@
 name: mmv-tracking-napari
 display_name: Cell Tracking Tool
+schema_version: 0.1.0
 contributions:
   commands: 
-    - id: mmv-tracking-napari.make_qwidget
-      python_name: mmv_tracking_napari._widget:ExampleQWidget
-      title: Make example QWidget
-    - id: mmv-tracking-napari.make_magic_widget
-      python_name: mmv_tracking_napari._widget:example_magic_widget
-      title: Make example magic widget
-    - id: mmv-tracking-napari.make_func_widget
-      python_name: mmv_tracking_napari._widget:example_function_widget
-      title: Make example function widget   
+  - id: mmv-tracking-napari.make_qwidget
+    python_name: mmv_tracking_napari._widget:MMVTracking
+    title: Make tracking widget
   widgets:
-    - command: mmv-tracking-napari.make_qwidget
-      display_name: Example QWidget
-    - command: mmv-tracking-napari.make_magic_widget
-      display_name: Example Magic Widget
-    - command: mmv-tracking-napari.make_func_widget
-      autogenerate: true
-      display_name: Example Function Widget 
+  - command: mmv-tracking-napari.make_qwidget
+    display_name: Tracking Widget
