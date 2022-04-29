@@ -1,7 +1,12 @@
-from qtpy.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QScrollArea, QLabel, QFileDialog, QSlider, QLineEdit
+import napari
+import zarr
 from qtpy.QtCore import Qt
+from qtpy.QtWidgets import (QFileDialog, QHBoxLayout, QLabel, QLineEdit,
+                            QPushButton, QScrollArea, QSlider, QVBoxLayout,
+                            QWidget, QMessageBox)
 
 
+### TODO: Insert Manual Tracking
 class MMVTracking(QWidget):
     def __init__(self, napari_viewer):
         super().__init__()
@@ -21,6 +26,10 @@ class MMVTracking(QWidget):
         insert_correspondence = QLabel("ID should be tracked with second ID:")
         extra = QLabel("Extra functions:")
 
+        # Numeric Labels
+        self.n_tail = QLabel()
+        self.n_tail.setText("0")
+
         # Buttons
         btn_load = QPushButton("Load")
         btn_false_positive = QPushButton("Remove")
@@ -33,23 +42,34 @@ class MMVTracking(QWidget):
 
         # Linking buttons to functions
         btn_load.clicked.connect(self._load_zarr)
+        btn_plot.clicked.connect(self._get_current_slice)
+        btn_save.clicked.connect(self._save_zarr)
 
         # Sliders
-        s_tail = QSlider()
-        s_tail.setRange(0,10)
-        s_tail.setValue(0)
-        s_tail.setOrientation(Qt.Horizontal)
-        s_tail.setPageStep(2)
+        self.s_tail = QSlider()
+        self.s_tail.setRange(0,30)
+        self.s_tail.setValue(0)
+        self.s_tail.setOrientation(Qt.Horizontal)
+        self.s_tail.setPageStep(2)
+
+        # Link numeric labels to sliders
+        self.s_tail.valueChanged.connect(self._update_tail)
+
+        # Update tracks layer on release of slider
+        self.s_tail.sliderReleased.connect(self._update_track_tails)
 
         # Line Edits
-        le_trajectory = QLineEdit("-1")
-        le_false_positive = QLineEdit("-1")
-        le_false_merge = QLineEdit("-1")
-        le_false_cut_1 = QLineEdit("-1")
-        le_false_cut_2 = QLineEdit("-1")
-        le_remove_corespondence = QLineEdit("-1")
-        le_insert_corespondence_1 = QLineEdit("-1")
-        le_insert_corespondence_2 = QLineEdit("-1")
+        self.le_trajectory = QLineEdit("-1")
+        self.le_false_positive = QLineEdit("-1")
+        self.le_false_merge = QLineEdit("-1")
+        self.le_false_cut_1 = QLineEdit("-1")
+        self.le_false_cut_2 = QLineEdit("-1")
+        self.le_remove_corespondence = QLineEdit("-1")
+        self.le_insert_corespondence_1 = QLineEdit("-1")
+        self.le_insert_corespondence_2 = QLineEdit("-1")
+
+        # Link functions to line edits
+        self.le_trajectory.editingFinished.connect(self._select_track)
 
         # Loading .zarr file UI
         q_load = QWidget()
@@ -61,19 +81,20 @@ class MMVTracking(QWidget):
         q_tail = QWidget()
         q_tail.setLayout(QHBoxLayout())
         q_tail.layout().addWidget(tail)
-        q_tail.layout().addWidget(s_tail)
+        q_tail.layout().addWidget(self.s_tail)
+        q_tail.layout().addWidget(self.n_tail)
 
         # Selecting trajectory UI
         q_trajectory = QWidget()
         q_trajectory.setLayout(QHBoxLayout())
         q_trajectory.layout().addWidget(trajectory)
-        q_trajectory.layout().addWidget(le_trajectory)
+        q_trajectory.layout().addWidget(self.le_trajectory)
 
         # Correcting segmentation UI
         help_false_positive = QWidget()
         help_false_positive.setLayout(QHBoxLayout())
         help_false_positive.layout().addWidget(false_positive)
-        help_false_positive.layout().addWidget(le_false_positive)
+        help_false_positive.layout().addWidget(self.le_false_positive)
         help_false_positive.layout().addWidget(btn_false_positive)
         help_false_negative = QWidget()
         help_false_negative.setLayout(QHBoxLayout())
@@ -82,13 +103,13 @@ class MMVTracking(QWidget):
         help_false_merge = QWidget()
         help_false_merge.setLayout(QHBoxLayout())
         help_false_merge.layout().addWidget(false_merge)
-        help_false_merge.layout().addWidget(le_false_merge)
+        help_false_merge.layout().addWidget(self.le_false_merge)
         help_false_merge.layout().addWidget(btn_false_merge)
         help_false_cut = QWidget()
         help_false_cut.setLayout(QHBoxLayout())
         help_false_cut.layout().addWidget(false_cut)
-        help_false_cut.layout().addWidget(le_false_cut_1)
-        help_false_cut.layout().addWidget(le_false_cut_2)
+        help_false_cut.layout().addWidget(self.le_false_cut_1)
+        help_false_cut.layout().addWidget(self.le_false_cut_2)
         help_false_cut.layout().addWidget(btn_false_cut)
         q_segmentation = QWidget()
         q_segmentation.setLayout(QVBoxLayout())
@@ -101,13 +122,13 @@ class MMVTracking(QWidget):
         help_remove_correspondence = QWidget()
         help_remove_correspondence.setLayout(QHBoxLayout())
         help_remove_correspondence.layout().addWidget(remove_correspondence)
-        help_remove_correspondence.layout().addWidget(le_remove_corespondence)
+        help_remove_correspondence.layout().addWidget(self.le_remove_corespondence)
         help_remove_correspondence.layout().addWidget(btn_remove_correspondence)
         help_insert_correspondence = QWidget()
         help_insert_correspondence.setLayout(QHBoxLayout())
         help_insert_correspondence.layout().addWidget(insert_correspondence)
-        help_insert_correspondence.layout().addWidget(le_insert_corespondence_1)
-        help_insert_correspondence.layout().addWidget(le_insert_corespondence_2)
+        help_insert_correspondence.layout().addWidget(self.le_insert_corespondence_1)
+        help_insert_correspondence.layout().addWidget(self.le_insert_corespondence_2)
         help_insert_correspondence.layout().addWidget(btn_insert_correspondence)
         q_tracking = QWidget()
         q_tracking.setLayout(QVBoxLayout())
@@ -138,5 +159,58 @@ class MMVTracking(QWidget):
 
     # Functions
     def _load_zarr(self):
-        zarr = QFileDialog.getOpenFileUrl(self, "Select Zarr-File")
-        print("Selected " + zarr)
+        self.file = QFileDialog.getExistingDirectory(self, "Select Zarr-File")
+        self.z1 = zarr.load(self.file)
+        self.viewer.add_image(self.z1['raw_data/Image 1'][:], name = 'Raw Image')
+        self.viewer.add_labels(self.z1['segmentation_data/Image 1'][:], name = 'Segmentation Data')
+        self.viewer.add_tracks(self.z1['tracking_data/Image 1'][:], name = 'Tracks', tail_length = self.s_tail.value()) # Use graph argument for inheritance (https://napari.org/howtos/layers/tracks.html)
+
+    def _get_current_slice(self):
+        #napari.viewer.current_viewer().dims.set_current_step(0,5)
+        print(napari.viewer.current_viewer().dims.current_step[0]) # prints current slice
+
+    def _update_tail(self):
+        self.n_tail.setText(str(self.s_tail.value()))
+
+    def _update_track_tails(self):
+        self.viewer.layers.remove('Tracks')
+        self.viewer.add_tracks(self.z1['tracking_data/Image 1'][:], name='Tracks', tail_length=self.s_tail.value())
+
+    def _save_zarr(self):
+        zarr.save(self.file, self.z1)
+        msg = QMessageBox()
+        msg.setText("Zarr file has been saved.")
+        msg.exec()
+
+    def _temp(self):
+        layers = [
+            layer
+            for layer in self.viewer.layers
+            if isinstance(layer, napari.layers.Tracks)
+        ]
+        print(str(len(layers)) + " tracks layers")
+        print(layers[0].data)
+        #print(napari.viewer.current_viewer().layers.selection)
+        pass
+
+    def _plot(self):
+        pass
+
+    def _select_track(self):
+        try:
+            self.viewer.layers.remove('Tracks')
+        except ValueError:
+            print("No tracking layer found")
+        id = int(self.le_trajectory.text())
+        if id < 0:
+            self.viewer.add_tracks(self.z1['tracking_data/Image 1'][:], name='Tracks', tail_length=self.s_tail.value())
+        else:
+            tracks_data = [
+                track
+                for track in self.z1['tracking_data/Image 1'][:]
+                if track[0] == id
+            ]
+            if not tracks_data:
+                print("No tracking data found for id " + str(id))
+                return
+            self.viewer.add_tracks(tracks_data, name='Tracks', tail_length=self.s_tail.value())
