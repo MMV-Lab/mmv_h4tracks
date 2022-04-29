@@ -17,7 +17,6 @@ class MMVTracking(QWidget):
         next_free = QLabel("Next free label:")
         self.next_free_id = QLabel("next_free_id")
         trajectory = QLabel("Select ID for trajectory:")
-        tail = QLabel("Set tail length:")
         load = QLabel("Load .zarr file:")
         false_positive = QLabel("Remove false positive for ID:")
         false_merge = QLabel("Cut falsely merged ID:")
@@ -25,10 +24,6 @@ class MMVTracking(QWidget):
         remove_correspondence = QLabel("Remove tracking for later Slices for ID:")
         insert_correspondence = QLabel("ID should be tracked with second ID:")
         extra = QLabel("Extra functions:")
-
-        # Numeric Labels
-        self.n_tail = QLabel()
-        self.n_tail.setText("0")
 
         # Buttons
         btn_load = QPushButton("Load")
@@ -45,18 +40,6 @@ class MMVTracking(QWidget):
         btn_plot.clicked.connect(self._get_current_slice)
         btn_save.clicked.connect(self._save_zarr)
 
-        # Sliders
-        self.s_tail = QSlider()
-        self.s_tail.setRange(0,30)
-        self.s_tail.setValue(0)
-        self.s_tail.setOrientation(Qt.Horizontal)
-        self.s_tail.setPageStep(2)
-
-        # Link numeric labels to sliders
-        self.s_tail.valueChanged.connect(self._update_tail)
-
-        # Update tracks layer on release of slider
-        self.s_tail.sliderReleased.connect(self._update_track_tails)
 
         # Line Edits
         self.le_trajectory = QLineEdit("-1")
@@ -76,13 +59,6 @@ class MMVTracking(QWidget):
         q_load.setLayout(QHBoxLayout())
         q_load.layout().addWidget(load)
         q_load.layout().addWidget(btn_load)
-
-        # Changing tail length UI
-        q_tail = QWidget()
-        q_tail.setLayout(QHBoxLayout())
-        q_tail.layout().addWidget(tail)
-        q_tail.layout().addWidget(self.s_tail)
-        q_tail.layout().addWidget(self.n_tail)
 
         # Selecting trajectory UI
         q_trajectory = QWidget()
@@ -147,7 +123,6 @@ class MMVTracking(QWidget):
         scroll_area.setLayout(QVBoxLayout())
         scroll_area.layout().addWidget(title)
         scroll_area.layout().addWidget(q_load)
-        scroll_area.layout().addWidget(q_tail)
         scroll_area.layout().addWidget(q_trajectory)
         scroll_area.layout().addWidget(q_segmentation)
         scroll_area.layout().addWidget(q_tracking)
@@ -163,20 +138,12 @@ class MMVTracking(QWidget):
         self.z1 = zarr.load(self.file)
         self.viewer.add_image(self.z1['raw_data/Image 1'][:], name = 'Raw Image')
         self.viewer.add_labels(self.z1['segmentation_data/Image 1'][:], name = 'Segmentation Data')
-        self.viewer.add_tracks(self.z1['tracking_data/Image 1'][:], name = 'Tracks', tail_length = self.s_tail.value()) # Use graph argument for inheritance (https://napari.org/howtos/layers/tracks.html)
+        self.viewer.add_tracks(self.z1['tracking_data/Image 1'][:], name = 'Tracks') # Use graph argument for inheritance (https://napari.org/howtos/layers/tracks.html)
         self._get_next_free_id()
 
     def _get_current_slice(self):
         #napari.viewer.current_viewer().dims.set_current_step(0,5)
         print(napari.viewer.current_viewer().dims.current_step[0]) # prints current slice
-
-    def _update_tail(self):
-        self.n_tail.setText(str(self.s_tail.value()))
-
-    def _update_track_tails(self):
-        self.viewer.layers.remove('Tracks')
-        self.viewer.add_tracks(self.z1['tracking_data/Image 1'][:], name='Tracks', tail_length=self.s_tail.value())
-        self._get_next_free_id()
 
     def _save_zarr(self):
         zarr.save(self.file, self.z1)
@@ -205,7 +172,7 @@ class MMVTracking(QWidget):
             print("No tracking layer found")
         id = int(self.le_trajectory.text())
         if id < 0:
-            self.viewer.add_tracks(self.z1['tracking_data/Image 1'][:], name='Tracks', tail_length=self.s_tail.value())
+            self.viewer.add_tracks(self.z1['tracking_data/Image 1'][:], name='Tracks')
             self._get_next_free_id()
         else:
             tracks_data = [
@@ -216,7 +183,7 @@ class MMVTracking(QWidget):
             if not tracks_data:
                 print("No tracking data found for id " + str(id))
                 return
-            self.viewer.add_tracks(tracks_data, name='Tracks', tail_length=self.s_tail.value())
+            self.viewer.add_tracks(tracks_data, name='Tracks')
             self._get_next_free_id()
 
     def _get_next_free_id(self):
