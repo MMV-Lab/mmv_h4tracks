@@ -1,9 +1,10 @@
 import napari
 import zarr
+from napari.layers import Image, Labels, Tracks
 from qtpy.QtCore import Qt
 from qtpy.QtWidgets import (QFileDialog, QHBoxLayout, QLabel, QLineEdit,
-                            QPushButton, QScrollArea, QSlider, QVBoxLayout,
-                            QWidget, QMessageBox)
+                            QMessageBox, QPushButton, QScrollArea, QSlider,
+                            QVBoxLayout, QWidget)
 
 
 ### TODO: Insert Manual Tracking
@@ -135,7 +136,7 @@ class MMVTracking(QWidget):
     # Functions
     def _load_zarr(self):
         self.file = QFileDialog.getExistingDirectory(self, "Select Zarr-File")
-        self.z1 = zarr.load(self.file)
+        self.z1 = zarr.open(self.file,mode='a')
         self.viewer.add_image(self.z1['raw_data/Image 1'][:], name = 'Raw Image')
         self.viewer.add_labels(self.z1['segmentation_data/Image 1'][:], name = 'Segmentation Data')
         self.viewer.add_tracks(self.z1['tracking_data/Image 1'][:], name = 'Tracks') # Use graph argument for inheritance (https://napari.org/howtos/layers/tracks.html)
@@ -146,7 +147,15 @@ class MMVTracking(QWidget):
         print(napari.viewer.current_viewer().dims.current_step[0]) # prints current slice
 
     def _save_zarr(self):
-        zarr.save(self.file, self.z1)
+        for layer in self.viewer.layers:
+            if layer.name == 'Raw Image' and type(layer) == Image:
+                self.z1['raw_data/Image 1'][:] = layer.data
+                continue
+            if layer.name == 'Segmentation Data' and type(layer) == Labels:
+                self.z1['segmentation_data/Image 1'][:] = layer.data
+                continue
+            if layer.name == 'Tracks' and type(layer) == Tracks:
+                self.z1['tracking_data/Image 1'][:] = layer.data
         msg = QMessageBox()
         msg.setText("Zarr file has been saved.")
         msg.exec()
