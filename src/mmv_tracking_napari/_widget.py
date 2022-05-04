@@ -183,10 +183,16 @@ class MMVTracking(QWidget):
 
     def _select_track(self):
         try:
+            id = int(self.le_trajectory.text())
+        except ValueError:
+            msg = QMessageBox()
+            msg.setText("Please use integer (whole number)")
+            msg.exec()
+            return
+        try:
             self.viewer.layers.remove('Tracks')
         except ValueError:
             print("No tracking layer found")
-        id = int(self.le_trajectory.text())
         if id < 0:
             self.viewer.add_tracks(self.z1['tracking_data/Image 1'][:], name='Tracks')
             self._get_next_free_id()
