@@ -1,6 +1,6 @@
 import napari
+import numpy as np
 import zarr
-from napari.layers import Image, Labels, Tracks
 from qtpy.QtCore import Qt
 from qtpy.QtWidgets import (QFileDialog, QHBoxLayout, QLabel, QLineEdit,
                             QMessageBox, QPushButton, QScrollArea, QSlider,
@@ -14,7 +14,7 @@ class MMVTracking(QWidget):
         self.viewer = napari_viewer
 
         # Labels
-        title = QLabel("<font color='green'>WIP title!</font>")
+        title = QLabel("<font color='green'>Tracking, Visualization, Editing</font>")
         next_free = QLabel("Next free label:")
         self.next_free_id = QLabel("next_free_id")
         trajectory = QLabel("Select ID for trajectory:")
@@ -40,7 +40,7 @@ class MMVTracking(QWidget):
         btn_load.clicked.connect(self._load_zarr)
         btn_plot.clicked.connect(self._get_current_slice)
         btn_save.clicked.connect(self._save_zarr)
-
+       
 
         # Line Edits
         self.le_trajectory = QLineEdit("-1")
@@ -135,9 +135,11 @@ class MMVTracking(QWidget):
 
     # Functions
     def _load_zarr(self):
-        self.file = QFileDialog.getExistingDirectory(self, "Select Zarr-File")
+        dialog = QFileDialog()
+        dialog.setNameFilter('*.zarr')
+        self.file = dialog.getExistingDirectory(self, "Select Zarr-File")
         if(self.file == ""):
-            print("No Zarr-File selected")
+            print("No file selected")
             return
         self.z1 = zarr.open(self.file,mode='a')
         try:
@@ -145,8 +147,14 @@ class MMVTracking(QWidget):
             self.viewer.add_labels(self.z1['segmentation_data/Image 1'][:], name = 'Segmentation Data')
             self.viewer.add_tracks(self.z1['tracking_data/Image 1'][:], name = 'Tracks') # Use graph argument for inheritance (https://napari.org/howtos/layers/tracks.html)
         except:
-            print("Zarr file does not contain required groups")
+            print("File is either no Zarr file or does not contain required groups")
         else:
+            segmentation = [
+            layer
+            for layer in self.viewer.layers
+            if isinstance(layer, napari.layers.Labels)
+        ][0]
+            segmentation.events.mode.connect(self._get_next_free_id)
             self._get_next_free_id()
 
     def _get_current_slice(self):
@@ -155,13 +163,13 @@ class MMVTracking(QWidget):
 
     def _save_zarr(self):
         for layer in self.viewer.layers:
-            if layer.name == 'Raw Image' and type(layer) == Image:
+            if layer.name == 'Raw Image' and isinstance(layer, napari.layers.Image):
                 self.z1['raw_data/Image 1'][:] = layer.data
                 continue
-            if layer.name == 'Segmentation Data' and type(layer) == Labels:
+            if layer.name == 'Segmentation Data' and isinstance(layer, napari.layers.Labels):
                 self.z1['segmentation_data/Image 1'][:] = layer.data
                 continue
-            if layer.name == 'Tracks' and type(layer) == Tracks:
+            if layer.name == 'Tracks' and isinstance(layer, napari.layers.Tracks):
                 self.z1['tracking_data/Image 1'][:] = layer.data
         msg = QMessageBox()
         msg.setText("Zarr file has been saved.")
@@ -209,10 +217,9 @@ class MMVTracking(QWidget):
             self._get_next_free_id()
 
     def _get_next_free_id(self):
-        i = 0
-        while True:
-            for element in self.z1['tracking_data/Image 1'][:,0]:
-                if i == element:
-                    i = i + 1
-            break
-        self.next_free_id.setText(str(i))
+        for layer in self.viewer.layers:
+            if isinstance(layer, napari.layers.Labels):
+                self.next_free_id.setText(str(np.amax(layer.data)+1))
+                return
+            pass
+        # TODO: handling for if the layer doesn't exist
