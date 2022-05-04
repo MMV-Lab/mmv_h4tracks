@@ -136,11 +136,18 @@ class MMVTracking(QWidget):
     # Functions
     def _load_zarr(self):
         self.file = QFileDialog.getExistingDirectory(self, "Select Zarr-File")
+        if(self.file == ""):
+            print("No Zarr-File selected")
+            return
         self.z1 = zarr.open(self.file,mode='a')
-        self.viewer.add_image(self.z1['raw_data/Image 1'][:], name = 'Raw Image')
-        self.viewer.add_labels(self.z1['segmentation_data/Image 1'][:], name = 'Segmentation Data')
-        self.viewer.add_tracks(self.z1['tracking_data/Image 1'][:], name = 'Tracks') # Use graph argument for inheritance (https://napari.org/howtos/layers/tracks.html)
-        self._get_next_free_id()
+        try:
+            self.viewer.add_image(self.z1['raw_data/Image 1'][:], name = 'Raw Image')
+            self.viewer.add_labels(self.z1['segmentation_data/Image 1'][:], name = 'Segmentation Data')
+            self.viewer.add_tracks(self.z1['tracking_data/Image 1'][:], name = 'Tracks') # Use graph argument for inheritance (https://napari.org/howtos/layers/tracks.html)
+        except:
+            print("Zarr file does not contain required groups")
+        else:
+            self._get_next_free_id()
 
     def _get_current_slice(self):
         #napari.viewer.current_viewer().dims.set_current_step(0,5)
