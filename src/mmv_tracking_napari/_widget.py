@@ -134,6 +134,7 @@ class MMVTracking(QWidget):
         self.layout().addWidget(scroll_area)
 
     # Functions
+    @napari.Viewer.bind_key('i')
     def _load_zarr(self):
         dialog = QFileDialog()
         dialog.setNameFilter('*.zarr')
@@ -160,7 +161,7 @@ class MMVTracking(QWidget):
     def _get_current_slice(self):
         #napari.viewer.current_viewer().dims.set_current_step(0,5)
         print(napari.viewer.current_viewer().dims.current_step[0]) # prints current slice
-
+    
     def _save_zarr(self):
         for layer in self.viewer.layers:
             if layer.name == 'Raw Image' and isinstance(layer, napari.layers.Image):
@@ -190,28 +191,57 @@ class MMVTracking(QWidget):
         pass
 
     def _select_track(self):
-        try:
+        try: # Try for one value
             id = int(self.le_trajectory.text())
-        except ValueError:
-            msg = QMessageBox()
-            msg.setText("Please use integer (whole number)")
-            msg.exec()
-            return
+        except ValueError: # Try for list of values
+            txt = self.le_trajectory.text()
+            id = []
+            try:
+                for i in range(0,len(txt.split(","))):
+                    id.append(int(txt.split(",")[i]))
+            except ValueError:
+                msg = QMessageBox()
+                msg.setText("Please use a single integer (whole number) or a comma separated list of integers")
+                msg.exec()
+                return
         try:
             self.viewer.layers.remove('Tracks')
         except ValueError:
             print("No tracking layer found")
-        if id < 0:
-            self.viewer.add_tracks(self.z1['tracking_data/Image 1'][:], name='Tracks')
-            self._get_next_free_id()
-        else:
+        if isinstance(id,int): # Single value
+            if id < 0:
+                self.viewer.add_tracks(self.z1['tracking_data/Image 1'][:], name='Tracks')
+                self._get_next_free_id()
+            else:
+                tracks_data = [
+                    track
+                    for track in self.z1['tracking_data/Image 1'][:]
+                    if track[0] == id
+                ]
+                if not tracks_data:
+                    print("No tracking data found for id " + str(id))
+                    return
+                self.viewer.add_tracks(tracks_data, name='Tracks')
+                self._get_next_free_id()
+        else: # Multiple values, id is instance of "list"
+            id = list(dict.fromkeys(id)) # Removes multiple values
+            for i in range(0,len(id)): # Remove illegal values (<0) from id
+                if id[i] < 0:
+                    id.pop(i)
+            # id now only contains legal values, can be written back to line edit
+            txt = ""
+            for i in range(0,len(id)):
+                if len(txt)>0:
+                    txt = txt + ","
+                txt = f'{txt}{id[i]}'
+            self.le_trajectory.setText(txt)
             tracks_data = [
                 track
                 for track in self.z1['tracking_data/Image 1'][:]
-                if track[0] == id
+                if track[0] in id
             ]
             if not tracks_data:
-                print("No tracking data found for id " + str(id))
+                print("No tracking data found for ids " + str(id))
                 return
             self.viewer.add_tracks(tracks_data, name='Tracks')
             self._get_next_free_id()
