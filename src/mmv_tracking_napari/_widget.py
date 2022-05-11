@@ -2,9 +2,9 @@ import napari
 import numpy as np
 import zarr
 from qtpy.QtCore import Qt
-from qtpy.QtWidgets import (QFileDialog, QHBoxLayout, QLabel, QLineEdit,
-                            QMessageBox, QPushButton, QScrollArea, QSlider,
-                            QVBoxLayout, QWidget)
+from qtpy.QtWidgets import (QComboBox, QFileDialog, QHBoxLayout, QLabel,
+                            QLineEdit, QMessageBox, QPushButton, QScrollArea, QGridLayout,
+                            QStackedWidget, QVBoxLayout, QWidget)
 
 
 ### TODO: Insert Manual Tracking
@@ -18,13 +18,20 @@ class MMVTracking(QWidget):
         next_free = QLabel("Next free label:")
         self.next_free_id = QLabel("next_free_id")
         trajectory = QLabel("Select ID for trajectory:")
-        load = QLabel("Load .zarr file:")
+        load_save = QLabel("Load/Save .zarr file:") # TODO: tooltip: replace original file
         false_positive = QLabel("Remove false positive for ID:")
         false_merge = QLabel("Cut falsely merged ID:")
         false_cut = QLabel("Merge falsely cut ID into second ID:")
         remove_correspondence = QLabel("Remove tracking for later Slices for ID:")
         insert_correspondence = QLabel("ID should be tracked with second ID:")
-        extra = QLabel("Extra functions:")
+        metric = QLabel("Evaluation metrics:")
+
+        # Tooltips for Labels
+        load_save_tip = (
+            "Loading: Select the .zarr directory to open the file.<br><br>\n\n"
+            "Saving: Overwrites the file selected at the time of loading!"
+        )
+        load_save.setToolTip(load_save_tip)
 
         # Buttons
         btn_load = QPushButton("Load")
@@ -35,12 +42,30 @@ class MMVTracking(QWidget):
         btn_insert_correspondence = QPushButton("Link")
         btn_save = QPushButton("Save")
         btn_plot = QPushButton("Plot")
+        btn_show_seg_track = QPushButton("temp_button_name_collapse")
+        btn_segment = QPushButton("Run instance segmentation")
+        btn_track = QPushButton("Run tracking")
 
         # Linking buttons to functions
         btn_load.clicked.connect(self._load_zarr)
         btn_plot.clicked.connect(self._get_current_slice)
         btn_save.clicked.connect(self._save_zarr)
+        btn_show_seg_track.clicked.connect(self._show_seg_track)
        
+        # Combo Boxes
+        c_segmentation = QComboBox()
+        c_plots = QComboBox()
+
+        # Adding entries to Combo Boxes
+        c_segmentation.addItem("select model")
+        c_segmentation.addItem("model 1")
+        c_segmentation.addItem("model 2")
+        c_segmentation.addItem("model 3")
+        c_segmentation.addItem("model 4")
+        c_plots.addItem("select metric")
+        c_plots.addItem("metric 1")
+        c_plots.addItem("metric 2")
+        c_plots.addItem("metric 3")
 
         # Line Edits
         self.le_trajectory = QLineEdit("-1")
@@ -55,11 +80,28 @@ class MMVTracking(QWidget):
         # Link functions to line edits
         self.le_trajectory.editingFinished.connect(self._select_track)
 
-        # Loading .zarr file UI
+        # Running segmentation/tracking UI
+        q_empty = QWidget() # Empty widget to create blank space
+        q_empty.setLayout(QHBoxLayout())
+        q_run = QWidget()
+        q_run.setLayout(QGridLayout())
+        q_run.layout().addWidget(btn_segment,0,0)
+        q_run.layout().addWidget(btn_track,0,1)
+        q_run.layout().addWidget(c_segmentation,1,0)
+        self.stack = QStackedWidget()
+        self.stack.insertWidget(0,q_empty)
+        self.stack.insertWidget(1,q_run)
+        q_seg_track = QWidget()
+        q_seg_track.setLayout(QVBoxLayout())
+        q_seg_track.layout().addWidget(btn_show_seg_track)
+        q_seg_track.layout().addWidget(self.stack)
+
+        # Loading/Saving .zarr file UI
         q_load = QWidget()
         q_load.setLayout(QHBoxLayout())
-        q_load.layout().addWidget(load)
+        q_load.layout().addWidget(load_save)
         q_load.layout().addWidget(btn_load)
+        q_load.layout().addWidget(btn_save)
 
         # Selecting trajectory UI
         q_trajectory = QWidget()
@@ -112,22 +154,23 @@ class MMVTracking(QWidget):
         q_tracking.layout().addWidget(help_remove_correspondence)
         q_tracking.layout().addWidget(help_insert_correspondence)
 
-        # Extra elements UI
-        q_extra = QWidget()
-        q_extra.setLayout(QHBoxLayout())
-        q_extra.layout().addWidget(extra)
-        q_extra.layout().addWidget(btn_save)
-        q_extra.layout().addWidget(btn_plot)
+        # Plot UI
+        q_plot = QWidget()
+        q_plot.setLayout(QHBoxLayout())
+        q_plot.layout().addWidget(metric)
+        q_plot.layout().addWidget(c_plots)
+        q_plot.layout().addWidget(btn_plot)
 
         # Assemble UI elements in ScrollArea
         scroll_area = QScrollArea()
         scroll_area.setLayout(QVBoxLayout())
         scroll_area.layout().addWidget(title)
+        scroll_area.layout().addWidget(q_seg_track)
         scroll_area.layout().addWidget(q_load)
         scroll_area.layout().addWidget(q_trajectory)
         scroll_area.layout().addWidget(q_segmentation)
         scroll_area.layout().addWidget(q_tracking)
-        scroll_area.layout().addWidget(q_extra)
+        scroll_area.layout().addWidget(q_plot)
 
         # Set ScrollArea as content of plugin
         self.setLayout(QVBoxLayout())
@@ -253,3 +296,6 @@ class MMVTracking(QWidget):
                 return
             pass
         # TODO: handling for if the layer doesn't exist
+
+    def _show_seg_track(self):
+        self.stack.setCurrentIndex(abs(self.stack.currentIndex()-1))
