@@ -51,6 +51,8 @@ class MMVTracking(QWidget):
         btn_plot.clicked.connect(self._get_current_slice)
         btn_save.clicked.connect(self._save_zarr)
         btn_show_seg_track.clicked.connect(self._show_seg_track)
+        btn_false_positive.clicked.connect(self._remove_fp)
+        btn_segment.clicked.connect(self._temp)
        
         # Combo Boxes
         c_segmentation = QComboBox()
@@ -205,7 +207,7 @@ class MMVTracking(QWidget):
         #napari.viewer.current_viewer().dims.set_current_step(0,5)
         print(napari.viewer.current_viewer().dims.current_step[0]) # prints current slice
     
-    def _save_zarr(self):
+    def _save_zarr(self): # TODO: redo with self.viewer.layers.index()
         for layer in self.viewer.layers:
             if layer.name == 'Raw Image' and isinstance(layer, napari.layers.Image):
                 self.z1['raw_data/Image 1'][:] = layer.data
@@ -220,13 +222,15 @@ class MMVTracking(QWidget):
         msg.exec()
 
     def _temp(self):
-        layers = [
+        print(self.viewer.layers[0].data)
+        #print(self.viewer.layers.index("Raw Image")) # Indexes go from bottom to top
+        """layers = [
             layer
             for layer in self.viewer.layers
             if isinstance(layer, napari.layers.Tracks)
         ]
         print(str(len(layers)) + " tracks layers")
-        print(layers[0].data)
+        print(layers[0].data)"""
         #print(napari.viewer.current_viewer().layers.selection)
         pass
 
@@ -271,7 +275,7 @@ class MMVTracking(QWidget):
             for i in range(0,len(id)): # Remove illegal values (<0) from id
                 if id[i] < 0:
                     id.pop(i)
-            # id now only contains legal values, can be written back to line edit
+            # ID now only contains legal values, can be written back to line edit
             txt = ""
             for i in range(0,len(id)):
                 if len(txt)>0:
@@ -289,7 +293,7 @@ class MMVTracking(QWidget):
             self.viewer.add_tracks(tracks_data, name='Tracks')
             self._get_next_free_id()
 
-    def _get_next_free_id(self):
+    def _get_next_free_id(self): # TODO: redo with self.viewer.layers.index("Tracking")
         for layer in self.viewer.layers:
             if isinstance(layer, napari.layers.Labels):
                 self.next_free_id.setText(str(np.amax(layer.data)+1))
@@ -297,5 +301,30 @@ class MMVTracking(QWidget):
             pass
         # TODO: handling for if the layer doesn't exist
 
-    def _show_seg_track(self):
+    def _show_seg_track(self): # Switches element of stack to be shown
         self.stack.setCurrentIndex(abs(self.stack.currentIndex()-1))
+
+    def _remove_fp(self): # TODO: handling for non-integers
+        try:
+            data = self.viewer.layers[self.viewer.layers.index("Segmentation Data")].data
+        except ValueError:
+            msg = QMessageBox()
+            msg.setText("Missing label layer")
+            msg.exec()
+            return
+        try:
+            if np.count_nonzero(data[napari.viewer.current_viewer().dims.current_step[0]] == int(self.le_false_positive.text())) < 1:
+                msg = QMessageBox()
+                msg.setText("ID doesn't exist in the current slice")
+                msg.exec()
+                return
+        except ValueError:
+            msg = QMessageBox()
+            msg.setText("Please use an Integer (whole number) as ID")
+            msg.exec()
+            return
+        # Replace all pixels with given ID with 0 in current slice
+        np.place(data[napari.viewer.current_viewer().dims.current_step[0]], data[napari.viewer.current_viewer().dims.current_step[0]]==int(self.le_false_positive.text()), 0)
+        self.viewer.layers.pop(self.viewer.layers.index("Segmentation Data"))
+        self.viewer.add_labels(data, name = 'Segmentation Data')
+        self.viewer.layers.move(self.viewer.layers.index("Segmentation Data"),1)
