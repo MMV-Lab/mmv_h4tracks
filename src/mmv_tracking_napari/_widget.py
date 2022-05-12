@@ -37,13 +37,14 @@ class MMVTracking(QWidget):
         btn_false_positive = QPushButton("Remove")
         btn_false_positive.setToolTip("R")
         btn_false_merge = QPushButton("Cut")
+        btn_false_merge.setToolTip("T")
         btn_false_cut = QPushButton("Merge")
+        btn_false_cut.setToolTip("Z")
         btn_remove_correspondence = QPushButton("Unlink")
         btn_insert_correspondence = QPushButton("Link")
         btn_save = QPushButton("Save")
         btn_save.setToolTip("W")
         btn_plot = QPushButton("Plot")
-        btn_show_seg_track = QPushButton("temp_button_name_collapse")
         btn_segment = QPushButton("Run instance segmentation")
         btn_track = QPushButton("Run tracking")
         btn_free_label = QPushButton("Load Label")
@@ -53,11 +54,11 @@ class MMVTracking(QWidget):
         btn_load.clicked.connect(self._load_zarr)
         btn_plot.clicked.connect(self._plot)
         btn_save.clicked.connect(self._save_zarr)
-        btn_show_seg_track.clicked.connect(self._show_seg_track)
         btn_false_positive.clicked.connect(self._remove_fp)
         btn_segment.clicked.connect(self._temp)
         btn_false_merge.clicked.connect(self._false_merge)
         btn_free_label.clicked.connect(self._get_free_id)
+        btn_false_cut.clicked.connect(self._false_cut)
        
         # Combo Boxes
         c_segmentation = QComboBox()
@@ -75,20 +76,20 @@ class MMVTracking(QWidget):
         c_plots.addItem("metric 3")
 
         # Line Edits
-        self.le_trajectory = QLineEdit("-1")
-        self.le_false_positive = QLineEdit("-1")
-        self.le_false_merge = QLineEdit("-1")
-        self.le_false_cut_1 = QLineEdit("-1")
-        self.le_false_cut_2 = QLineEdit("-1")
-        self.le_remove_corespondence = QLineEdit("-1")
-        self.le_insert_corespondence_1 = QLineEdit("-1")
-        self.le_insert_corespondence_2 = QLineEdit("-1")
+        self.le_trajectory = QLineEdit("")
+        self.le_false_positive = QLineEdit("")
+        self.le_false_merge = QLineEdit("")
+        self.le_false_cut_1 = QLineEdit("0")
+        self.le_false_cut_2 = QLineEdit("0")
+        self.le_remove_corespondence = QLineEdit("0")
+        self.le_insert_corespondence_1 = QLineEdit("")
+        self.le_insert_corespondence_2 = QLineEdit("0")
 
         # Link functions to line edits
         self.le_trajectory.editingFinished.connect(self._select_track)
 
         # Tool Box
-        toolbox = QToolBox()
+        self.toolbox = QToolBox()
 
         # Running segmentation/tracking UI
         q_seg_track = QWidget()
@@ -161,18 +162,18 @@ class MMVTracking(QWidget):
         q_eval.layout().addWidget(c_plots)
         q_eval.layout().addWidget(btn_plot)
 
-        # Add zones to toolbox
-        toolbox.addItem(q_seg_track, "Data Processing")
-        toolbox.addItem(q_segmentation, "Postprocessing Segmentation")
-        toolbox.addItem(q_tracking, "Postprocessing Tracking")
-        toolbox.addItem(q_eval, "Evaluation")
+        # Add zones to self.toolbox
+        self.toolbox.addItem(q_seg_track, "Data Processing")
+        self.toolbox.addItem(q_segmentation, "Postprocessing Segmentation")
+        self.toolbox.addItem(q_tracking, "Postprocessing Tracking")
+        self.toolbox.addItem(q_eval, "Evaluation")
 
         # Assemble UI elements in ScrollArea
         scroll_area = QScrollArea()
         scroll_area.setLayout(QVBoxLayout())
         scroll_area.layout().addWidget(title)
         scroll_area.layout().addWidget(q_load)
-        scroll_area.layout().addWidget(toolbox)
+        scroll_area.layout().addWidget(self.toolbox)
 
         # Set ScrollArea as content of plugin
         self.setLayout(QVBoxLayout())
@@ -312,18 +313,19 @@ class MMVTracking(QWidget):
 
     def _get_free_id(self):
         try:
-            label_layer =  self.viewer.layers[self.viewer.layers.index("Segmentation Data")]
-            label_layer.selected_label = (np.amax(label_layer.data)+1)
+            label_layer = self.viewer.layers[self.viewer.layers.index("Segmentation Data")]
         except ValueError:
             msg = QMessageBox()
             msg.setText("Missing label layer")
             msg.exec()
-
-    def _show_seg_track(self): # Switches element of stack to be shown
-        self.stack.setCurrentIndex(abs(self.stack.currentIndex()-1))
+            return
+        label_layer.selected_label = (np.amax(label_layer.data)+1)
+        napari.viewer.current_viewer().layers.select_all()
+        napari.viewer.current_viewer().layers.selection.select_only(label_layer)
+        label_layer.mode = "PAINT"
 
     @napari.Viewer.bind_key('r')
-    def _hotkey_get_free_id(self):
+    def _hotkey_remove_fp(self):
         MMVTracking.dock._remove_fp()
 
     def _remove_fp(self):
@@ -335,7 +337,9 @@ class MMVTracking(QWidget):
             msg.exec()
             return
         try:
-            if np.count_nonzero(data[napari.viewer.current_viewer().dims.current_step[0]] == int(self.le_false_positive.text())) < 1:
+            if np.count_nonzero(
+                data[napari.viewer.current_viewer().dims.current_step[0]] == int(self.le_false_positive.text())
+                ) < 1:
                 msg = QMessageBox()
                 msg.setText("ID doesn't exist in the current slice")
                 msg.exec()
@@ -346,18 +350,94 @@ class MMVTracking(QWidget):
             msg.exec()
             return
         # Replace all pixels with given ID with 0 in current slice
-        np.place(data[napari.viewer.current_viewer().dims.current_step[0]], data[napari.viewer.current_viewer().dims.current_step[0]]==int(self.le_false_positive.text()), 0)
+        np.place(
+            data[napari.viewer.current_viewer().dims.current_step[0]],
+            data[napari.viewer.current_viewer().dims.current_step[0]]==int(self.le_false_positive.text()),
+            0
+            )
         self.viewer.layers.pop(self.viewer.layers.index("Segmentation Data"))
         self.viewer.add_labels(data, name = 'Segmentation Data')
         self.viewer.layers.move(self.viewer.layers.index("Segmentation Data"),1)
 
+    @napari.Viewer.bind_key('t')
+    def _hotkey_false_merge(self):
+        MMVTracking.dock._false_merge()
+
     def _false_merge(self):
+        try:
+            data = self.viewer.layers[self.viewer.layers.index("Segmentation Data")].data
+        except ValueError:
+            msg = QMessageBox()
+            msg.setText("Missing label layer")
+            msg.exec()
+            return
+        try:
+            if np.count_nonzero(
+                data[napari.viewer.current_viewer().dims.current_step[0]] == int(self.le_false_cut_1.text())
+                ) < 1:
+                msg = QMessageBox()
+                msg.setText("ID doesn't exist in the current slice")
+                msg.exec()
+                return
+        except ValueError:
+            msg = QMessageBox()
+            msg.setText("Please use an Integer (whole number) as ID")
+            msg.exec()
+            return
         # TODO: make functional
         # TODO: catch user error
-        self.viewer.layers[self.viewer.layers.index("Segmentation Data")].fill((5,665,371),100)
+        #self.viewer.layers[self.viewer.layers.index("Segmentation Data")].fill((5,665,371),100)
         pass
 
-    @napari.Viewer.bind_key('i')
-    def _hotkey(viewer):
-        print("You pressed \"i\"!")
-        
+    @napari.Viewer.bind_key('z')
+    def _hotkey_false_cut(self):
+        MMVTracking.dock._false_cut()
+
+    def _false_cut(self):
+        try:
+            data = self.viewer.layers[self.viewer.layers.index("Segmentation Data")].data
+        except ValueError:
+            msg = QMessageBox()
+            msg.setText("Missing label layer")
+            msg.exec()
+            return
+        try:
+            if np.count_nonzero(
+                data[napari.viewer.current_viewer().dims.current_step[0]] == int(self.le_false_cut_1.text())
+                ) < 1:
+                msg = QMessageBox()
+                msg.setText("ID doesn't exist in the current slice")
+                msg.exec()
+                return
+        except ValueError:
+            msg = QMessageBox()
+            msg.setText("Please use an Integer (whole number) as ID")
+            msg.exec()
+            return
+        # TODO: change colour!
+        try:
+            np.place(
+                data[napari.viewer.current_viewer().dims.current_step[0]],
+                data[napari.viewer.current_viewer().dims.current_step[0]]==int(self.le_false_cut_1.text()),
+                int(self.le_false_cut_2.text())
+            )
+        except ValueError:
+            msg = QMessageBox()
+            msg.setText("Please use an Integer (whole number) as ID")
+            msg.exec()
+
+    @napari.Viewer.bind_key('1')
+    def _hotkey_zone_1(self):
+        MMVTracking.dock.toolbox.setCurrentIndex(0)
+
+    @napari.Viewer.bind_key('2')
+    def _hotkey_zone_2(self):
+        MMVTracking.dock.toolbox.setCurrentIndex(1)
+
+    @napari.Viewer.bind_key('3')
+    def _hotkey_zone_3(self):
+        MMVTracking.dock.toolbox.setCurrentIndex(2)
+
+    @napari.Viewer.bind_key('4')
+    def _hotkey_zone_4(self):
+        MMVTracking.dock.toolbox.setCurrentIndex(3)
