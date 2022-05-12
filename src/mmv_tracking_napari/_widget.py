@@ -1,11 +1,12 @@
 import napari
 import numpy as np
 import zarr
-from qtpy.QtWidgets import (QComboBox, QFileDialog, QHBoxLayout, QLabel,
-                            QLineEdit, QMessageBox, QPushButton, QScrollArea, QGridLayout,
-                            QStackedWidget, QVBoxLayout, QWidget)
+from qtpy.QtWidgets import (QComboBox, QFileDialog, QGridLayout, QHBoxLayout,
+                            QLabel, QLineEdit, QMessageBox, QPushButton,
+                            QScrollArea, QStackedWidget, QToolBox, QVBoxLayout,
+                            QWidget)
 
-### TODO: change structure away from 'Image 1' as soon as data with new structure is available
+
 ### TODO: Insert Manual Tracking
 class MMVTracking(QWidget):
     def __init__(self, napari_viewer):
@@ -15,7 +16,6 @@ class MMVTracking(QWidget):
         # Labels
         title = QLabel("<font color='green'>Tracking, Visualization, Editing</font>")
         next_free = QLabel("Next free label:")
-        self.next_free_id = QLabel("next_free_id")
         trajectory = QLabel("Select ID for trajectory:")
         load_save = QLabel("Load/Save .zarr file:")
         false_positive = QLabel("Remove false positive for ID:")
@@ -44,6 +44,7 @@ class MMVTracking(QWidget):
         btn_show_seg_track = QPushButton("temp_button_name_collapse")
         btn_segment = QPushButton("Run instance segmentation")
         btn_track = QPushButton("Run tracking")
+        btn_free_label = QPushButton("Load Label")
 
         # Linking buttons to functions
         btn_load.clicked.connect(self._load_zarr)
@@ -52,6 +53,8 @@ class MMVTracking(QWidget):
         btn_show_seg_track.clicked.connect(self._show_seg_track)
         btn_false_positive.clicked.connect(self._remove_fp)
         btn_segment.clicked.connect(self._temp)
+        btn_false_merge.clicked.connect(self._false_merge)
+        btn_free_label.clicked.connect(self._get_free_id)
        
         # Combo Boxes
         c_segmentation = QComboBox()
@@ -81,8 +84,11 @@ class MMVTracking(QWidget):
         # Link functions to line edits
         self.le_trajectory.editingFinished.connect(self._select_track)
 
+        # Tool Box
+        toolbox = QToolBox()
+
         # Running segmentation/tracking UI
-        q_empty = QWidget() # Empty widget to create blank space
+        """q_empty = QWidget() # Empty widget to create blank space
         q_empty.setLayout(QHBoxLayout())
         q_run = QWidget()
         q_run.setLayout(QGridLayout())
@@ -91,11 +97,13 @@ class MMVTracking(QWidget):
         q_run.layout().addWidget(c_segmentation,1,0)
         self.stack = QStackedWidget()
         self.stack.insertWidget(0,q_empty)
-        self.stack.insertWidget(1,q_run)
+        self.stack.insertWidget(1,q_run)"""
         q_seg_track = QWidget()
-        q_seg_track.setLayout(QVBoxLayout())
-        q_seg_track.layout().addWidget(btn_show_seg_track)
-        q_seg_track.layout().addWidget(self.stack)
+        q_seg_track.setLayout(QGridLayout())
+        q_seg_track.layout().addWidget(btn_segment,0,0)
+        q_seg_track.layout().addWidget(btn_track,0,1)
+        q_seg_track.layout().addWidget(c_segmentation,1,0)
+        #q_seg_track.layout().addWidget(self.stack)
 
         # Loading/Saving .zarr file UI
         q_load = QWidget()
@@ -103,12 +111,6 @@ class MMVTracking(QWidget):
         q_load.layout().addWidget(load_save)
         q_load.layout().addWidget(btn_load)
         q_load.layout().addWidget(btn_save)
-
-        # Selecting trajectory UI
-        q_trajectory = QWidget()
-        q_trajectory.setLayout(QHBoxLayout())
-        q_trajectory.layout().addWidget(trajectory)
-        q_trajectory.layout().addWidget(self.le_trajectory)
 
         # Correcting segmentation UI
         help_false_positive = QWidget()
@@ -119,7 +121,7 @@ class MMVTracking(QWidget):
         help_false_negative = QWidget()
         help_false_negative.setLayout(QHBoxLayout())
         help_false_negative.layout().addWidget(next_free)
-        help_false_negative.layout().addWidget(self.next_free_id)
+        help_false_negative.layout().addWidget(btn_free_label)
         help_false_merge = QWidget()
         help_false_merge.setLayout(QHBoxLayout())
         help_false_merge.layout().addWidget(false_merge)
@@ -133,12 +135,16 @@ class MMVTracking(QWidget):
         help_false_cut.layout().addWidget(btn_false_cut)
         q_segmentation = QWidget()
         q_segmentation.setLayout(QVBoxLayout())
-        q_segmentation.layout().addWidget(help_false_positive)
         q_segmentation.layout().addWidget(help_false_negative)
+        q_segmentation.layout().addWidget(help_false_positive)
         q_segmentation.layout().addWidget(help_false_merge)
         q_segmentation.layout().addWidget(help_false_cut)
 
-        # Correcting correspondence UI
+        # Postprocessing tracking UI
+        help_trajectory = QWidget()
+        help_trajectory.setLayout(QHBoxLayout())
+        help_trajectory.layout().addWidget(trajectory)
+        help_trajectory.layout().addWidget(self.le_trajectory)
         help_remove_correspondence = QWidget()
         help_remove_correspondence.setLayout(QHBoxLayout())
         help_remove_correspondence.layout().addWidget(remove_correspondence)
@@ -152,33 +158,35 @@ class MMVTracking(QWidget):
         help_insert_correspondence.layout().addWidget(btn_insert_correspondence)
         q_tracking = QWidget()
         q_tracking.setLayout(QVBoxLayout())
+        q_tracking.layout().addWidget(help_trajectory)
         q_tracking.layout().addWidget(help_remove_correspondence)
         q_tracking.layout().addWidget(help_insert_correspondence)
 
-        # Plot UI
-        q_plot = QWidget()
-        q_plot.setLayout(QHBoxLayout())
-        q_plot.layout().addWidget(metric)
-        q_plot.layout().addWidget(c_plots)
-        q_plot.layout().addWidget(btn_plot)
+        # Evaluation UI
+        q_eval = QWidget()
+        q_eval.setLayout(QHBoxLayout())
+        q_eval.layout().addWidget(metric)
+        q_eval.layout().addWidget(c_plots)
+        q_eval.layout().addWidget(btn_plot)
+
+        # Add zones to toolbox
+        toolbox.addItem(q_seg_track, "Data Processing")
+        toolbox.addItem(q_segmentation, "Postprocessing Segmentation")
+        toolbox.addItem(q_tracking, "Postprocessing Tracking")
+        toolbox.addItem(q_eval, "Evaluation")
 
         # Assemble UI elements in ScrollArea
         scroll_area = QScrollArea()
         scroll_area.setLayout(QVBoxLayout())
         scroll_area.layout().addWidget(title)
-        scroll_area.layout().addWidget(q_seg_track)
         scroll_area.layout().addWidget(q_load)
-        scroll_area.layout().addWidget(q_trajectory)
-        scroll_area.layout().addWidget(q_segmentation)
-        scroll_area.layout().addWidget(q_tracking)
-        scroll_area.layout().addWidget(q_plot)
+        scroll_area.layout().addWidget(toolbox)
 
         # Set ScrollArea as content of plugin
         self.setLayout(QVBoxLayout())
         self.layout().addWidget(scroll_area)
 
     # Functions
-    @napari.Viewer.bind_key('i')
     def _load_zarr(self):
         dialog = QFileDialog()
         dialog.setNameFilter('*.zarr')
@@ -188,18 +196,19 @@ class MMVTracking(QWidget):
             return
         self.z1 = zarr.open(self.file,mode='a')
         try:
-            self.viewer.add_image(self.z1['raw_data/Image 1'][:], name = 'Raw Image')
-            self.viewer.add_labels(self.z1['segmentation_data/Image 1'][:], name = 'Segmentation Data')
-            self.viewer.add_tracks(self.z1['tracking_data/Image 1'][:], name = 'Tracks') # Use graph argument for inheritance (https://napari.org/howtos/layers/tracks.html)
+            self.viewer.add_image(self.z1['raw_data'][:], name = 'Raw Image')
+            s1 = self.viewer.add_labels(self.z1['segmentation_data'][:], name = 'Segmentation Data')
+            self.viewer.add_tracks(self.z1['tracking_data'][:], name = 'Tracks') # Use graph argument for inheritance (https://napari.org/howtos/layers/tracks.html)
         except:
-            print("File is either no Zarr file or does not contain required groups")
-        else:
-            segmentation = self.viewer.layers[self.viewer.layers.index("Segmentation Data")]
-            segmentation.events.mode.connect(self._get_next_free_id)
-            self._get_next_free_id()
+            print("File is either no Zarr file or does not contain adhere to required structure")
+        """for layer in self.viewer.layers:
+            @layer.mouse_drag_callbacks.append
+            def _click(layer, event):
+                print("Clicking on " + layer.name + " at + " + str(event.position) + "!")
+                s1.selected_label = 2"""
     
     def _save_zarr(self):
-        # Useful if we later want to save to new file
+        # Useful if we later want to allow saving to new file
         """try:
             raw = self.viewer.layers.index("Raw Image")
         except ValueError:
@@ -221,9 +230,9 @@ class MMVTracking(QWidget):
             err.setText("No Tracking Data layer found!")
             err.exec()
             return
-        #self.z1['raw_data/Image 1'][:] = self.viewer.layers[raw].data
-        self.z1['segmentation_data/Image 1'][:] = self.viewer.layers[seg].data
-        self.z1['tracking_data/Image 1'][:] = self.viewer.layers[track].data
+        #self.z1['raw_data'][:] = self.viewer.layers[raw].data
+        self.z1['segmentation_data'][:] = self.viewer.layers[seg].data
+        self.z1['tracking_data'][:] = self.viewer.layers[track].data
         msg = QMessageBox()
         msg.setText("Zarr file has been saved.")
         msg.exec()
@@ -264,19 +273,17 @@ class MMVTracking(QWidget):
             print("No tracking layer found")
         if isinstance(id,int): # Single value
             if id < 0:
-                self.viewer.add_tracks(self.z1['tracking_data/Image 1'][:], name='Tracks')
-                self._get_next_free_id()
+                self.viewer.add_tracks(self.z1['tracking_data'][:], name='Tracks')
             else:
                 tracks_data = [
                     track
-                    for track in self.z1['tracking_data/Image 1'][:]
+                    for track in self.z1['tracking_data'][:]
                     if track[0] == id
                 ]
                 if not tracks_data:
                     print("No tracking data found for id " + str(id))
                     return
                 self.viewer.add_tracks(tracks_data, name='Tracks')
-                self._get_next_free_id()
         else: # Multiple values, id is instance of "list"
             id = list(dict.fromkeys(id)) # Removes multiple values
             for i in range(0,len(id)): # Remove illegal values (<0) from id
@@ -291,18 +298,18 @@ class MMVTracking(QWidget):
             self.le_trajectory.setText(txt)
             tracks_data = [
                 track
-                for track in self.z1['tracking_data/Image 1'][:]
+                for track in self.z1['tracking_data'][:]
                 if track[0] in id
             ]
             if not tracks_data:
                 print("No tracking data found for ids " + str(id))
                 return
             self.viewer.add_tracks(tracks_data, name='Tracks')
-            self._get_next_free_id()
 
-    def _get_next_free_id(self):
+    def _get_free_id(self):
         try:
-            self.next_free_id.setText(str(np.amax(self.viewer.layers[self.viewer.layers.index("Segmentation Data")].data)+1))
+            label_layer =  self.viewer.layers[self.viewer.layers.index("Segmentation Data")]
+            label_layer.selected_label = (np.amax(label_layer.data)+1)
         except ValueError:
             msg = QMessageBox()
             msg.setText("Missing label layer")
@@ -335,3 +342,14 @@ class MMVTracking(QWidget):
         self.viewer.layers.pop(self.viewer.layers.index("Segmentation Data"))
         self.viewer.add_labels(data, name = 'Segmentation Data')
         self.viewer.layers.move(self.viewer.layers.index("Segmentation Data"),1)
+
+    def _false_merge(self):
+        # TODO: make functional
+        # TODO: catch user error
+        self.viewer.layers[self.viewer.layers.index("Segmentation Data")].fill((5,665,371),100)
+        pass
+
+    @napari.Viewer.bind_key('i')
+    def _hotkey(viewer):
+        print("You pressed \"i\"!")
+    
