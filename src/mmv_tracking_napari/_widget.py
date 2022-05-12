@@ -3,16 +3,15 @@ import numpy as np
 import zarr
 from qtpy.QtWidgets import (QComboBox, QFileDialog, QGridLayout, QHBoxLayout,
                             QLabel, QLineEdit, QMessageBox, QPushButton,
-                            QScrollArea, QStackedWidget, QToolBox, QVBoxLayout,
-                            QWidget)
-
+                            QScrollArea, QToolBox, QVBoxLayout, QWidget)
 
 ### TODO: Insert Manual Tracking
 class MMVTracking(QWidget):
+    dock = None
     def __init__(self, napari_viewer):
         super().__init__()
         self.viewer = napari_viewer
-
+        MMVTracking.dock = self
         # Labels
         title = QLabel("<font color='green'>Tracking, Visualization, Editing</font>")
         next_free = QLabel("Next free label:")
@@ -34,17 +33,21 @@ class MMVTracking(QWidget):
 
         # Buttons
         btn_load = QPushButton("Load")
+        btn_load.setToolTip("Q")
         btn_false_positive = QPushButton("Remove")
+        btn_false_positive.setToolTip("R")
         btn_false_merge = QPushButton("Cut")
         btn_false_cut = QPushButton("Merge")
         btn_remove_correspondence = QPushButton("Unlink")
         btn_insert_correspondence = QPushButton("Link")
         btn_save = QPushButton("Save")
+        btn_save.setToolTip("W")
         btn_plot = QPushButton("Plot")
         btn_show_seg_track = QPushButton("temp_button_name_collapse")
         btn_segment = QPushButton("Run instance segmentation")
         btn_track = QPushButton("Run tracking")
         btn_free_label = QPushButton("Load Label")
+        btn_free_label.setToolTip("E")
 
         # Linking buttons to functions
         btn_load.clicked.connect(self._load_zarr)
@@ -88,22 +91,11 @@ class MMVTracking(QWidget):
         toolbox = QToolBox()
 
         # Running segmentation/tracking UI
-        """q_empty = QWidget() # Empty widget to create blank space
-        q_empty.setLayout(QHBoxLayout())
-        q_run = QWidget()
-        q_run.setLayout(QGridLayout())
-        q_run.layout().addWidget(btn_segment,0,0)
-        q_run.layout().addWidget(btn_track,0,1)
-        q_run.layout().addWidget(c_segmentation,1,0)
-        self.stack = QStackedWidget()
-        self.stack.insertWidget(0,q_empty)
-        self.stack.insertWidget(1,q_run)"""
         q_seg_track = QWidget()
         q_seg_track.setLayout(QGridLayout())
         q_seg_track.layout().addWidget(btn_segment,0,0)
         q_seg_track.layout().addWidget(btn_track,0,1)
         q_seg_track.layout().addWidget(c_segmentation,1,0)
-        #q_seg_track.layout().addWidget(self.stack)
 
         # Loading/Saving .zarr file UI
         q_load = QWidget()
@@ -187,6 +179,10 @@ class MMVTracking(QWidget):
         self.layout().addWidget(scroll_area)
 
     # Functions
+    @napari.Viewer.bind_key('q')
+    def _hotkey_load_zarr(self):
+        MMVTracking.dock._load_zarr()
+        
     def _load_zarr(self):
         dialog = QFileDialog()
         dialog.setNameFilter('*.zarr')
@@ -200,13 +196,17 @@ class MMVTracking(QWidget):
             s1 = self.viewer.add_labels(self.z1['segmentation_data'][:], name = 'Segmentation Data')
             self.viewer.add_tracks(self.z1['tracking_data'][:], name = 'Tracks') # Use graph argument for inheritance (https://napari.org/howtos/layers/tracks.html)
         except:
-            print("File is either no Zarr file or does not contain adhere to required structure")
+            print("File is either no Zarr file or does not  adhere to required structure")
         """for layer in self.viewer.layers:
             @layer.mouse_drag_callbacks.append
             def _click(layer, event):
                 print("Clicking on " + layer.name + " at + " + str(event.position) + "!")
                 s1.selected_label = 2"""
     
+    @napari.Viewer.bind_key('w')
+    def _hotkey_save_zarr(self):
+        MMVTracking.dock._save_zarr()
+
     def _save_zarr(self):
         # Useful if we later want to allow saving to new file
         """try:
@@ -306,6 +306,10 @@ class MMVTracking(QWidget):
                 return
             self.viewer.add_tracks(tracks_data, name='Tracks')
 
+    @napari.Viewer.bind_key('e')
+    def _hotkey_get_free_id(self):
+        MMVTracking.dock._get_free_id()
+
     def _get_free_id(self):
         try:
             label_layer =  self.viewer.layers[self.viewer.layers.index("Segmentation Data")]
@@ -317,6 +321,10 @@ class MMVTracking(QWidget):
 
     def _show_seg_track(self): # Switches element of stack to be shown
         self.stack.setCurrentIndex(abs(self.stack.currentIndex()-1))
+
+    @napari.Viewer.bind_key('r')
+    def _hotkey_get_free_id(self):
+        MMVTracking.dock._remove_fp()
 
     def _remove_fp(self):
         try:
@@ -352,4 +360,4 @@ class MMVTracking(QWidget):
     @napari.Viewer.bind_key('i')
     def _hotkey(viewer):
         print("You pressed \"i\"!")
-    
+        
