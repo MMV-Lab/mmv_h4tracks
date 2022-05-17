@@ -178,6 +178,7 @@ class MMVTracking(QWidget):
         # Set ScrollArea as content of plugin
         self.setLayout(QVBoxLayout())
         self.layout().addWidget(scroll_area)
+        self.setMinimumWidth(300)
 
     # Functions
     @napari.Viewer.bind_key('q')
@@ -310,6 +311,8 @@ class MMVTracking(QWidget):
     @napari.Viewer.bind_key('e')
     def _hotkey_get_free_id(self):
         MMVTracking.dock._get_free_id()
+        # TODO: try catch ValueError
+        MMVTracking.dock.viewer.layers[MMVTracking.dock.viewer.layers.index("Segmentation Data")].mode = "PAINT"
 
     def _get_free_id(self):
         try:
@@ -322,7 +325,7 @@ class MMVTracking(QWidget):
         label_layer.selected_label = (np.amax(label_layer.data)+1)
         napari.viewer.current_viewer().layers.select_all()
         napari.viewer.current_viewer().layers.selection.select_only(label_layer)
-        label_layer.mode = "PAINT"
+        #label_layer.mode = "PAINT"
 
     @napari.Viewer.bind_key('r')
     def _hotkey_remove_fp(self):
@@ -371,9 +374,10 @@ class MMVTracking(QWidget):
             msg.setText("Missing label layer")
             msg.exec()
             return
+        print(1)
         try:
             if np.count_nonzero(
-                data[napari.viewer.current_viewer().dims.current_step[0]] == int(self.le_false_cut_1.text())
+                data[napari.viewer.current_viewer().dims.current_step[0]] == int(self.le_false_merge.text())
                 ) < 1:
                 msg = QMessageBox()
                 msg.setText("ID doesn't exist in the current slice")
@@ -384,10 +388,9 @@ class MMVTracking(QWidget):
             msg.setText("Please use an Integer (whole number) as ID")
             msg.exec()
             return
+        print(2)
         # TODO: make functional
-        # TODO: catch user error
         #self.viewer.layers[self.viewer.layers.index("Segmentation Data")].fill((5,665,371),100)
-        pass
 
     @napari.Viewer.bind_key('z')
     def _hotkey_false_cut(self):
