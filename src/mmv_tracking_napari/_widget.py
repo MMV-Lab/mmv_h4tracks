@@ -164,8 +164,8 @@ class MMVTracking(QWidget):
 
         # Add zones to self.toolbox
         self.toolbox.addItem(q_seg_track, "Data Processing")
-        self.toolbox.addItem(q_segmentation, "Postprocessing Segmentation")
-        self.toolbox.addItem(q_tracking, "Postprocessing Tracking")
+        self.toolbox.addItem(q_segmentation, "Segmentation correction")
+        self.toolbox.addItem(q_tracking, "Tracking correction")
         self.toolbox.addItem(q_eval, "Evaluation")
 
         # Assemble UI elements in ScrollArea
