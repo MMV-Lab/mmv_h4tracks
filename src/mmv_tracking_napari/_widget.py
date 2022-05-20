@@ -12,6 +12,8 @@ class MMVTracking(QWidget):
         super().__init__()
         self.viewer = napari_viewer
         MMVTracking.dock = self
+        self.recording = False
+
         # Labels
         title = QLabel("<font color='green'>Tracking, Visualization, Editing</font>")
         next_free = QLabel("Next free label:")
@@ -56,9 +58,10 @@ class MMVTracking(QWidget):
         btn_save.clicked.connect(self._save_zarr)
         btn_false_positive.clicked.connect(self._remove_fp)
         btn_segment.clicked.connect(self._temp)
-        btn_false_merge.clicked.connect(self._false_merge)
+        btn_false_merge.clicked.connect(self._hotkey_false_merge)
         btn_free_label.clicked.connect(self._get_free_id)
         btn_false_cut.clicked.connect(self._false_cut)
+        btn_insert_correspondence.clicked.connect(self._hotkey_correspond)
        
         # Combo Boxes
         c_segmentation = QComboBox()
@@ -178,7 +181,7 @@ class MMVTracking(QWidget):
         # Set ScrollArea as content of plugin
         self.setLayout(QVBoxLayout())
         self.layout().addWidget(scroll_area)
-        self.setMinimumWidth(300)
+        self.setMinimumWidth(400)
 
     # Functions
     @napari.Viewer.bind_key('q')
@@ -198,7 +201,7 @@ class MMVTracking(QWidget):
             s1 = self.viewer.add_labels(self.z1['segmentation_data'][:], name = 'Segmentation Data')
             self.viewer.add_tracks(self.z1['tracking_data'][:], name = 'Tracks') # Use graph argument for inheritance (https://napari.org/howtos/layers/tracks.html)
         except:
-            print("File is either no Zarr file or does not  adhere to required structure")
+            print("File is either no Zarr file or does not adhere to required structure")
         """for layer in self.viewer.layers:
             @layer.mouse_drag_callbacks.append
             def _click(layer, event):
@@ -310,11 +313,11 @@ class MMVTracking(QWidget):
 
     @napari.Viewer.bind_key('e')
     def _hotkey_get_free_id(self):
-        MMVTracking.dock._get_free_id()
+        MMVTracking.dock._set_free_id()
         # TODO: try catch ValueError
         MMVTracking.dock.viewer.layers[MMVTracking.dock.viewer.layers.index("Segmentation Data")].mode = "PAINT"
 
-    def _get_free_id(self):
+    def _set_free_id(self):
         try:
             label_layer = self.viewer.layers[self.viewer.layers.index("Segmentation Data")]
         except ValueError:
@@ -322,10 +325,12 @@ class MMVTracking(QWidget):
             msg.setText("Missing label layer")
             msg.exec()
             return
-        label_layer.selected_label = (np.amax(label_layer.data)+1)
+        label_layer.selected_label = self._get_free_id(label_layer)
         napari.viewer.current_viewer().layers.select_all()
         napari.viewer.current_viewer().layers.selection.select_only(label_layer)
-        #label_layer.mode = "PAINT"
+
+    def _get_free_id(self, layer):
+        return np.amax(layer.data)+1
 
     @napari.Viewer.bind_key('r')
     def _hotkey_remove_fp(self):
@@ -368,27 +373,16 @@ class MMVTracking(QWidget):
 
     def _false_merge(self):
         try:
-            data = self.viewer.layers[self.viewer.layers.index("Segmentation Data")].data
+            layer = self.viewer.layers[self.viewer.layers.index("Segmentation Data")]
         except ValueError:
             msg = QMessageBox()
             msg.setText("Missing label layer")
             msg.exec()
             return
-        print(1)
-        try:
-            if np.count_nonzero(
-                data[napari.viewer.current_viewer().dims.current_step[0]] == int(self.le_false_merge.text())
-                ) < 1:
-                msg = QMessageBox()
-                msg.setText("ID doesn't exist in the current slice")
-                msg.exec()
-                return
-        except ValueError:
-            msg = QMessageBox()
-            msg.setText("Please use an Integer (whole number) as ID")
-            msg.exec()
-            return
-        print(2)
+        for layer in self.viewer.layers:
+            @layer.mouse_drag_callbacks.append
+            def _cut(layer, event):
+                self.viewer.layers[self.viewer.layers.index("Segmentation Data")].fill((int(event.position[0]),int(event.position[1]),int(event.position[2])),self._get_free_id(self.viewer.layers[self.viewer.layers.index("Segmentation Data")]))
         # TODO: make functional
         #self.viewer.layers[self.viewer.layers.index("Segmentation Data")].fill((5,665,371),100)
 
@@ -428,6 +422,46 @@ class MMVTracking(QWidget):
             msg = QMessageBox()
             msg.setText("Please use an Integer (whole number) as ID")
             msg.exec()
+    @napari.Viewer.bind_key('u')
+    def _hotkey_correspond(self):
+        if self.recording:
+            if MMVTracking.dock._activate_recording(): return #TODO: user feedback
+            self.recording = False
+        else:
+            if MMVTracking.dock._evaluate_recording(): return #TODO: user feedback
+            self.recording = True
+
+    def _activate_recording(self): # entering recording mode/evaluating data from recording mode 
+        """try:
+            data = self.viewer.layers[self.viewer.layers.index("Segmentation Data")].data
+        except ValueError:
+            msg = QMessageBox()
+            msg.setText("Missing label layer")
+            msg.exec()
+            return 1
+        try:
+            if np.count_nonzero(
+                data[napari.viewer.current_viewer().dims.current_step[0]] == int(self.le_false_merge.text())
+                ) < 1:
+                msg = QMessageBox()
+                msg.setText("ID doesn't exist in the current slice")
+                msg.exec()
+                return 2
+        except ValueError:
+            msg = QMessageBox()
+            msg.setText("Please use an Integer (whole number) as ID")
+            msg.exec()
+            return 3"""
+        self.clicked = []
+        for layer in self.viewer.layers:
+            @layer.mouse_drag_callbacks.append
+            def _record_click(layer,event):
+                self.clicked.append(event.position)
+                print("Recording " + str(event.position))
+        
+
+    def _evaluate_recording(self):
+        pass
 
     @napari.Viewer.bind_key('1')
     def _hotkey_zone_1(self):
