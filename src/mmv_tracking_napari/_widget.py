@@ -76,7 +76,6 @@ class MMVTracking(QWidget):
         btn_false_merge.clicked.connect(self._false_merge)
         btn_free_label.clicked.connect(self._set_free_id)
         btn_false_cut.clicked.connect(self._false_cut)
-        btn_insert_correspondence.clicked.connect(self._hotkey_correspond)
         btn_grab_label.clicked.connect(self._grab_label)
        
         # Combo Boxes
@@ -202,15 +201,11 @@ class MMVTracking(QWidget):
 
     def _mouse(self,mode,id = 0):
         for layer in self.viewer.layers:
-            print("callbacks before removal: " + str(layer.mouse_drag_callbacks))
-            #layer.mouse_drag_callbacks.clear()
             if len(layer.mouse_drag_callbacks):
                 if layer.mouse_drag_callbacks[0].__name__ == "no_op":
-                    print("Function found!")
                     layer.mouse_drag_callbacks.pop(-1)
                 else:
                     layer.mouse_drag_callbacks.clear()
-            print("callbacks after removal: " + str(layer.mouse_drag_callbacks))
 
             if mode == State.default:
                 pass
