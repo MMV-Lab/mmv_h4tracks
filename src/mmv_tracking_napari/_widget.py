@@ -317,10 +317,10 @@ class MMVTracking(QWidget):
             err.exec()
             return
         try:
-            track = self.viewer.layers.index("Tracking")
+            track = self.viewer.layers.index("Tracks")
         except ValueError:
             err = QMessageBox()
-            err.setText("No Tracking Data layer found!")
+            err.setText("No Tracks layer found!")
             err.exec()
             return
         #self.z1['raw_data'][:] = self.viewer.layers[raw].data
