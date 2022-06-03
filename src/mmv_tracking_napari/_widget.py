@@ -317,29 +317,55 @@ class MMVTracking(QWidget):
                         return
                     selected_cell = label_layer.data[int(event.position[0]),int(event.position[1]),int(event.position[2])]
                     if selected_cell == 0: # Make sure a cell has been selected
-                        msg = QMessageBox()
-                        msg.setText("Please select a segmented cell") #TODO: this locks the layer to the mouse, FIX!
-                        msg.exec()
+                        self.viewer.layers.selection.active.help = "NO CELL SELECTED, TRY AGAIN!"
                         self._mouse(State.unlink)
                         return
+                    self.viewer.layers.selection.active.help = ""
                     centroid = ndimage.center_of_mass(label_layer.data[int(event.position[0])], labels = label_layer.data[int(event.position[0])], index = selected_cell)
                     self._mouse(State.unlink2, id=(int(event.position[0]),int(np.rint(centroid[0])),int(np.rint(centroid[1]))))
             elif mode == State.unlink2:
                 @layer.mouse_drag_callbacks.append
                 def _handle(layer,event):
-                    if id[0] == event.position:
-                        msg = QMessageBox()
-                        msg.setText("Please select a cell from a different slice")
-                        msg.exec()
+                    label_layer = self.viewer.layers[self.viewer.layers.index("Segmentation Data")]
+                    if label_layer.data[int(event.position[0]),int(event.position[1]),int(event.position[2])] == 0: # Make sure a cell has been selected
+                        self.viewer.layers.selection.active.help = "NO CELL SELECTED, TRY AGAIN!"
                         self._mouse(State.unlink2)
                         return
-                    if id[0] < event.position[0]:
-                        # change trackid in this & following layers
-                        
-                        pass
-                    else:
-                        # change trackid in following layers
-                        pass
+                    if id[0] == event.position[0]:
+                        self.viewer.layers.selection.active.help = "SELECT A CELL FROM A DIFFERENT SLICE!"
+                        self._mouse(State.unlink2)
+                        return
+                    self.viewer.layers.selection.active.help = ""
+                    try:
+                        track = self.viewer.layers.index("Tracks")
+                    except ValueError:
+                        # Tracks layer doesn't exist, can't remove tracks
+                        msg = QMessageBox()
+                        msg.setText("Missing tracks layer")
+                        msg.exec()
+                        self._mouse(State.default)
+                        return
+                    tracks = self.viewer.layers[track].data
+                    new_id = max(tracks[:,0]) + 1
+                    for i in range(len(tracks.data)):
+                        if tracks[i,1] == id[0] and tracks[i,2] == id[1] and tracks[i,3] == id[2]:
+                            old_id = tracks[i,0]
+                            break
+                    for i in range(len(tracks.data)):
+                        if tracks[i,0] == old_id and tracks[i,1] > min(event.position[0],id[0]):
+                            tracks[i,0] = new_id
+                    # Delete single slice tracks if any exist
+                    for i in range(len(np.unique(tracks[:,0]))):
+                        if np.unique(tracks[:,0],return_counts = True)[1][i] == 1:
+                            i = i - 1
+                            for j in range(len(tracks)):
+                                if tracks[j,0] == np.unique(tracks[:,0])[i]:
+                                    tracks = np.delete(tracks,j,0)
+                                    break
+                    self.viewer.layers.remove('Tracks')
+                    df = pd.DataFrame(tracks, columns=['ID', 'Z', 'Y', 'X'])
+                    df.sort_values(['ID', 'Z'], ascending=True, inplace=True)
+                    self.viewer.add_tracks(df.values, name='Tracks')
                     self._mouse(State.default)
 
     @napari.Viewer.bind_key('q')
