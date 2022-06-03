@@ -106,9 +106,6 @@ class MMVTracking(QWidget):
 
         # Line Edits
         self.le_trajectory = QLineEdit("")
-        self.le_remove_corespondence = QLineEdit("0")
-        self.le_insert_corespondence_1 = QLineEdit("")
-        self.le_insert_corespondence_2 = QLineEdit("0")
 
         # Link functions to line edits
         self.le_trajectory.editingFinished.connect(self._select_track)
@@ -167,13 +164,10 @@ class MMVTracking(QWidget):
         help_remove_correspondence = QWidget()
         help_remove_correspondence.setLayout(QHBoxLayout())
         help_remove_correspondence.layout().addWidget(remove_correspondence)
-        help_remove_correspondence.layout().addWidget(self.le_remove_corespondence)
         help_remove_correspondence.layout().addWidget(btn_remove_correspondence)
         help_insert_correspondence = QWidget()
         help_insert_correspondence.setLayout(QHBoxLayout())
         help_insert_correspondence.layout().addWidget(insert_correspondence)
-        help_insert_correspondence.layout().addWidget(self.le_insert_corespondence_1)
-        help_insert_correspondence.layout().addWidget(self.le_insert_corespondence_2)
         help_insert_correspondence.layout().addWidget(btn_insert_correspondence)
         q_tracking = QWidget()
         q_tracking.setLayout(QVBoxLayout())
@@ -306,7 +300,7 @@ class MMVTracking(QWidget):
                         msg = QMessageBox()
                         msg.setText("Please select a segmented cell")
                         msg.exec()
-                        self._mouse(State.link)
+                        self._link()
                         return
                     centroid = ndimage.center_of_mass(label_layer.data[int(event.position[0])], labels = label_layer.data[int(event.position[0])], index = selected_cell)
                     self.to_track.append([int(event.position[0]),int(np.rint(centroid[0])),int(np.rint(centroid[1]))])
@@ -523,6 +517,8 @@ class MMVTracking(QWidget):
         for i in range(len(layer.mouse_drag_callbacks)):
             if layer.mouse_drag_callbacks[i].__name__ == "_record": #TODO: insert logic to evaluate inputs & create/combine tracks
                 if len(self.to_track) < 2:
+                    self.to_track = []
+                    self._mouse(State.default)
                     return
                 self.to_track.sort()
                 try:
