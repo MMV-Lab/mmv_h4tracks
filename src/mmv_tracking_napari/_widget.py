@@ -534,10 +534,10 @@ class MMVTracking(QWidget):
 
     def _link(self):
         try:
-            layer = self.viewer.layers[0]
+            layer = self.viewer.layers[self.viewer.layers.index("Segmentation Data")]
         except ValueError:
             err = QMessageBox()
-            err.setText("No layer found!")
+            err.setText("No label layer found!")
             err.exec()
             return
         for i in range(len(layer.mouse_drag_callbacks)):
@@ -555,16 +555,27 @@ class MMVTracking(QWidget):
                     tracks = self.viewer.layers[track].data
                     self.viewer.layers.remove('Tracks')
                     id = max(tracks[:,0]) + 1
-                if id != 1:
-                    for entry in self.to_track:
-                        # try to find entry in tracking data
-                        for j in range(len(layer.data)):
-                            if tracks[j][1:3] == entry:
-                                # adding to existing track
-                                id = tracks[j][0]
-                                self.to_track.remove(entry)
-                                break
-                for entry in self.to_track:
+                old_ids = [0,0]
+                if id != 1: # tracking data is not empty
+                    for j in range(len(tracks)):
+                        if tracks[j][1] == self.to_track[0][0] and tracks[j][2] == self.to_track[0][1] and tracks[j][3] == self.to_track[0][2]: # new track starting point exists in tracking data
+                            old_ids[0] = tracks[j][0]
+                            self.to_track.remove(self.to_track[0])
+                            break
+                    for j in range(len(tracks)):
+                        if tracks[j][1] == self.to_track[-1][0] and tracks[j][2] == self.to_track[-1][1] and tracks[j][3] == self.to_track[-1][2]: # new track end point exists in tracking data
+                            old_ids[1] = tracks[j][0]
+                            self.to_track.remove(self.to_track[-1])
+                            break
+                if max(old_ids) > 0:
+                    if min(old_ids) == 0: # one end connects to existing track
+                        id = max(old_ids)
+                    else: # both ends connect to existing track, (higher) id of second existing track changed to id of first track
+                        id = min(old_ids)
+                        for track_entry in tracks:
+                            if track_entry[0] == max(old_ids):
+                                track_entry[0] = id
+                for entry in self.to_track: # entries are added to tracking data
                     try:
                         tracks = np.r_[tracks, [[id] + entry]]
                     except UnboundLocalError:
