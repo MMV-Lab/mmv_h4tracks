@@ -297,9 +297,7 @@ class MMVTracking(QWidget):
                         return
                     selected_cell = label_layer.data[int(event.position[0]),int(event.position[1]),int(event.position[2])]
                     if selected_cell == 0: # Make sure a cell has been selected
-                        msg = QMessageBox()
-                        msg.setText("Please select a segmented cell")
-                        msg.exec()
+                        self.viewer.layers.selection.active.help = "YOU MISSED THE CELL, PRESS THE BUTTON AGAIN AND CONTINUE FROM THE LAST VALID INPUT!"
                         self._link()
                         return
                     centroid = ndimage.center_of_mass(label_layer.data[int(event.position[0])], labels = label_layer.data[int(event.position[0])], index = selected_cell)
@@ -400,7 +398,9 @@ class MMVTracking(QWidget):
         msg.exec()
 
     def _temp(self):
-        print(self.viewer.layers[2].data[0:5])
+        #print(dir(napari.viewer.current_viewer().layers.selection))
+        #napari.viewer.current_viewer().layers.selection.toggle(self.viewer.layers[0])
+        print(self.viewer.layers.selection.active)
 
     def _plot(self):
         pass
@@ -438,7 +438,7 @@ class MMVTracking(QWidget):
                 self.viewer.add_tracks(tracks_data, name='Tracks')
             self._mouse(State.default)
         else: # Multiple values, id is instance of "list"
-            id = list(dict.fromkeys(id)) # Removes multiple values
+            id = list(dict.fromkeys(id)) # Removes duplicate values
             for i in range(0,len(id)): # Remove illegal values (<0) from id
                 if id[i] < 0:
                     id.pop(i)
@@ -549,6 +549,7 @@ class MMVTracking(QWidget):
                 self.viewer.add_tracks(df.values, name='Tracks')
                 self._mouse(State.default)
                 return
+        self.viewer.layers.selection.active.help = ""
         self._mouse(State.link)
 
     @napari.Viewer.bind_key('i')
