@@ -230,7 +230,8 @@ class MMVTracking(QWidget):
                         msg.exec()
                         self._mouse(State.default)
                         return
-                    self.viewer.layers[self.viewer.layers.index("Segmentation Data")].fill((int(event.position[0]),int(event.position[1]),int(event.position[2])),0)
+                    false_id = self.viewer.layers[self.viewer.layers.index("Segmentation Data")].data[int(event.position[0]),int(event.position[1]),int(event.position[2])]
+                    np.place(self.viewer.layers[self.viewer.layers.index("Segmentation Data")].data[int(event.position[0])],self.viewer.layers[self.viewer.layers.index("Segmentation Data")].data[int(event.position[0])]==false_id,0)
                     self._mouse(State.default)
                     pass
             elif mode == State.recolour: # False Merge
@@ -674,32 +675,15 @@ class MMVTracking(QWidget):
                             elif tracks[j,1] >= self.to_cut[-1][0]: # cells to track with new id
                                 tracks[j,0] = id
                     j = j + 1
-                # Delete single slice tracks if any exist
-                """for i in range(len(np.unique(tracks[:,0]))): #TODO: FIX
-                    if np.unique(tracks[:,0],return_counts = True)[1][i] == 1:
-                        i = i - 1
-                        for j in range(len(tracks)):
-                            if tracks[j,0] == np.unique(tracks[:,0])[i]:
-                                tracks = np.delete(tracks,j,0)
-                                break
-                import sys
-                np.set_printoptions(threshold=sys.maxsize)"""
                 self.to_cut = []
                 df = pd.DataFrame(tracks, columns=['ID', 'Z', 'Y', 'X'])
                 df.sort_values(['ID', 'Z'], ascending=True, inplace=True)
-                # Delete single slice tracks if any exist
-                for i in range(len(np.unique(tracks[:,0]))):
-                    if np.unique(tracks[:,0],return_counts = True)[1][i] == 1:
-                        print(np.unique(tracks[:,0]))
-                        i = i - 1
-                        for j in range(len(tracks)):
-                            if tracks[j,0] == np.unique(tracks[:,0])[i]:
-                                print(tracks[j])
-                                tracks = np.delete(tracks,j,0)
-                                break
-                #print(tracks)
+                tracks = df.values
+                tmp = np.unique(tracks[:,0],return_counts = True)
+                tmp = np.delete(tmp,tmp[1] == 1,1)
+                tracks = np.delete(tracks,np.where(np.isin(tracks[:,0],tmp[0,:],invert=True)),0)
                 self.viewer.layers.remove('Tracks')
-                self.viewer.add_tracks(df.values, name='Tracks')
+                self.viewer.add_tracks(tracks, name='Tracks')
                 self._mouse(State.default)
                 return
         self.to_cut = []
