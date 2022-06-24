@@ -20,7 +20,6 @@ class State(enum.Enum):
     select = 5
     link = 6
     unlink = 7
-    unlink2 = 8
 
 class MMVTracking(QWidget):
     dock = None
@@ -331,74 +330,6 @@ class MMVTracking(QWidget):
                     centroid = ndimage.center_of_mass(label_layer.data[int(event.position[0])], labels = label_layer.data[int(event.position[0])], index = selected_cell)
                     self.to_cut.append([int(event.position[0]),int(np.rint(centroid[0])),int(np.rint(centroid[1]))])
 
-            """elif mode == State.unlink: # Removes Track
-                self.viewer.layers.selection.active.help = "(7)"
-                if isinstance(layer,napari.layers.labels.labels.Labels):
-                    layer.mode = "PAN_ZOOM"
-                @layer.mouse_drag_callbacks.append
-                def _handle(layer,event):
-                    try:
-                        label_layer = self.viewer.layers[self.viewer.layers.index("Segmentation Data")]
-                    except ValueError:
-                        msg = QMessageBox()
-                        msg.setText("Missing label layer")
-                        msg.exec()
-                        self._mouse(State.default)
-                        return
-                    selected_cell = label_layer.data[int(event.position[0]),int(event.position[1]),int(event.position[2])]
-                    if selected_cell == 0: # Make sure a cell has been selected
-                        self.viewer.layers.selection.active.help = "NO CELL SELECTED, TRY AGAIN!"
-                        self._mouse(State.unlink)
-                        return
-                    self.viewer.layers.selection.active.help = ""
-                    centroid = ndimage.center_of_mass(label_layer.data[int(event.position[0])], labels = label_layer.data[int(event.position[0])], index = selected_cell)
-                    self._mouse(State.unlink2, id=(int(event.position[0]),int(np.rint(centroid[0])),int(np.rint(centroid[1]))))
-            elif mode == State.unlink2:
-                self.viewer.layers.selection.active.help = "(8)"
-                @layer.mouse_drag_callbacks.append
-                def _handle(layer,event):
-                    label_layer = self.viewer.layers[self.viewer.layers.index("Segmentation Data")]
-                    if label_layer.data[int(event.position[0]),int(event.position[1]),int(event.position[2])] == 0: # Make sure a cell has been selected
-                        self.viewer.layers.selection.active.help = "NO CELL SELECTED, TRY AGAIN!"
-                        self._mouse(State.unlink2)
-                        return
-                    if id[0] == event.position[0]:
-                        self.viewer.layers.selection.active.help = "SELECT A CELL FROM A DIFFERENT SLICE!"
-                        self._mouse(State.unlink2)
-                        return
-                    self.viewer.layers.selection.active.help = ""
-                    try:
-                        track = self.viewer.layers.index("Tracks")
-                    except ValueError:
-                        # Tracks layer doesn't exist, can't remove tracks
-                        msg = QMessageBox()
-                        msg.setText("Missing tracks layer")
-                        msg.exec()
-                        self._mouse(State.default)
-                        return
-                    tracks = self.viewer.layers[track].data
-                    new_id = max(np.amax(tracks[:,0]),np.amax(self.z1['tracking_data'][:,0])) + 1
-                    for i in range(len(tracks.data)):
-                        if tracks[i,1] == id[0] and tracks[i,2] == id[1] and tracks[i,3] == id[2]:
-                            old_id = tracks[i,0]
-                            break
-                    for i in range(len(tracks.data)):
-                        if tracks[i,0] == old_id and tracks[i,1] > min(event.position[0],id[0]):
-                            tracks[i,0] = new_id
-                    # Delete single slice tracks if any exist
-                    for i in range(len(np.unique(tracks[:,0]))):
-                        if np.unique(tracks[:,0],return_counts = True)[1][i] == 1:
-                            i = i - 1
-                            for j in range(len(tracks)):
-                                if tracks[j,0] == np.unique(tracks[:,0])[i]:
-                                    tracks = np.delete(tracks,j,0)
-                                    break
-                    self.viewer.layers.remove('Tracks')
-                    df = pd.DataFrame(tracks, columns=['ID', 'Z', 'Y', 'X'])
-                    df.sort_values(['ID', 'Z'], ascending=True, inplace=True)
-                    self.viewer.add_tracks(df.values, name='Tracks')
-                    self._mouse(State.default)"""
-
     @napari.Viewer.bind_key('q')
     def _hotkey_load_zarr(self):
         MMVTracking.dock._load_zarr()
@@ -411,6 +342,24 @@ class MMVTracking(QWidget):
             print("No file selected")
             return
         self.z1 = zarr.open(self.file,mode='a')
+
+        # check if "Raw Image", "Segmentation Data" or "Track" exist in self.viewer.layers
+        if "Raw Image" in self.viewer.layers or "Segmentation Data" in self.viewer.layers or "Tracks" in self.viewer.layers:
+            msg = QMessageBox()
+            msg.setWindowTitle("Layer name blocked")
+            msg.setText("Found layer name")
+            msg.setInformativeText("One or more layers with the names \"Raw Image\", \"Segmentation Data\" or \"Tracks\" exists already. Continuing will delete those layers. Are you sure?")
+            msg.addButton("Continue", QMessageBox.AcceptRole)
+            msg.addButton(QMessageBox.Cancel)
+            ret = msg.exec() # ret = 0 means Continue was selected, ret = 4194304 means Cancel was selected
+            if ret == 4194304:
+                return
+            try:
+                self.viewer.layers.remove("Raw Image")
+                self.viewer.layers.remove("Segmentation Data")
+                self.viewer.layers.remove("Tracks")
+            except ValueError: # only one or two layers may exist, so not all can be deleted
+                pass
         try:
             self.viewer.add_image(self.z1['raw_data'][:], name = 'Raw Image')
             self.viewer.add_labels(self.z1['segmentation_data'][:], name = 'Segmentation Data')
