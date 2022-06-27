@@ -28,9 +28,12 @@ class MMVTracking(QWidget):
         self.viewer = napari_viewer
         MMVTracking.dock = self
 
-        # Variable to store clicked centroids for Tracking
+        # Variables to store clicked centroids for Tracking
         self.to_track = []
         self.to_cut = []
+
+        # Variable to hold complete (corrected) tracks layer
+        self.tracks = np.zeros((1,4))
 
         # Labels
         title = QLabel("<font color='green'>HITL4Trk</font>")
@@ -203,7 +206,7 @@ class MMVTracking(QWidget):
 
     # Functions
 
-    def _mouse(self,mode,id = 0):
+    def _mouse(self,mode,id = 0, paint = False):
         for layer in self.viewer.layers:
             if len(layer.mouse_drag_callbacks):
                 if layer.mouse_drag_callbacks[0].__name__ == "no_op":
@@ -286,6 +289,8 @@ class MMVTracking(QWidget):
                     label_layer.selected_label = label_layer.data[int(event.position[0]),int(event.position[1]),int(event.position[2])]
                     napari.viewer.current_viewer().layers.select_all()
                     napari.viewer.current_viewer().layers.selection.select_only(label_layer)
+                    if paint:
+                        label_layer.mode = "PAINT"
                     self._mouse(State.default)
             elif mode == State.link: # Creates Track
                 self.viewer.layers.selection.active.help = "(6)"
@@ -373,6 +378,7 @@ class MMVTracking(QWidget):
         MMVTracking.dock._save_zarr()
 
     def _save_zarr(self):
+        
         # Useful if we later want to allow saving to new file
         """try:
             raw = self.viewer.layers.index("Raw Image")
@@ -381,23 +387,41 @@ class MMVTracking(QWidget):
             err.setText("No Raw Data layer found!")
             err.exec()
             return"""
-        try:
+        try: # Check if segmentation layer exists
             seg = self.viewer.layers.index("Segmentation Data")
         except ValueError:
             err = QMessageBox()
             err.setText("No Segmentation Data layer found!")
             err.exec()
             return
-        try:
+        try: # Check if tracks layer exists
             track = self.viewer.layers.index("Tracks")
         except ValueError:
             err = QMessageBox()
             err.setText("No Tracks layer found!")
             err.exec()
             return
-        #self.z1['raw_data'][:] = self.viewer.layers[raw].data
-        self.z1['segmentation_data'][:] = self.viewer.layers[seg].data
-        self.z1['tracking_data'][:] = self.viewer.layers[track].data
+
+        ret = 1
+        if self.le_trajectory.text() != "": # Some tracks are potentially left out
+            msg = QMessageBox()
+            msg.setWindowTitle("Tracks")
+            msg.setText("Limited Tracks layer")
+            msg.setInformativeText("It looks like you have selected only some of the tracks from your tracks layer. Do you want to save only the selected ones or all of them?") # ok clippy
+            msg.addButton("Save Selected",QMessageBox.YesRole)
+            msg.addButton("Save All",QMessageBox.NoRole)
+            msg.addButton(QMessageBox.Cancel)
+            ret = msg.exec() # Save Selected -> ret = 0, Save All -> ret = 1, Cancel -> ret = 4194304
+            if ret == 4194304:
+                return
+        if ret == 0: # save current tracks layer
+            #self.z1['raw_data'][:] = self.viewer.layers[raw].data
+            self.z1['segmentation_data'][:] = self.viewer.layers[seg].data
+            self.z1.create_dataset('tracking_data', shape = self.viewer.layers[track].data.shape, dtype = 'i4', data = self.viewer.layers[track].data)
+        else: # save complete tracks layer
+            #self.z1['raw_data'][:] = self.viewer.layers[raw].data
+            self.z1['segmentation_data'][:] = self.viewer.layers[seg].data
+            self.z1.create_dataset('tracking_data', shape = self.viewer.layers[track].data.shape, dtype = 'i4', data = self.tracks)
         msg = QMessageBox()
         msg.setText("Zarr file has been saved.")
         msg.exec()
@@ -411,6 +435,13 @@ class MMVTracking(QWidget):
         pass
 
     def _select_track(self):
+        if self.le_trajectory.text() == "": # deleting the text returns the whole layer
+            try:
+                self.viewer.layers.remove('Tracks')
+            except ValueError:
+                print("No tracking layer found")
+            self.viewer.add_tracks(self.tracks, name='Tracks')
+            return
         try: # Try for single value
             id = int(self.le_trajectory.text())
         except ValueError: # Try for list of values
@@ -425,16 +456,18 @@ class MMVTracking(QWidget):
                 msg.exec()
                 return
         try:
+            self.tracks = self.viewer.layers[self.viewer.layers.index("Tracks")].data
             self.viewer.layers.remove('Tracks')
         except ValueError:
             print("No tracking layer found")
         if isinstance(id,int): # Single value
             if id < 0:
-                self.viewer.add_tracks(self.z1['tracking_data'][:], name='Tracks')
+                self.viewer.add_tracks(self.tracks, name='Tracks')
+                self.le_trajectory.setText("") # No need to keep negative number
             else:
                 tracks_data = [
                     track
-                    for track in self.z1['tracking_data'][:]
+                    for track in self.tracks
                     if track[0] == id
                 ]
                 if not tracks_data:
@@ -456,7 +489,7 @@ class MMVTracking(QWidget):
             self.le_trajectory.setText(txt)
             tracks_data = [
                 track
-                for track in self.z1['tracking_data'][:]
+                for track in self.tracks
                 if track[0] in id
             ]
             if not tracks_data:
@@ -512,7 +545,7 @@ class MMVTracking(QWidget):
         MMVTracking.dock._link()
 
     def _link(self):
-        try:
+        try: # check if segmentation layer exists
             layer = self.viewer.layers[self.viewer.layers.index("Segmentation Data")]
         except ValueError:
             err = QMessageBox()
@@ -533,7 +566,7 @@ class MMVTracking(QWidget):
                 else:
                     tracks = self.viewer.layers[track].data
                     self.viewer.layers.remove('Tracks')
-                    id = max(np.amax(tracks[:,0]),np.amax(self.z1['tracking_data'][:,0])) + 1
+                    id = max(np.amax(tracks[:,0]),np.amax(self.tracks[:,0])) + 1
                 old_ids = [0,0]
                 if id != 1: # tracking data is not empty
                     for j in range(len(tracks)):
@@ -554,11 +587,15 @@ class MMVTracking(QWidget):
                         for track_entry in tracks:
                             if track_entry[0] == max(old_ids):
                                 track_entry[0] = id
-                for entry in self.to_track: # entries are added to tracking data
+                for entry in self.to_track: # entries are added to tracking data (current and cached, in case those are different)
                     try:
                         tracks = np.r_[tracks, [[id] + entry]]
                     except UnboundLocalError:
                         tracks = [[id] + entry]
+                    try:
+                        self.tracks = np.r_[tracks, [[id] + entry]]
+                    except UnboundLocalError:
+                        self.tracks = [[id] + entry]
                 self.to_track = []
                 df = pd.DataFrame(tracks, columns=['ID', 'Z', 'Y', 'X'])
                 df.sort_values(['ID', 'Z'], ascending=True, inplace=True)
@@ -588,7 +625,7 @@ class MMVTracking(QWidget):
             err.setText("No tracks layer found!")
             err.exec()
             return
-        id = max(np.amax(tracks_layer.data[:,0]),np.amax(self.z1['tracking_data'][:,0])) + 1
+        id = max(np.amax(tracks_layer.data[:,0]),np.amax(self.tracks[:,0])) + 1
         tracks = tracks_layer.data
         for i in range(len(label_layer.mouse_drag_callbacks)):
             if label_layer.mouse_drag_callbacks[i].__name__ == "_cut":
@@ -628,9 +665,10 @@ class MMVTracking(QWidget):
                 df = pd.DataFrame(tracks, columns=['ID', 'Z', 'Y', 'X'])
                 df.sort_values(['ID', 'Z'], ascending=True, inplace=True)
                 tracks = df.values
-                tmp = np.unique(tracks[:,0],return_counts = True)
+                tmp = np.unique(tracks[:,0],return_counts = True) # count occurences of each id
                 tmp = np.delete(tmp,tmp[1] == 1,1)
                 tracks = np.delete(tracks,np.where(np.isin(tracks[:,0],tmp[0,:],invert=True)),0)
+                self.tracks = np.delete(self.tracks,np.where(np.isin(tracks[:,0],tmp[0,:],invert=True)),0) # TEST IF THIS WORKS FOR ISSUE 16
                 self.viewer.layers.remove('Tracks')
                 self.viewer.add_tracks(tracks, name='Tracks')
                 self._mouse(State.default)
@@ -647,11 +685,11 @@ class MMVTracking(QWidget):
 
     @napari.Viewer.bind_key('a')
     def _hotkey_grab_label(self):
-        MMVTracking.dock._grab_label()
-        MMVTracking.dock.viewer.layers[MMVTracking.dock.viewer.layers.index("Segmentation Data")].mode = "PAINT"
+        MMVTracking.dock._grab_label(paint = True)
 
-    def _grab_label(self):
-        self._mouse(State.select)
+    def _grab_label(self, paint = False):
+        self.viewer.layers[self.viewer.layers.index("Segmentation Data")].mode = "PAN_ZOOM"
+        self._mouse(State.select, paint = paint)
 
     @napari.Viewer.bind_key('1')
     def _hotkey_zone_1(self):
