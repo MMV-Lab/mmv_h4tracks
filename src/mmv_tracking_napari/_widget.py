@@ -28,12 +28,15 @@ class MMVTracking(QWidget):
         self.viewer = napari_viewer
         MMVTracking.dock = self
 
+        # Variable to hold zarr file
+        self.z1 = None
+
         # Variables to store clicked centroids for Tracking
-        self.to_track = []
-        self.to_cut = []
+        self.to_track = np.empty((1,3),dtype=np.int8)
+        self.to_cut = np.empty((1,3),dtype=np.int8)
 
         # Variable to hold complete (corrected) tracks layer
-        self.tracks = np.zeros((1,4))
+        self.tracks = np.empty((1,4),dtype=np.int8)
 
         # Labels
         title = QLabel("<font color='green'>HITL4Trk</font>")
@@ -221,11 +224,11 @@ class MMVTracking(QWidget):
             elif mode == State.remove: # False Positive
                 self.viewer.layers.selection.active.help = "(1)"
                 if isinstance(layer,napari.layers.labels.labels.Labels):
-                    layer.mode = "PAN_ZOOM"
+                    layer.mode = "pan_zoom"
                 @layer.mouse_drag_callbacks.append
                 def _handle(layer,event):
                     try:
-                        self.viewer.layers[self.viewer.layers.index("Segmentation Data")].data
+                        label_layer = self.viewer.layers[self.viewer.layers.index("Segmentation Data")]
                     except ValueError:
                         msg = QMessageBox()
                         msg.setText("Missing label layer")
@@ -234,12 +237,17 @@ class MMVTracking(QWidget):
                         return
                     false_id = self.viewer.layers[self.viewer.layers.index("Segmentation Data")].data[int(event.position[0]),int(event.position[1]),int(event.position[2])]
                     np.place(self.viewer.layers[self.viewer.layers.index("Segmentation Data")].data[int(event.position[0])],self.viewer.layers[self.viewer.layers.index("Segmentation Data")].data[int(event.position[0])]==false_id,0)
+                    napari.viewer.current_viewer().layers.select_all()
+                    napari.viewer.current_viewer().layers.selection.select_only(label_layer)
+                    import keyboard
+                    if label_layer.mode == "pan_zoom":
+                        keyboard.press_and_release("4")
+                    keyboard.press_and_release("5")
                     self._mouse(State.default)
-                    pass
             elif mode == State.recolour: # False Merge
                 self.viewer.layers.selection.active.help = "(2)"
                 if isinstance(layer,napari.layers.labels.labels.Labels):
-                    layer.mode = "PAN_ZOOM"
+                    layer.mode = "pan_zoom"
                 @layer.mouse_drag_callbacks.append
                 def _handle(layer,event):
                     try:
@@ -255,7 +263,7 @@ class MMVTracking(QWidget):
             elif mode == State.merge_from: # False Cut 1
                 self.viewer.layers.selection.active.help = "(3)"
                 if isinstance(layer,napari.layers.labels.labels.Labels):
-                    layer.mode = "PAN_ZOOM"
+                    layer.mode = "pan_zoom"
                 @layer.mouse_drag_callbacks.append
                 def _handle(layer,event):
                     try:
@@ -290,12 +298,13 @@ class MMVTracking(QWidget):
                     napari.viewer.current_viewer().layers.select_all()
                     napari.viewer.current_viewer().layers.selection.select_only(label_layer)
                     if paint:
-                        label_layer.mode = "PAINT"
+                        import keyboard
+                        keyboard.press_and_release("2")
                     self._mouse(State.default)
             elif mode == State.link: # Creates Track
                 self.viewer.layers.selection.active.help = "(6)"
                 if isinstance(layer,napari.layers.labels.labels.Labels):
-                    layer.mode = "PAN_ZOOM"
+                    layer.mode = "pan_zoom"
                 @layer.mouse_drag_callbacks.append
                 def _record(layer,event):
                     try:
@@ -317,7 +326,7 @@ class MMVTracking(QWidget):
             elif mode == State.unlink: # Removes Track
                 self.viewer.layers.selection.active.help = "(7)"
                 if isinstance(layer,napari.layers.labels.labels.Labels):
-                    layer.mode = "PAN_ZOOM"
+                    layer.mode = "pan_zoom"
                 @layer.mouse_drag_callbacks.append
                 def _cut(layer,event):
                     try:
@@ -369,6 +378,7 @@ class MMVTracking(QWidget):
             self.viewer.add_image(self.z1['raw_data'][:], name = 'Raw Image')
             self.viewer.add_labels(self.z1['segmentation_data'][:], name = 'Segmentation Data')
             self.viewer.add_tracks(self.z1['tracking_data'][:], name = 'Tracks') # Use graph argument for inheritance (https://napari.org/howtos/layers/tracks.html)
+            self.tracks = self.z1['tracking_data'][:]
         except:
             print("File is either no Zarr file or does not adhere to required structure")
         self._mouse(State.default)
@@ -417,11 +427,15 @@ class MMVTracking(QWidget):
         if ret == 0: # save current tracks layer
             #self.z1['raw_data'][:] = self.viewer.layers[raw].data
             self.z1['segmentation_data'][:] = self.viewer.layers[seg].data
-            self.z1.create_dataset('tracking_data', shape = self.viewer.layers[track].data.shape, dtype = 'i4', data = self.viewer.layers[track].data)
+            self.z1['tracking_data'].resize(self.viewer.layers[track].data.shape[0],self.viewer.layers[track].data.shape[1])
+            self.z1['tracking_data'][:] = self.viewer.layers[track].data
+            #self.z1.create_dataset('tracking_data', shape = self.viewer.layers[track].data.shape, dtype = 'i4', data = self.viewer.layers[track].data)
         else: # save complete tracks layer
             #self.z1['raw_data'][:] = self.viewer.layers[raw].data
             self.z1['segmentation_data'][:] = self.viewer.layers[seg].data
-            self.z1.create_dataset('tracking_data', shape = self.viewer.layers[track].data.shape, dtype = 'i4', data = self.tracks)
+            self.z1['tracking_data'].resize(self.tracks.shape[0],self.tracks.shape[1])
+            self.z1['tracking_data'][:] = self.viewer.layers[track].data
+            #self.z1.create_dataset('tracking_data', shape = self.tracks.shape, dtype = 'i4', data = self.tracks)
         msg = QMessageBox()
         msg.setText("Zarr file has been saved.")
         msg.exec()
@@ -456,7 +470,6 @@ class MMVTracking(QWidget):
                 msg.exec()
                 return
         try:
-            self.tracks = self.viewer.layers[self.viewer.layers.index("Tracks")].data
             self.viewer.layers.remove('Tracks')
         except ValueError:
             print("No tracking layer found")
@@ -501,7 +514,7 @@ class MMVTracking(QWidget):
     @napari.Viewer.bind_key('e')
     def _hotkey_get_free_id(self):
         MMVTracking.dock._set_free_id()
-        MMVTracking.dock.viewer.layers[MMVTracking.dock.viewer.layers.index("Segmentation Data")].mode = "PAINT"
+        MMVTracking.dock.viewer.layers[MMVTracking.dock.viewer.layers.index("Segmentation Data")].mode = "paint"
 
     def _set_free_id(self):
         try:
@@ -552,9 +565,34 @@ class MMVTracking(QWidget):
             err.setText("No label layer found!")
             err.exec()
             return
+        try:
+            tracks = self.viewer.layers[self.viewer.layers.index("Tracks")].data
+        except ValueError:
+            pass
+        else:
+            if not np.array_equal(tracks,self.tracks): #  and (tracks == self.tracks).all(): alternatively: tracks.shape == self.tracks.shape
+                msg = QMessageBox()
+                msg.setText("Missing Tracks")
+                msg.setInformativeText("You need to have all Tracks displayed to add a new Track. Do you want to display all Tracks now?")
+                msg.addButton("Display all", QMessageBox.AcceptRole)
+                msg.addButton(QMessageBox.Cancel)
+                ret = msg.exec() # ret = 0 -> Display all, ret = 4194304 -> Cancel
+                if ret == 4194304:
+                    return
+                self.le_trajectory.setText("")
+                self._select_track()
         for i in range(len(layer.mouse_drag_callbacks)):
-            if layer.mouse_drag_callbacks[i].__name__ == "_record":
-                if len(self.to_track) < 2:
+            if layer.mouse_drag_callbacks[i].__name__ == "_record": # Check if we are in recording mode already
+                if len(self.to_track) < 2: # Less than two cells can not be tracked
+                    self.to_track = []
+                    self._mouse(State.default)
+                    return
+                if len(np.asarray(self.to_track)[:,0]) != len(set(np.asarray(self.to_track)[:,0])): # check for duplicates
+                    msg = QMessageBox()
+                    msg.setText("Duplicate cells per slice")
+                    msg.setInformativeText("Looks like you were an idiot and selected more than one cell per slice. How is that supposed to work?")
+                    msg.addButton("I'm sorry!", QMessageBox.AcceptRole)
+                    msg.exec()
                     self.to_track = []
                     self._mouse(State.default)
                     return
@@ -566,7 +604,7 @@ class MMVTracking(QWidget):
                 else:
                     tracks = self.viewer.layers[track].data
                     self.viewer.layers.remove('Tracks')
-                    id = max(np.amax(tracks[:,0]),np.amax(self.tracks[:,0])) + 1
+                    id = max(np.amax(tracks[:,0]),np.amax(tracks[:,0])) + 1 # determine id for the new track
                 old_ids = [0,0]
                 if id != 1: # tracking data is not empty
                     for j in range(len(tracks)):
@@ -592,13 +630,10 @@ class MMVTracking(QWidget):
                         tracks = np.r_[tracks, [[id] + entry]]
                     except UnboundLocalError:
                         tracks = [[id] + entry]
-                    try:
-                        self.tracks = np.r_[tracks, [[id] + entry]]
-                    except UnboundLocalError:
-                        self.tracks = [[id] + entry]
                 self.to_track = []
                 df = pd.DataFrame(tracks, columns=['ID', 'Z', 'Y', 'X'])
                 df.sort_values(['ID', 'Z'], ascending=True, inplace=True)
+                self.tracks = df.values
                 self.viewer.add_tracks(df.values, name='Tracks')
                 self._mouse(State.default)
                 return
@@ -668,7 +703,7 @@ class MMVTracking(QWidget):
                 tmp = np.unique(tracks[:,0],return_counts = True) # count occurences of each id
                 tmp = np.delete(tmp,tmp[1] == 1,1)
                 tracks = np.delete(tracks,np.where(np.isin(tracks[:,0],tmp[0,:],invert=True)),0)
-                self.tracks = np.delete(self.tracks,np.where(np.isin(tracks[:,0],tmp[0,:],invert=True)),0) # TEST IF THIS WORKS FOR ISSUE 16
+                self.tracks = np.copy(np.delete(self.tracks,np.where(np.isin(tracks[:,0],tmp[0,:],invert=True)),0))
                 self.viewer.layers.remove('Tracks')
                 self.viewer.add_tracks(tracks, name='Tracks')
                 self._mouse(State.default)
@@ -688,7 +723,13 @@ class MMVTracking(QWidget):
         MMVTracking.dock._grab_label(paint = True)
 
     def _grab_label(self, paint = False):
-        self.viewer.layers[self.viewer.layers.index("Segmentation Data")].mode = "PAN_ZOOM"
+        try:
+            self.viewer.layers[self.viewer.layers.index("Segmentation Data")].mode = "pan_zoom"
+        except ValueError:
+            msg = QMessageBox()
+            msg.setText("Missing label layer")
+            msg.exec()
+            return
         self._mouse(State.select, paint = paint)
 
     @napari.Viewer.bind_key('1')
