@@ -1,6 +1,7 @@
 import enum
 
-import napari
+#import napari
+import napari.layers.labels.labels
 import numpy as np
 import pandas as pd
 import zarr
@@ -27,6 +28,7 @@ class MMVTracking(QWidget):
         super().__init__()
         self.viewer = napari_viewer
         MMVTracking.dock = self
+        print("-----------------------------------------------")
 
         # Variable to hold zarr file
         self.z1 = None
@@ -554,7 +556,7 @@ class MMVTracking(QWidget):
 
     # Tracking correction
     @napari.Viewer.bind_key('u')
-    def _hotkey_unlink(self):
+    def _hotkey_link(self):
         MMVTracking.dock._link()
 
     def _link(self):
@@ -692,21 +694,41 @@ class MMVTracking(QWidget):
                         if tracks[j,1] > self.to_cut[0][0]:
                             if tracks[j,1] < self.to_cut[-1][0]: # cells to remove from tracking
                                 tracks = np.delete(tracks,j,0)
+                                k = 0
+                                while k < len(self.tracks):
+                                    if self.tracks[k,0] == track:
+                                        self.tracks = np.delete(self.tracks,k,0)
+                                        break
                                 j = j - 1
                             elif tracks[j,1] >= self.to_cut[-1][0]: # cells to track with new id
                                 tracks[j,0] = id
+                                k = 0
+                                while k < len(self.tracks):
+                                    #print("k: " + str(k) + ", len(self.tracks: " + str(len(self.tracks)))
+                                    if np.array_equal(self.tracks[k],np.array([track,tracks[j,1],tracks[j,2],tracks[j,3]])):
+                                        self.tracks[k,0] = id
+                                        break
+                                    k = k + 1
+                                #np.where(self.tracks == [track,tracks[j,1],tracks[j,2],tracks[j,3]], tracks[j], self.tracks)
                     j = j + 1
                 self.to_cut = []
                 df = pd.DataFrame(tracks, columns=['ID', 'Z', 'Y', 'X'])
                 df.sort_values(['ID', 'Z'], ascending=True, inplace=True)
                 tracks = df.values
-                tmp = np.unique(tracks[:,0],return_counts = True) # count occurences of each id
+                df_cache = pd.DataFrame(self.tracks, columns=['ID', 'Z', 'Y', 'X'])
+                df_cache.sort_values(['ID', 'Z'], ascending=True, inplace=True)
+                self.tracks = df_cache.values
+                tmp = np.unique(tracks[:,0],return_counts = True) # count occurrences of each id
                 tmp = np.delete(tmp,tmp[1] == 1,1)
                 tracks = np.delete(tracks,np.where(np.isin(tracks[:,0],tmp[0,:],invert=True)),0)
                 self.tracks = np.copy(np.delete(self.tracks,np.where(np.isin(tracks[:,0],tmp[0,:],invert=True)),0))
                 self.viewer.layers.remove('Tracks')
                 self.viewer.add_tracks(tracks, name='Tracks')
                 self._mouse(State.default)
+                import sys
+                np.set_printoptions(threshold=sys.maxsize)
+                #print(tracks)
+                #print(self.tracks)
                 return
         self.to_cut = []
         self._mouse(State.unlink)
