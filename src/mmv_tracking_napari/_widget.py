@@ -7,7 +7,7 @@ import pandas as pd
 import zarr
 from qtpy.QtWidgets import (QComboBox, QFileDialog, QGridLayout, QHBoxLayout,
                             QLabel, QLineEdit, QMessageBox, QPushButton,
-                            QScrollArea, QToolBox, QVBoxLayout, QWidget)
+                            QScrollArea, QToolBox, QVBoxLayout, QWidget, QDockWidget, QMainWindow)
 from scipy import ndimage
 
 
@@ -28,7 +28,6 @@ class MMVTracking(QWidget):
         super().__init__()
         self.viewer = napari_viewer
         MMVTracking.dock = self
-        print("-----------------------------------------------")
 
         # Variable to hold zarr file
         self.z1 = None
@@ -443,9 +442,11 @@ class MMVTracking(QWidget):
         msg.exec()
 
     def _temp(self):
-        #print(dir(napari.viewer.current_viewer().layers.selection))
-        #napari.viewer.current_viewer().layers.selection.toggle(self.viewer.layers[0])
-        print(self.viewer.layers.selection.active)
+        dock = QDockWidget()
+        placeholder = QLabel("Placeholder")
+        dock.setWidget(placeholder)
+        pass
+        #print(self.viewer.layers.selection.active)
 
     def _plot(self):
         pass
@@ -699,6 +700,7 @@ class MMVTracking(QWidget):
                                     if self.tracks[k,0] == track:
                                         self.tracks = np.delete(self.tracks,k,0)
                                         break
+                                    k = k + 1
                                 j = j - 1
                             elif tracks[j,1] >= self.to_cut[-1][0]: # cells to track with new id
                                 tracks[j,0] = id
