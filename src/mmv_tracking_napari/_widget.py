@@ -7,7 +7,7 @@ import pandas as pd
 import zarr
 from qtpy.QtWidgets import (QComboBox, QFileDialog, QGridLayout, QHBoxLayout,
                             QLabel, QLineEdit, QMessageBox, QPushButton,
-                            QScrollArea, QToolBox, QVBoxLayout, QWidget, QDockWidget, QMainWindow)
+                            QScrollArea, QToolBox, QVBoxLayout, QWidget)
 from scipy import ndimage
 
 
@@ -21,6 +21,57 @@ class State(enum.Enum):
     select = 5
     link = 6
     unlink = 7
+    
+class Window(QWidget):
+    def __init__(self):
+        super().__init__()
+        
+class SelectFromCollection:
+    def __init__(self, parent, ax, collection, alpha_other=0.3):
+        self.canvas = ax.figure.canvas
+        self.collection = collection
+        self.alpha_other = alpha_other
+        self.parent = parent
+        
+        self.xys = collection.get_offsets()
+        self.Npts = len(self.xys)
+
+        # Ensure that we have separate colors for each object
+        self.fc = collection.get_facecolors()
+        if len(self.fc) == 0:
+            raise ValueError("Collection must have a facecolor")
+        elif len(self.fc) == 1:
+            self.fc = np.tile(self.fc, (self.Npts, 1))
+        
+        from matplotlib.widgets import LassoSelector
+        self.lasso = LassoSelector(ax, onselect = self.onselect, button = 1)
+        self.ind = []
+        
+    def onselect(self,verts):
+        from matplotlib.path import Path
+        path = Path(verts)
+        self.ind = np.nonzero(path.contains_points(self.xys))[0]
+        #print(type(self.fc))
+        self.fc[:, :] = np.array([.8,.2,.0,1])
+        self.fc[self.ind, :] = np.array([0,.5,0,1])
+        self.collection.set_facecolors(self.fc)
+        self.canvas.draw_idle()
+        self.selected_coordinates = self.xys[self.ind].data
+        
+    def disconnect(self):
+        self.lasso.disconnect_events()
+        self.fc[:,-1] = 1
+        self.collection.set_facecolors(self.fc)
+        self.canvas.draw_idle()
+        
+    def apply(self):
+        #print(self.ind)
+        if self.ind == []:
+            self.ind = -1
+        self.parent._select_track(self.ind)
+        self.parent.window.close()
+        pass
+        
 
 class MMVTracking(QWidget):
     dock = None
@@ -81,6 +132,8 @@ class MMVTracking(QWidget):
         btn_free_label.setToolTip("E")
         btn_grab_label = QPushButton("Select")
         btn_grab_label.setToolTip("A")
+        btn_export = QPushButton("Export")
+        btn_adjust_seg_ids = QPushButton("Adjust Segmentation IDs")
 
         # Linking buttons to functions
         btn_load.clicked.connect(self._load_zarr)
@@ -97,7 +150,7 @@ class MMVTracking(QWidget):
        
         # Combo Boxes
         c_segmentation = QComboBox()
-        c_plots = QComboBox()
+        self.c_plots = QComboBox()
 
         # Adding entries to Combo Boxes
         c_segmentation.addItem("select model")
@@ -105,10 +158,10 @@ class MMVTracking(QWidget):
         c_segmentation.addItem("model 2")
         c_segmentation.addItem("model 3")
         c_segmentation.addItem("model 4")
-        c_plots.addItem("select metric")
-        c_plots.addItem("metric 1")
-        c_plots.addItem("metric 2")
-        c_plots.addItem("metric 3")
+        self.c_plots.addItem("select metric")
+        self.c_plots.addItem("speed")
+        self.c_plots.addItem("size")
+        self.c_plots.addItem("metric 3")
 
         # Line Edits
         self.le_trajectory = QLineEdit("")
@@ -125,6 +178,7 @@ class MMVTracking(QWidget):
         q_seg_track.layout().addWidget(btn_segment,0,0)
         q_seg_track.layout().addWidget(btn_track,0,1)
         q_seg_track.layout().addWidget(c_segmentation,1,0)
+        q_seg_track.layout().addWidget(btn_adjust_seg_ids,2,0)
 
         # Loading/Saving .zarr file UI
         q_load = QWidget()
@@ -182,11 +236,15 @@ class MMVTracking(QWidget):
         q_tracking.layout().addWidget(help_insert_correspondence)
 
         # Evaluation UI
+        help_plot = QWidget()
+        help_plot.setLayout(QHBoxLayout())
+        help_plot.layout().addWidget(metric)
+        help_plot.layout().addWidget(self.c_plots)
+        help_plot.layout().addWidget(btn_plot)
         q_eval = QWidget()
-        q_eval.setLayout(QHBoxLayout())
-        q_eval.layout().addWidget(metric)
-        q_eval.layout().addWidget(c_plots)
-        q_eval.layout().addWidget(btn_plot)
+        q_eval.setLayout(QVBoxLayout())
+        q_eval.layout().addWidget(help_plot)
+        q_eval.layout().addWidget(btn_export)
 
         # Add zones to self.toolbox
         self.toolbox.addItem(q_seg_track, "Data Processing")
@@ -210,7 +268,7 @@ class MMVTracking(QWidget):
 
     # Functions
 
-    def _mouse(self,mode,id = 0, paint = False):
+    def _mouse(self,mode,seg_id = 0, paint = False):
         for layer in self.viewer.layers:
             if len(layer.mouse_drag_callbacks):
                 if layer.mouse_drag_callbacks[0].__name__ == "no_op":
@@ -281,7 +339,7 @@ class MMVTracking(QWidget):
                 @layer.mouse_drag_callbacks.append
                 def _handle(layer,event):
                     # Label layer can't be missing as this is only called from False Cut 1
-                    self.viewer.layers[self.viewer.layers.index("Segmentation Data")].fill((int(event.position[0]),int(event.position[1]),int(event.position[2])),id)
+                    self.viewer.layers[self.viewer.layers.index("Segmentation Data")].fill((int(event.position[0]),int(event.position[1]),int(event.position[2])),seg_id)
                     self._mouse(State.default)
             elif mode == State.select: # Correct Segmentation
                 self.viewer.layers.selection.active.help = "(5)"
@@ -442,74 +500,118 @@ class MMVTracking(QWidget):
         msg.exec()
 
     def _temp(self):
-        dock = QDockWidget()
-        placeholder = QLabel("Placeholder")
-        dock.setWidget(placeholder)
         pass
-        #print(self.viewer.layers.selection.active)
 
     def _plot(self):
-        pass
+        # Throw warning message if plot is generated and cached tracks are different from current tracks
+        from matplotlib.figure import Figure
+        from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+        fig = Figure(figsize=(6,7))
+        fig.patch.set_facecolor("#262930")
+        axes = fig.add_subplot(111)
+        axes.set_facecolor("#262930")
+        axes.spines["bottom"].set_color("white")
+        axes.spines["top"].set_color("white")
+        axes.spines["right"].set_color("white")
+        axes.spines["left"].set_color("white")
+        axes.xaxis.label.set_color("white")
+        axes.yaxis.label.set_color("white")
+        axes.tick_params(axis="x", colors="white")
+        axes.tick_params(axis="y", colors="white")
+        canvas = FigureCanvas(fig)
+        self.window = Window()
+        self.window.setLayout(QVBoxLayout())
+        if self.c_plots.currentIndex() == 1:
+            speed = self._calculate_speed()
+            axes.set_xlabel("Speed")
+            axes.set_ylabel("Standard Deviation")
+            data = axes.scatter(speed[:,1],speed[:,2],c = np.array([[0,.5,0,1]]))
+            self.window.layout().addWidget(QLabel("Scatterplot Standard Deviation vs Average: Speed"))
+        elif self.c_plots.currentIndex() == 2:
+            size = self._calculate_size()
+            axes.set_xlabel("Size")
+            axes.set_ylabel("Standard Deviation")
+            data = axes.scatter(size[:,1],size[:,2],c = np.array([[0,.5,0,1]]))
+            self.window.layout().addWidget(QLabel("Scatterplot Standard Deviation vs Average: Size"))
+        selector = SelectFromCollection(self, axes, data)
+        
+        def accept(event):
+            if event.key == "enter":
+                print("Selected points:")
+                print(selector.xys[selector.ind])
+                selector.disconnect()
+                axes.set_title("")
+                fig.canvas.draw()
+                
+        fig.canvas.mpl_connect("key_press_event",accept)
+        #axes.set_title("Press enter to accept selected points.")
+        self.window.layout().addWidget(canvas)
+        btn_apply = QPushButton("Apply")
+        btn_apply.clicked.connect(selector.apply)
+        self.window.layout().addWidget(btn_apply)
+        self.window.show()
+                
 
-    def _select_track(self):
-        if self.le_trajectory.text() == "": # deleting the text returns the whole layer
-            try:
-                self.viewer.layers.remove('Tracks')
-            except ValueError:
-                print("No tracking layer found")
-            self.viewer.add_tracks(self.tracks, name='Tracks')
-            return
-        try: # Try for single value
-            id = int(self.le_trajectory.text())
-        except ValueError: # Try for list of values
-            txt = self.le_trajectory.text()
-            id = []
-            try:
-                for i in range(0,len(txt.split(","))):
-                    id.append(int(txt.split(",")[i]))
-            except ValueError:
-                msg = QMessageBox()
-                msg.setText("Please use a single integer (whole number) or a comma separated list of integers")
-                msg.exec()
+    def _select_track(self, tracks = []):
+        if tracks == []:                
+            if self.le_trajectory.text() == "": # deleting the text returns the whole layer
+                try:
+                    self.viewer.layers.remove('Tracks')
+                except ValueError:
+                    print("No tracking layer found")
+                self.viewer.add_tracks(self.tracks, name='Tracks')
                 return
+            try: # Try for single value
+                tracks = int(self.le_trajectory.text())
+            except ValueError: # Try for list of values
+                txt = self.le_trajectory.text()
+                tracks = []
+                try:
+                    for i in range(0,len(txt.split(","))):
+                        tracks.append(int(txt.split(",")[i]))
+                except ValueError:
+                    msg = QMessageBox()
+                    msg.setText("Please use a single integer (whole number) or a comma separated list of integers")
+                    msg.exec()
+                    return
         try:
             self.viewer.layers.remove('Tracks')
         except ValueError:
             print("No tracking layer found")
-        if isinstance(id,int): # Single value
-            if id < 0:
+        if isinstance(tracks,int): # Single value
+            if tracks < 0:
                 self.viewer.add_tracks(self.tracks, name='Tracks')
                 self.le_trajectory.setText("") # No need to keep negative number
             else:
                 tracks_data = [
                     track
                     for track in self.tracks
-                    if track[0] == id
+                    if track[0] == tracks
                 ]
                 if not tracks_data:
-                    print("No tracking data found for id " + str(id))
+                    print("No tracking data found for id " + str(track))
                     return
                 self.viewer.add_tracks(tracks_data, name='Tracks')
             self._mouse(State.default)
-        else: # Multiple values, id is instance of "list"
-            id = list(dict.fromkeys(id)) # Removes duplicate values
-            for i in range(0,len(id)): # Remove illegal values (<0) from id
-                if id[i] < 0:
-                    id.pop(i)
+        else: # Multiple values, tracks is instance of "list"
+            tracks = list(dict.fromkeys(tracks)) # Removes duplicate values
+            for i in range(0,len(tracks)): # Remove illegal values (<0) from tracks
+                if tracks[i] < 0:
+                    tracks.pop(i)
             # ID now only contains legal values, can be written back to line edit
             txt = ""
-            for i in range(0,len(id)):
+            for i in range(0,len(tracks)):
                 if len(txt)>0:
                     txt = txt + ","
-                txt = f'{txt}{id[i]}'
+                txt = f'{txt}{tracks[i]}'
             self.le_trajectory.setText(txt)
             tracks_data = [
                 track
                 for track in self.tracks
-                if track[0] in id
+                if track[0] in tracks
             ]
             if not tracks_data:
-                print("No tracking data found for ids " + str(id))
+                print("No tracking data found for ids " + str(tracks))
                 return
             self.viewer.add_tracks(tracks_data, name='Tracks')
             self._mouse(State.default)
@@ -771,3 +873,57 @@ class MMVTracking(QWidget):
     @napari.Viewer.bind_key('4')
     def _hotkey_zone_4(self):
         MMVTracking.dock.toolbox.setCurrentIndex(3)
+        
+    def _calculate_speed(self):
+        """ Speed metric:
+            - avg speed (every cell) <- prio
+            - std (standard deviation from avg speed)
+            - peak speed (overall)
+            - mean speed (every cell)
+        """
+        for unique_id in np.unique(self.tracks[:,0]):
+            track = np.delete(self.tracks,np.where(self.tracks[:,0] != unique_id),0)
+            distance = []
+            for i in range(0,len(track)-1):
+                distance.append(np.hypot(track[i,2] - track[i+1,2],track[i,3] - track[i+1,3]))
+            avg_speed = np.average(distance)
+            std_speed = np.std(distance)
+            try:
+                retval = np.append(retval, [[unique_id,avg_speed,std_speed]],0)
+            except UnboundLocalError:
+                retval = np.array([[unique_id,avg_speed,std_speed]])
+        return retval
+    
+    def _calculate_size(self):
+        """Size metric:
+            - avg size
+            - std
+            - mean
+            - peak?
+            - minimum?
+        """
+        try:
+            label_layer = self.viewer.layers[self.viewer.layers.index("Segmentation Data")]
+        except ValueError:
+            err = QMessageBox()
+            err.setText("No label layer found!")
+            err.exec()
+            return
+        for unique_id in np.unique(self.tracks[:,0]):
+            track = np.delete(self.tracks,np.where(self.tracks[:,0] != unique_id),0)
+            size = []
+            for i in range(0,len(track)-1):
+                # TODO: calculate size in slice
+                seg_id = label_layer.data[track[i,1],track[i,2],track[i,3]]
+                """print(seg_id)
+                print(np.where(label_layer.data[track[i,1]] == seg_id))"""
+                size.append(len(np.where(label_layer.data[track[i,1]] == seg_id)[0]))
+                # size.append(np.hypot(track[i,2] - track[i+1,2],track[i,3] - track[i+1,3]))
+            avg_speed = np.average(size)
+            std_speed = np.std(size)
+            try:
+                retval = np.append(retval, [[unique_id,avg_speed,std_speed]],0)
+            except UnboundLocalError:
+                retval = np.array([[unique_id,avg_speed,std_speed]])
+        return retval
+        pass
