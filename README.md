@@ -7,19 +7,14 @@
 [![codecov](https://codecov.io/gh/MMV-Lab/mmv-tracking-napari/branch/main/graph/badge.svg)](https://codecov.io/gh/MMV-Lab/mmv-tracking-napari)
 [![napari hub](https://img.shields.io/endpoint?url=https://api.napari-hub.org/shields/mmv-tracking-napari)](https://napari-hub.org/plugins/mmv-tracking-napari)
 
-A simple plugin to use with napari
+A plugin to use with napari to segment and track cells via HumanInTheLoop(HITL)-approach.
 
 ----------------------------------
 
 This [napari] plugin was generated with [Cookiecutter] using [@napari]'s [cookiecutter-napari-plugin] template.
 
-<!--
-Don't miss the full getting started guide to set up your new package:
-https://github.com/napari/cookiecutter-napari-plugin#getting-started
-
-and review the napari docs for plugin developers:
-https://napari.org/plugins/stable/index.html
--->
+## Usage
+Load a zarr-file consisting of Image, Label and Tracks layer.
 
 ## Installation
 

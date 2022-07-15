@@ -1,11 +1,10 @@
 import enum
 
-#import napari
 import napari.layers.labels.labels
 import numpy as np
 import pandas as pd
 import zarr
-from qtpy.QtWidgets import (QComboBox, QFileDialog, QGridLayout, QHBoxLayout,
+from qtpy.QtWidgets import (QCheckBox, QComboBox, QFileDialog, QGridLayout, QHBoxLayout,
                             QLabel, QLineEdit, QMessageBox, QPushButton,
                             QScrollArea, QToolBox, QVBoxLayout, QWidget)
 from scipy import ndimage
@@ -51,7 +50,6 @@ class SelectFromCollection:
         from matplotlib.path import Path
         path = Path(verts)
         self.ind = np.nonzero(path.contains_points(self.xys))[0]
-        #print(type(self.fc))
         self.fc[:, :] = np.array([.8,.2,.0,1])
         self.fc[self.ind, :] = np.array([0,.5,0,1])
         self.collection.set_facecolors(self.fc)
@@ -65,7 +63,6 @@ class SelectFromCollection:
         self.canvas.draw_idle()
         
     def apply(self):
-        #print(self.ind)
         if self.ind == []:
             self.ind = -1
         self.parent._select_track(self.ind)
@@ -89,6 +86,10 @@ class MMVTracking(QWidget):
 
         # Variable to hold complete (corrected) tracks layer
         self.tracks = np.empty((1,4),dtype=np.int8)
+        
+        # Variables to hold data for plot metrics
+        self.speed = []
+        self.size = []
 
         # Labels
         title = QLabel("<font color='green'>HITL4Trk</font>")
@@ -147,6 +148,7 @@ class MMVTracking(QWidget):
         btn_grab_label.clicked.connect(self._grab_label)
         btn_remove_correspondence.clicked.connect(self._unlink)
         btn_insert_correspondence.clicked.connect(self._link)
+        btn_export.clicked.connect(self._export)
        
         # Combo Boxes
         c_segmentation = QComboBox()
@@ -168,6 +170,10 @@ class MMVTracking(QWidget):
 
         # Link functions to line edits
         self.le_trajectory.editingFinished.connect(self._select_track)
+        
+        # Checkboxes: off -> 0, on -> 2 if not tristate
+        self.ch_speed = QCheckBox("Speed")
+        self.ch_size = QCheckBox("Size")
 
         # Tool Box
         self.toolbox = QToolBox()
@@ -244,6 +250,8 @@ class MMVTracking(QWidget):
         q_eval = QWidget()
         q_eval.setLayout(QVBoxLayout())
         q_eval.layout().addWidget(help_plot)
+        q_eval.layout().addWidget(self.ch_speed)
+        q_eval.layout().addWidget(self.ch_size)
         q_eval.layout().addWidget(btn_export)
 
         # Add zones to self.toolbox
@@ -269,23 +277,36 @@ class MMVTracking(QWidget):
     # Functions
 
     def _mouse(self,mode,seg_id = 0, paint = False):
-        for layer in self.viewer.layers:
+        """
+        hub for adding functionality to mouseclicks
+        
+        :param mode: used to discern which function to call on mouseclick
+        :param seg_id: Segmentation ID to change selected cell to
+        :param paint: Sets mode of label layer to paint if True 
+        """
+        
+        for layer in self.viewer.layers: # Functions get applied to every layer
             if len(layer.mouse_drag_callbacks):
-                if layer.mouse_drag_callbacks[0].__name__ == "no_op":
+                if layer.mouse_drag_callbacks[0].__name__ == "no_op": # no_op is a function set by napari itself, and it is always the first in the list
                     layer.mouse_drag_callbacks.pop(-1)
                 else:
                     layer.mouse_drag_callbacks.clear()
 
             if mode == State.default:
                 self.viewer.layers.selection.active.help = "(0)"
-            elif mode == State.test:
+            elif mode == State.test: # Unused at the moment
                 self.viewer.layers.selection.active.help = "(-1)"
-            elif mode == State.remove: # False Positive
+            elif mode == State.remove: # False Positive -- Delete cell from label layer
                 self.viewer.layers.selection.active.help = "(1)"
                 if isinstance(layer,napari.layers.labels.labels.Labels):
                     layer.mode = "pan_zoom"
                 @layer.mouse_drag_callbacks.append
                 def _handle(layer,event):
+                    """
+                    Removes cell from segmentation
+                    
+                    :param event: Mouseclick event
+                    """
                     try:
                         label_layer = self.viewer.layers[self.viewer.layers.index("Segmentation Data")]
                     except ValueError:
@@ -294,21 +315,27 @@ class MMVTracking(QWidget):
                         msg.exec()
                         self._mouse(State.default)
                         return
+                    # Replace the ID with 0 (id of background)
                     false_id = self.viewer.layers[self.viewer.layers.index("Segmentation Data")].data[int(event.position[0]),int(event.position[1]),int(event.position[2])]
                     np.place(self.viewer.layers[self.viewer.layers.index("Segmentation Data")].data[int(event.position[0])],self.viewer.layers[self.viewer.layers.index("Segmentation Data")].data[int(event.position[0])]==false_id,0)
                     napari.viewer.current_viewer().layers.select_all()
                     napari.viewer.current_viewer().layers.selection.select_only(label_layer)
-                    import keyboard
+                    import keyboard # Juggle label layer modes to update the layer
                     if label_layer.mode == "pan_zoom":
                         keyboard.press_and_release("4")
                     keyboard.press_and_release("5")
                     self._mouse(State.default)
-            elif mode == State.recolour: # False Merge
+            elif mode == State.recolour: # False Merge -- Two separate cells have the same label, relabel one
                 self.viewer.layers.selection.active.help = "(2)"
                 if isinstance(layer,napari.layers.labels.labels.Labels):
                     layer.mode = "pan_zoom"
                 @layer.mouse_drag_callbacks.append
                 def _handle(layer,event):
+                    """
+                    Changes ID of cell from selection
+                    
+                    :param event: Mouseclick event
+                    """
                     try:
                         self.viewer.layers[self.viewer.layers.index("Segmentation Data")]
                     except ValueError:
@@ -317,14 +344,20 @@ class MMVTracking(QWidget):
                         msg.exec()
                         self._mouse(State.default)
                         return
+                    # Selected cell gets new label
                     self.viewer.layers[self.viewer.layers.index("Segmentation Data")].fill((int(event.position[0]),int(event.position[1]),int(event.position[2])),self._get_free_id(self.viewer.layers[self.viewer.layers.index("Segmentation Data")]))
                     self._mouse(State.default)
-            elif mode == State.merge_from: # False Cut 1
+            elif mode == State.merge_from: # False Cut 1 -- Two cells should be one
                 self.viewer.layers.selection.active.help = "(3)"
                 if isinstance(layer,napari.layers.labels.labels.Labels):
                     layer.mode = "pan_zoom"
                 @layer.mouse_drag_callbacks.append
                 def _handle(layer,event):
+                    """
+                    Selects cell ID from segmentation
+                    
+                    :param event: Mouseclick event
+                    """
                     try:
                         label_layer = self.viewer.layers[self.viewer.layers.index("Segmentation Data")]
                     except ValueError:
@@ -333,18 +366,30 @@ class MMVTracking(QWidget):
                         msg.exec()
                         self._mouse(State.default)
                         return
+                    # Select cell, pass ID on
                     self._mouse(State.merge_to, label_layer.data[int(event.position[0]),int(event.position[1]),int(event.position[2])])
-            elif mode == State.merge_to: # False Cut 2
+            elif mode == State.merge_to: # False Cut 2 -- Two cells should be one
                 self.viewer.layers.selection.active.help = "(4)"
                 @layer.mouse_drag_callbacks.append
                 def _handle(layer,event):
+                    """
+                    Changes cell ID in segmentation
+                    
+                    :param event: Mouseclick event
+                    """
                     # Label layer can't be missing as this is only called from False Cut 1
+                    # Change ID of selected cell to the ID passed on
                     self.viewer.layers[self.viewer.layers.index("Segmentation Data")].fill((int(event.position[0]),int(event.position[1]),int(event.position[2])),seg_id)
                     self._mouse(State.default)
-            elif mode == State.select: # Correct Segmentation
+            elif mode == State.select: # Correct Segmentation -- Cell needs to be redrawn. Loads ID of clicked cell and switches to painting mode if selected
                 self.viewer.layers.selection.active.help = "(5)"
                 @layer.mouse_drag_callbacks.append
                 def _handle(layer,event):
+                    """
+                    Load ID of cell to label layer
+                    
+                    :param event: Mouseclick event
+                    """
                     try:
                         label_layer = self.viewer.layers[self.viewer.layers.index("Segmentation Data")]
                     except ValueError:
@@ -360,12 +405,17 @@ class MMVTracking(QWidget):
                         import keyboard
                         keyboard.press_and_release("2")
                     self._mouse(State.default)
-            elif mode == State.link: # Creates Track
+            elif mode == State.link: # Creates Track -- Creates a new track or extends an existing one 
                 self.viewer.layers.selection.active.help = "(6)"
                 if isinstance(layer,napari.layers.labels.labels.Labels):
                     layer.mode = "pan_zoom"
                 @layer.mouse_drag_callbacks.append
                 def _record(layer,event):
+                    """
+                    Records centroids of selected cells
+                    
+                    :param event: Mouseclick event
+                    """
                     try:
                         label_layer = self.viewer.layers[self.viewer.layers.index("Segmentation Data")]
                     except ValueError:
@@ -382,12 +432,17 @@ class MMVTracking(QWidget):
                     centroid = ndimage.center_of_mass(label_layer.data[int(event.position[0])], labels = label_layer.data[int(event.position[0])], index = selected_cell)
                     self.to_track.append([int(event.position[0]),int(np.rint(centroid[0])),int(np.rint(centroid[1]))])
 
-            elif mode == State.unlink: # Removes Track
+            elif mode == State.unlink: # Removes Track -- Removes cells from track
                 self.viewer.layers.selection.active.help = "(7)"
                 if isinstance(layer,napari.layers.labels.labels.Labels):
                     layer.mode = "pan_zoom"
                 @layer.mouse_drag_callbacks.append
                 def _cut(layer,event):
+                    """
+                    Records centroids of selected cells
+                    
+                    :param event: Mouseclick event
+                    """
                     try:
                         label_layer = self.viewer.layers[self.viewer.layers.index("Segmentation Data")]
                     except ValueError:
@@ -408,6 +463,10 @@ class MMVTracking(QWidget):
         MMVTracking.dock._load_zarr()
         
     def _load_zarr(self):
+        """
+        Opens a dialog to select a zarr file.
+        Loads the zarr file's content as layers into the viewer
+        """
         dialog = QFileDialog()
         dialog.setNameFilter('*.zarr')
         self.file = dialog.getExistingDirectory(self, "Select Zarr-File")
@@ -429,15 +488,21 @@ class MMVTracking(QWidget):
                 return
             try:
                 self.viewer.layers.remove("Raw Image")
-                self.viewer.layers.remove("Segmentation Data")
-                self.viewer.layers.remove("Tracks")
             except ValueError: # only one or two layers may exist, so not all can be deleted
+                pass
+            try:
+                self.viewer.layers.remove("Segmentation Data")
+            except ValueError: # see above
+                pass
+            try:
+                self.viewer.layers.remove("Tracks")
+            except ValueError: # see above
                 pass
         try:
             self.viewer.add_image(self.z1['raw_data'][:], name = 'Raw Image')
             self.viewer.add_labels(self.z1['segmentation_data'][:], name = 'Segmentation Data')
             self.viewer.add_tracks(self.z1['tracking_data'][:], name = 'Tracks') # Use graph argument for inheritance (https://napari.org/howtos/layers/tracks.html)
-            self.tracks = self.z1['tracking_data'][:]
+            self.tracks = self.z1['tracking_data'][:] # Cache data of tracks layer
         except:
             print("File is either no Zarr file or does not adhere to required structure")
         self._mouse(State.default)
@@ -447,6 +512,9 @@ class MMVTracking(QWidget):
         MMVTracking.dock._save_zarr()
 
     def _save_zarr(self):
+        """
+        Saves the (changed) layers to the zarr file
+        """
         
         # Useful if we later want to allow saving to new file
         """try:
@@ -503,6 +571,9 @@ class MMVTracking(QWidget):
         pass
 
     def _plot(self):
+        """
+        Plots the data for the selected metric
+        """
         # Throw warning message if plot is generated and cached tracks are different from current tracks
         from matplotlib.figure import Figure
         from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
@@ -521,14 +592,17 @@ class MMVTracking(QWidget):
         canvas = FigureCanvas(fig)
         self.window = Window()
         self.window.setLayout(QVBoxLayout())
-        if self.c_plots.currentIndex() == 1:
-            speed = self._calculate_speed()
+        
+        if self.c_plots.currentIndex() == 1: # Speed metric
+            self._calculate_speed()
+            speed = self.speed
             axes.set_xlabel("Speed")
             axes.set_ylabel("Standard Deviation")
             data = axes.scatter(speed[:,1],speed[:,2],c = np.array([[0,.5,0,1]]))
             self.window.layout().addWidget(QLabel("Scatterplot Standard Deviation vs Average: Speed"))
-        elif self.c_plots.currentIndex() == 2:
-            size = self._calculate_size()
+        elif self.c_plots.currentIndex() == 2: # Size metric
+            self._calculate_size()
+            size = self.size
             axes.set_xlabel("Size")
             axes.set_ylabel("Standard Deviation")
             data = axes.scatter(size[:,1],size[:,2],c = np.array([[0,.5,0,1]]))
@@ -536,6 +610,9 @@ class MMVTracking(QWidget):
         selector = SelectFromCollection(self, axes, data)
         
         def accept(event):
+            """
+            this is somehow important, TBD why
+            """
             if event.key == "enter":
                 print("Selected points:")
                 print(selector.xys[selector.ind])
@@ -550,20 +627,84 @@ class MMVTracking(QWidget):
         btn_apply.clicked.connect(selector.apply)
         self.window.layout().addWidget(btn_apply)
         self.window.show()
+        
+    def _export(self):
+        """
+        Exports a CSV with selected metrics 
+        """
+        if not (self.ch_speed.checkState() or self.ch_size.checkState()):
+            msg = QMessageBox()
+            msg.setWindowTitle("No metric selected")
+            msg.setText("You selected no metrics")
+            msg.setInformativeText("Are you sure you want to export just the amount of cells?")
+            msg.addButton(QMessageBox.Yes)
+            msg.addButton(QMessageBox.Cancel)
+            ret = msg.exec() # Yes -> ret = 16384, Cancel -> ret = 4194304
+            if ret == 4194304:
+                return
+        import csv
+        csvfile = open('results.csv','w', newline='')
+        writer = csv.writer(csvfile)
+        
+        # Stats for all cells combined
+        metrics = ["Number of cells"]
+        individual_metrics = ["ID"]
+        values = [len(np.unique(self.tracks[:,0]))]
+        if self.ch_speed.checkState() == 2:
+            self._calculate_speed()
+            metrics.append("Average speed")
+            metrics.append("Standard deviation of speed")
+            individual_metrics.append("Average speed")
+            individual_metrics.append("Standard deviation of speed")
+            values.append(np.average(self.speed[:,1]))
+            values.append(np.std(self.speed[:,1]))
+        if self.ch_size.checkState() == 2:
+            self._calculate_size()
+            metrics.append("Average size")
+            metrics.append("Standard deviation of size")
+            individual_metrics.append("Average size")
+            individual_metrics.append("Standard deviation of size")
+            values.append(np.average(self.size[:,1]))
+            values.append(np.std(self.size[:,1]))
+        writer.writerow(metrics)
+        writer.writerow(values)
+        writer.writerow([None])
+        writer.writerow([None])
+        
+        # Stats for each individual cell
+        if not (self.ch_speed.checkState() or self.ch_size.checkState()):
+            csvfile.close()
+            return
+        writer.writerow(individual_metrics)
+        for track in np.unique(self.tracks[:,0]):
+            value = [track]
+            if self.ch_speed.checkState() == 2:
+                value.append(self.speed[np.where(self.speed[:,0] == track)[0],1][0])
+                value.append(self.speed[np.where(self.speed[:,0] == track)[0],2][0])
+            if self.ch_size.checkState() == 2:
+                value.append(self.size[np.where(self.size[:,0] == track)[0],1][0])
+                value.append(self.size[np.where(self.size[:,0] == track)[0],2][0])
+            writer.writerow(value)
+        csvfile.close()
                 
 
     def _select_track(self, tracks = []):
+        """
+        Displays only selected tracks
+        
+        :param tracks: list of IDs of tracks to display
+        """
         if tracks == []:                
-            if self.le_trajectory.text() == "": # deleting the text returns the whole layer
+            if self.le_trajectory.text() == "": # Deleting the text returns the whole layer
                 try:
                     self.viewer.layers.remove('Tracks')
                 except ValueError:
                     print("No tracking layer found")
                 self.viewer.add_tracks(self.tracks, name='Tracks')
                 return
-            try: # Try for single value
+            try: # This works for a single value
                 tracks = int(self.le_trajectory.text())
-            except ValueError: # Try for list of values
+            except ValueError: # This works for multiple  comma separated values
                 txt = self.le_trajectory.text()
                 tracks = []
                 try:
@@ -581,7 +722,7 @@ class MMVTracking(QWidget):
         if isinstance(tracks,int): # Single value
             if tracks < 0:
                 self.viewer.add_tracks(self.tracks, name='Tracks')
-                self.le_trajectory.setText("") # No need to keep negative number
+                self.le_trajectory.setText("") # Negative number gets removed
             else:
                 tracks_data = [
                     track
@@ -605,6 +746,7 @@ class MMVTracking(QWidget):
                     txt = txt + ","
                 txt = f'{txt}{tracks[i]}'
             self.le_trajectory.setText(txt)
+            # Get tracks data for selected IDs
             tracks_data = [
                 track
                 for track in self.tracks
@@ -622,6 +764,9 @@ class MMVTracking(QWidget):
         MMVTracking.dock.viewer.layers[MMVTracking.dock.viewer.layers.index("Segmentation Data")].mode = "paint"
 
     def _set_free_id(self):
+        """
+        Sets free segmentation ID on label layer
+        """
         try:
             label_layer = self.viewer.layers[self.viewer.layers.index("Segmentation Data")]
         except ValueError:
@@ -634,6 +779,11 @@ class MMVTracking(QWidget):
         napari.viewer.current_viewer().layers.selection.select_only(label_layer)
 
     def _get_free_id(self, layer):
+        """
+        Finds a free segmentation ID
+        
+        :return: integer, free segmentation ID
+        """
         return np.amax(layer.data)+1
 
     @napari.Viewer.bind_key('r')
@@ -641,6 +791,9 @@ class MMVTracking(QWidget):
         MMVTracking.dock._remove_fp()
 
     def _remove_fp(self):
+        """
+        Removes the clicked on cell from segmentation layer
+        """
         self._mouse(State.remove)
 
     @napari.Viewer.bind_key('t')
@@ -648,6 +801,9 @@ class MMVTracking(QWidget):
         MMVTracking.dock._false_merge()
 
     def _false_merge(self):
+        """
+        Changes ID for clicked on cell from segmentation layer
+        """
         self._mouse(State.recolour)
 
     @napari.Viewer.bind_key('z')
@@ -655,6 +811,9 @@ class MMVTracking(QWidget):
         MMVTracking.dock._false_cut()
 
     def _false_cut(self):
+        """
+        Adapts ID from second to first selected cell
+        """
         self._mouse(State.merge_from)
 
     # Tracking correction
@@ -663,7 +822,11 @@ class MMVTracking(QWidget):
         MMVTracking.dock._link()
 
     def _link(self):
-        try: # check if segmentation layer exists
+        """
+        Links cells together to form a track
+        Records inputs on first run, creates track on second run
+        """
+        try: # Check if segmentation layer exists
             layer = self.viewer.layers[self.viewer.layers.index("Segmentation Data")]
         except ValueError:
             err = QMessageBox()
@@ -675,7 +838,7 @@ class MMVTracking(QWidget):
         except ValueError:
             pass
         else:
-            if not np.array_equal(tracks,self.tracks): #  and (tracks == self.tracks).all(): alternatively: tracks.shape == self.tracks.shape
+            if not np.array_equal(tracks,self.tracks): # Check if full tracks layer is displayed
                 msg = QMessageBox()
                 msg.setText("Missing Tracks")
                 msg.setInformativeText("You need to have all Tracks displayed to add a new Track. Do you want to display all Tracks now?")
@@ -692,45 +855,45 @@ class MMVTracking(QWidget):
                     self.to_track = []
                     self._mouse(State.default)
                     return
-                if len(np.asarray(self.to_track)[:,0]) != len(set(np.asarray(self.to_track)[:,0])): # check for duplicates
+                if len(np.asarray(self.to_track)[:,0]) != len(set(np.asarray(self.to_track)[:,0])): # Check for duplicates
                     msg = QMessageBox()
                     msg.setText("Duplicate cells per slice")
-                    msg.setInformativeText("Looks like you were an idiot and selected more than one cell per slice. How is that supposed to work?")
-                    msg.addButton("I'm sorry!", QMessageBox.AcceptRole)
+                    msg.setInformativeText("Looks like you selected more than one cell per slice. This does not work.")
+                    msg.addButton(QMessageBox.Ok)
                     msg.exec()
                     self.to_track = []
                     self._mouse(State.default)
                     return
                 self.to_track.sort()
-                try:
+                try: # Check if tracks layer must be created
                     track = self.viewer.layers.index("Tracks")
                 except ValueError:
                     id = 1
                 else:
                     tracks = self.viewer.layers[track].data
                     self.viewer.layers.remove('Tracks')
-                    id = max(np.amax(tracks[:,0]),np.amax(tracks[:,0])) + 1 # determine id for the new track
+                    id = max(np.amax(tracks[:,0]),np.amax(tracks[:,0])) + 1 # Determine id for the new track
                 old_ids = [0,0]
-                if id != 1: # tracking data is not empty
+                if id != 1: # Tracking data is not empty
                     for j in range(len(tracks)):
-                        if tracks[j][1] == self.to_track[0][0] and tracks[j][2] == self.to_track[0][1] and tracks[j][3] == self.to_track[0][2]: # new track starting point exists in tracking data
+                        if tracks[j][1] == self.to_track[0][0] and tracks[j][2] == self.to_track[0][1] and tracks[j][3] == self.to_track[0][2]: # New track starting point exists in tracking data
                             old_ids[0] = tracks[j][0]
                             self.to_track.remove(self.to_track[0])
                             break
                     for j in range(len(tracks)):
-                        if tracks[j][1] == self.to_track[-1][0] and tracks[j][2] == self.to_track[-1][1] and tracks[j][3] == self.to_track[-1][2]: # new track end point exists in tracking data
+                        if tracks[j][1] == self.to_track[-1][0] and tracks[j][2] == self.to_track[-1][1] and tracks[j][3] == self.to_track[-1][2]: # New track end point exists in tracking data
                             old_ids[1] = tracks[j][0]
                             self.to_track.remove(self.to_track[-1])
                             break
                 if max(old_ids) > 0:
-                    if min(old_ids) == 0: # one end connects to existing track
+                    if min(old_ids) == 0: # One end connects to existing track
                         id = max(old_ids)
-                    else: # both ends connect to existing track, (higher) id of second existing track changed to id of first track
+                    else: # Both ends connect to existing track, (higher) id of second existing track changed to id of first track
                         id = min(old_ids)
                         for track_entry in tracks:
                             if track_entry[0] == max(old_ids):
                                 track_entry[0] = id
-                for entry in self.to_track: # entries are added to tracking data (current and cached, in case those are different)
+                for entry in self.to_track: # Entries are added to tracking data (current and cached, in case those are different)
                     try:
                         tracks = np.r_[tracks, [[id] + entry]]
                     except UnboundLocalError:
@@ -751,6 +914,11 @@ class MMVTracking(QWidget):
         MMVTracking.dock._unlink()
 
     def _unlink(self):
+        """
+        Removes cells from track
+        Records inputs on first run, removes cells from tracking on second run
+        This deletes tracks with length < 2
+        """
         try:
             label_layer = self.viewer.layers[self.viewer.layers.index("Segmentation Data")]
         except ValueError:
@@ -778,11 +946,11 @@ class MMVTracking(QWidget):
                     return
                 self.to_cut.sort()
                 track = 0
-                for j in range(len(tracks_layer.data)): # find track id
+                for j in range(len(tracks_layer.data)): # Find track ID
                     if tracks[j,1] == self.to_cut[0][0] and tracks[j,2] == self.to_cut[0][1] and tracks[j,3] == self.to_cut[0][2]:
                         track = tracks[j,0]
                         break
-                for j in range(len(tracks_layer.data)):  # confirm track id
+                for j in range(len(tracks_layer.data)):  # Confirm track ID matches other entries
                     if tracks[j,1] == self.to_cut[-1][0] and tracks[j,2] == self.to_cut[-1][1] and tracks[j,3] == self.to_cut[-1][2]:
                         if track != tracks[j,0]:
                             msg = QMessageBox()
@@ -795,7 +963,7 @@ class MMVTracking(QWidget):
                 while j < len(tracks):
                     if tracks[j,0] == track:
                         if tracks[j,1] > self.to_cut[0][0]:
-                            if tracks[j,1] < self.to_cut[-1][0]: # cells to remove from tracking
+                            if tracks[j,1] < self.to_cut[-1][0]: # Cells is removed from tracking
                                 tracks = np.delete(tracks,j,0)
                                 k = 0
                                 while k < len(self.tracks):
@@ -804,16 +972,14 @@ class MMVTracking(QWidget):
                                         break
                                     k = k + 1
                                 j = j - 1
-                            elif tracks[j,1] >= self.to_cut[-1][0]: # cells to track with new id
+                            elif tracks[j,1] >= self.to_cut[-1][0]: # Cells gets moved to track with new ID
                                 tracks[j,0] = id
                                 k = 0
                                 while k < len(self.tracks):
-                                    #print("k: " + str(k) + ", len(self.tracks: " + str(len(self.tracks)))
                                     if np.array_equal(self.tracks[k],np.array([track,tracks[j,1],tracks[j,2],tracks[j,3]])):
                                         self.tracks[k,0] = id
                                         break
                                     k = k + 1
-                                #np.where(self.tracks == [track,tracks[j,1],tracks[j,2],tracks[j,3]], tracks[j], self.tracks)
                     j = j + 1
                 self.to_cut = []
                 df = pd.DataFrame(tracks, columns=['ID', 'Z', 'Y', 'X'])
@@ -822,17 +988,13 @@ class MMVTracking(QWidget):
                 df_cache = pd.DataFrame(self.tracks, columns=['ID', 'Z', 'Y', 'X'])
                 df_cache.sort_values(['ID', 'Z'], ascending=True, inplace=True)
                 self.tracks = df_cache.values
-                tmp = np.unique(tracks[:,0],return_counts = True) # count occurrences of each id
+                tmp = np.unique(tracks[:,0],return_counts = True) # Count occurrences of each id
                 tmp = np.delete(tmp,tmp[1] == 1,1)
-                tracks = np.delete(tracks,np.where(np.isin(tracks[:,0],tmp[0,:],invert=True)),0)
-                self.tracks = np.copy(np.delete(self.tracks,np.where(np.isin(tracks[:,0],tmp[0,:],invert=True)),0))
+                tracks = np.delete(tracks,np.where(np.isin(tracks[:,0],tmp[0,:],invert=True)),0) # Remove tracks of length <2
+                self.tracks = np.copy(np.delete(self.tracks,np.where(np.isin(tracks[:,0],tmp[0,:],invert=True)),0)) # Remove tracks of length <2 from cache
                 self.viewer.layers.remove('Tracks')
                 self.viewer.add_tracks(tracks, name='Tracks')
                 self._mouse(State.default)
-                import sys
-                np.set_printoptions(threshold=sys.maxsize)
-                #print(tracks)
-                #print(self.tracks)
                 return
         self.to_cut = []
         self._mouse(State.unlink)
@@ -849,6 +1011,11 @@ class MMVTracking(QWidget):
         MMVTracking.dock._grab_label(paint = True)
 
     def _grab_label(self, paint = False):
+        """
+        Sets layer to ID of selected cell
+        
+        :param paint: Puts label layer in paint mode if true
+        """
         try:
             self.viewer.layers[self.viewer.layers.index("Segmentation Data")].mode = "pan_zoom"
         except ValueError:
@@ -875,6 +1042,10 @@ class MMVTracking(QWidget):
         MMVTracking.dock.toolbox.setCurrentIndex(3)
         
     def _calculate_speed(self):
+        """
+        Calculates average speed and standard deviation for all cells
+        """
+        
         """ Speed metric:
             - avg speed (every cell) <- prio
             - std (standard deviation from avg speed)
@@ -892,9 +1063,13 @@ class MMVTracking(QWidget):
                 retval = np.append(retval, [[unique_id,avg_speed,std_speed]],0)
             except UnboundLocalError:
                 retval = np.array([[unique_id,avg_speed,std_speed]])
-        return retval
+        self.speed =  retval
     
     def _calculate_size(self):
+        """
+        Calculates average size and standard deviation for all cells
+        """
+        
         """Size metric:
             - avg size
             - std
@@ -913,17 +1088,12 @@ class MMVTracking(QWidget):
             track = np.delete(self.tracks,np.where(self.tracks[:,0] != unique_id),0)
             size = []
             for i in range(0,len(track)-1):
-                # TODO: calculate size in slice
                 seg_id = label_layer.data[track[i,1],track[i,2],track[i,3]]
-                """print(seg_id)
-                print(np.where(label_layer.data[track[i,1]] == seg_id))"""
                 size.append(len(np.where(label_layer.data[track[i,1]] == seg_id)[0]))
-                # size.append(np.hypot(track[i,2] - track[i+1,2],track[i,3] - track[i+1,3]))
-            avg_speed = np.average(size)
-            std_speed = np.std(size)
+            avg_size = np.average(size)
+            std_size = np.std(size)
             try:
-                retval = np.append(retval, [[unique_id,avg_speed,std_speed]],0)
+                retval = np.append(retval, [[unique_id,avg_size,std_size]],0)
             except UnboundLocalError:
-                retval = np.array([[unique_id,avg_speed,std_speed]])
-        return retval
-        pass
+                retval = np.array([[unique_id,avg_size,std_size]])
+        self.size = retval
