@@ -67,7 +67,6 @@ class SelectFromCollection:
             self.ind = -1
         self.parent._select_track(self.ind)
         self.parent.window.close()
-        pass
         
 
 class MMVTracking(QWidget):
@@ -320,10 +319,7 @@ class MMVTracking(QWidget):
                     np.place(self.viewer.layers[self.viewer.layers.index("Segmentation Data")].data[int(event.position[0])],self.viewer.layers[self.viewer.layers.index("Segmentation Data")].data[int(event.position[0])]==false_id,0)
                     napari.viewer.current_viewer().layers.select_all()
                     napari.viewer.current_viewer().layers.selection.select_only(label_layer)
-                    import keyboard # Juggle label layer modes to update the layer
-                    if label_layer.mode == "pan_zoom":
-                        keyboard.press_and_release("4")
-                    keyboard.press_and_release("5")
+                    label_layer.refresh()
                     self._mouse(State.default)
             elif mode == State.recolour: # False Merge -- Two separate cells have the same label, relabel one
                 self.viewer.layers.selection.active.help = "(2)"
@@ -643,7 +639,16 @@ class MMVTracking(QWidget):
             if ret == 4194304:
                 return
         import csv
-        csvfile = open('results.csv','w', newline='')
+        dialog = QFileDialog()
+        #dialog.setDefaultSuffix("csv") Doesn't work for some reason
+        file = dialog.getSaveFileName(filter = "*.csv")
+        if file[0] == "":
+            # No file selected
+            return
+        """if not file[0].endswith(".csv"):
+            print("ADD CSV")
+        print(file)"""
+        csvfile = open(file[0],'w', newline='')
         writer = csv.writer(csvfile)
         
         # Stats for all cells combined
@@ -868,13 +873,13 @@ class MMVTracking(QWidget):
                 try: # Check if tracks layer must be created
                     track = self.viewer.layers.index("Tracks")
                 except ValueError:
-                    id = 1
+                    track_id = 1
                 else:
                     tracks = self.viewer.layers[track].data
                     self.viewer.layers.remove('Tracks')
-                    id = max(np.amax(tracks[:,0]),np.amax(tracks[:,0])) + 1 # Determine id for the new track
+                    track_id = max(np.amax(tracks[:,0]),np.amax(tracks[:,0])) + 1 # Determine id for the new track
                 old_ids = [0,0]
-                if id != 1: # Tracking data is not empty
+                if track_id != 1: # Tracking data is not empty
                     for j in range(len(tracks)):
                         if tracks[j][1] == self.to_track[0][0] and tracks[j][2] == self.to_track[0][1] and tracks[j][3] == self.to_track[0][2]: # New track starting point exists in tracking data
                             old_ids[0] = tracks[j][0]
@@ -887,17 +892,17 @@ class MMVTracking(QWidget):
                             break
                 if max(old_ids) > 0:
                     if min(old_ids) == 0: # One end connects to existing track
-                        id = max(old_ids)
+                        track_id = max(old_ids)
                     else: # Both ends connect to existing track, (higher) id of second existing track changed to id of first track
-                        id = min(old_ids)
+                        track_id = min(old_ids)
                         for track_entry in tracks:
                             if track_entry[0] == max(old_ids):
-                                track_entry[0] = id
+                                track_entry[0] = track_id
                 for entry in self.to_track: # Entries are added to tracking data (current and cached, in case those are different)
                     try:
-                        tracks = np.r_[tracks, [[id] + entry]]
+                        tracks = np.r_[tracks, [[track_id] + entry]]
                     except UnboundLocalError:
-                        tracks = [[id] + entry]
+                        tracks = [[track_id] + entry]
                 self.to_track = []
                 df = pd.DataFrame(tracks, columns=['ID', 'Z', 'Y', 'X'])
                 df.sort_values(['ID', 'Z'], ascending=True, inplace=True)
@@ -933,7 +938,7 @@ class MMVTracking(QWidget):
             err.setText("No tracks layer found!")
             err.exec()
             return
-        id = max(np.amax(tracks_layer.data[:,0]),np.amax(self.tracks[:,0])) + 1
+        track_id = max(np.amax(tracks_layer.data[:,0]),np.amax(self.tracks[:,0])) + 1
         tracks = tracks_layer.data
         for i in range(len(label_layer.mouse_drag_callbacks)):
             if label_layer.mouse_drag_callbacks[i].__name__ == "_cut":
@@ -973,11 +978,11 @@ class MMVTracking(QWidget):
                                     k = k + 1
                                 j = j - 1
                             elif tracks[j,1] >= self.to_cut[-1][0]: # Cells gets moved to track with new ID
-                                tracks[j,0] = id
+                                tracks[j,0] = track_id
                                 k = 0
                                 while k < len(self.tracks):
                                     if np.array_equal(self.tracks[k],np.array([track,tracks[j,1],tracks[j,2],tracks[j,3]])):
-                                        self.tracks[k,0] = id
+                                        self.tracks[k,0] = track_id
                                         break
                                     k = k + 1
                     j = j + 1
