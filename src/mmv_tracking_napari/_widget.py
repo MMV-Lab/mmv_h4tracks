@@ -592,14 +592,16 @@ class MMVTracking(QWidget):
         if self.c_plots.currentIndex() == 1: # Speed metric
             self._calculate_speed()
             speed = self.speed
-            axes.set_xlabel("Speed")
+            axes.set_title("Speed",{"fontsize": 18,"color": "white"})
+            axes.set_xlabel("Average")
             axes.set_ylabel("Standard Deviation")
             data = axes.scatter(speed[:,1],speed[:,2],c = np.array([[0,.5,0,1]]))
             self.window.layout().addWidget(QLabel("Scatterplot Standard Deviation vs Average: Speed"))
         elif self.c_plots.currentIndex() == 2: # Size metric
             self._calculate_size()
             size = self.size
-            axes.set_xlabel("Size")
+            axes.set_title("Size",{"fontsize": 18,"color": "white"})
+            axes.set_xlabel("Average")
             axes.set_ylabel("Standard Deviation")
             data = axes.scatter(size[:,1],size[:,2],c = np.array([[0,.5,0,1]]))
             self.window.layout().addWidget(QLabel("Scatterplot Standard Deviation vs Average: Size"))
