@@ -990,17 +990,17 @@ class MMVTracking(QWidget):
                 while j < len(tracks):
                     if tracks[j,0] == track:
                         if tracks[j,1] > self.to_cut[0][0]:
-                            if tracks[j,1] < self.to_cut[-1][0]: # Cells is removed from tracking
+                            if tracks[j,1] < self.to_cut[-1][0]: # Cell is removed from tracking
                                 to_delete = tracks[j]
                                 tracks = np.delete(tracks,j,0)
                                 k = 0
                                 while k < len(self.tracks):
-                                    if self.tracks[k] == to_delete:
+                                    if np.array_equal(self.tracks[k], to_delete):
                                         self.tracks = np.delete(self.tracks,k,0)
                                         break
                                     k = k + 1
                                 j = j - 1
-                            elif tracks[j,1] >= self.to_cut[-1][0]: # Cells gets moved to track with new ID
+                            elif tracks[j,1] >= self.to_cut[-1][0]: # Cell gets moved to track with new ID
                                 tracks[j,0] = track_id
                                 k = 0
                                 while k < len(self.tracks):
