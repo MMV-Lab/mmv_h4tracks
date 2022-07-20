@@ -159,10 +159,8 @@ class MMVTracking(QWidget):
         c_segmentation.addItem("model 2")
         c_segmentation.addItem("model 3")
         c_segmentation.addItem("model 4")
-        self.c_plots.addItem("select metric")
         self.c_plots.addItem("speed")
         self.c_plots.addItem("size")
-        self.c_plots.addItem("metric 3")
 
         # Line Edits
         self.le_trajectory = QLineEdit("")
@@ -601,7 +599,7 @@ class MMVTracking(QWidget):
         self.window = Window()
         self.window.setLayout(QVBoxLayout())
         
-        if self.c_plots.currentIndex() == 1: # Speed metric
+        if self.c_plots.currentIndex() == 0: # Speed metric
             self._calculate_speed()
             speed = self.speed
             axes.set_title("Speed",{"fontsize": 18,"color": "white"})
@@ -609,7 +607,7 @@ class MMVTracking(QWidget):
             axes.set_ylabel("Standard Deviation")
             data = axes.scatter(speed[:,1],speed[:,2],c = np.array([[0,.5,0,1]]))
             self.window.layout().addWidget(QLabel("Scatterplot Standard Deviation vs Average: Speed"))
-        elif self.c_plots.currentIndex() == 2: # Size metric
+        elif self.c_plots.currentIndex() == 1: # Size metric
             self._calculate_size()
             size = self.size
             axes.set_title("Size",{"fontsize": 18,"color": "white"})
@@ -713,6 +711,7 @@ class MMVTracking(QWidget):
         
         :param tracks: list of IDs of tracks to display
         """
+        print(tracks)
         if tracks == []:                
             if self.le_trajectory.text() == "": # Deleting the text returns the whole layer
                 try:
@@ -772,7 +771,8 @@ class MMVTracking(QWidget):
                 if track[0] in tracks
             ]
             if not tracks_data:
-                print("No tracking data found for ids " + str(tracks))
+                print("No tracking data found for ids " + str(tracks) + ", displaying all tracks instead")
+                self.viewer.add_tracks(self.tracks,name='Tracks')
                 return
             self.viewer.add_tracks(tracks_data, name='Tracks')
             self._mouse(State.default)
@@ -987,7 +987,7 @@ class MMVTracking(QWidget):
                                 tracks = np.delete(tracks,j,0)
                                 k = 0
                                 while k < len(self.tracks):
-                                    if self.tracks[k,0] == to_delete:
+                                    if self.tracks[k] == to_delete:
                                         self.tracks = np.delete(self.tracks,k,0)
                                         break
                                     k = k + 1
