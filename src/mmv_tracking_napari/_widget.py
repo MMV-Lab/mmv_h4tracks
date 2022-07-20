@@ -97,7 +97,7 @@ class MMVTracking(QWidget):
         load_save = QLabel("Load/Save .zarr file:")
         false_positive = QLabel("Remove false positive for ID:")
         false_merge = QLabel("Cut falsely merged ID:")
-        false_cut = QLabel("Merge falsely cut ID into second ID:")
+        false_cut = QLabel("Merge falsely cut ID and second ID:")
         remove_correspondence = QLabel("Remove tracking for later Slices for ID:")
         insert_correspondence = QLabel("ID should be tracked with second ID:")
         metric = QLabel("Evaluation metrics:")
@@ -362,6 +362,12 @@ class MMVTracking(QWidget):
                         msg.exec()
                         self._mouse(State.default)
                         return
+                    if label_layer.data[int(event.position[0]),int(event.position[1]),int(event.position[2])] == 0:
+                        msg = QMessageBox()
+                        msg.setText("Can't merge background!")
+                        msg.exec()
+                        self._mouse(State.default)
+                        return
                     # Select cell, pass ID on
                     self._mouse(State.merge_to, label_layer.data[int(event.position[0]),int(event.position[1]),int(event.position[2])])
             elif mode == State.merge_to: # False Cut 2 -- Two cells should be one
@@ -373,6 +379,12 @@ class MMVTracking(QWidget):
                     
                     :param event: Mouseclick event
                     """
+                    if self.viewer.layers[self.viewer.layers.index("Segmentation Data")].data[int(event.position[0]),int(event.position[1]),int(event.position[2])] == 0:
+                        msg = QMessageBox()
+                        msg.setText("Can't merge background!")
+                        msg.exec()
+                        self._mouse(State.default)
+                        return
                     # Label layer can't be missing as this is only called from False Cut 1
                     # Change ID of selected cell to the ID passed on
                     self.viewer.layers[self.viewer.layers.index("Segmentation Data")].fill((int(event.position[0]),int(event.position[1]),int(event.position[2])),seg_id)
@@ -971,10 +983,11 @@ class MMVTracking(QWidget):
                     if tracks[j,0] == track:
                         if tracks[j,1] > self.to_cut[0][0]:
                             if tracks[j,1] < self.to_cut[-1][0]: # Cells is removed from tracking
+                                to_delete = tracks[j]
                                 tracks = np.delete(tracks,j,0)
                                 k = 0
                                 while k < len(self.tracks):
-                                    if self.tracks[k,0] == track:
+                                    if self.tracks[k,0] == to_delete:
                                         self.tracks = np.delete(self.tracks,k,0)
                                         break
                                     k = k + 1
@@ -998,7 +1011,20 @@ class MMVTracking(QWidget):
                 tmp = np.unique(tracks[:,0],return_counts = True) # Count occurrences of each id
                 tmp = np.delete(tmp,tmp[1] == 1,1)
                 tracks = np.delete(tracks,np.where(np.isin(tracks[:,0],tmp[0,:],invert=True)),0) # Remove tracks of length <2
-                self.tracks = np.copy(np.delete(self.tracks,np.where(np.isin(tracks[:,0],tmp[0,:],invert=True)),0)) # Remove tracks of length <2 from cache
+                tmp = np.unique(self.tracks[:,0],return_counts = True) # Count occurrences of each id
+                tmp = np.delete(tmp,tmp[1] == 1,1)
+                self.tracks = np.delete(self.tracks,np.where(np.isin(self.tracks[:,0],tmp[0,:],invert=True)),0) # Remove tracks of length <2
+                """f = open('output.txt','w')
+                import sys
+                np.set_printoptions(threshold=sys.maxsize)
+                f.write("LAYER VERSION:")
+                f.write(tracks)
+                f.write("------------------------------------")
+                f.write("CACHE VERSION:")
+                f.write(self.tracks)
+                f.close()"""
+                
+                #self.tracks = np.copy(np.delete(self.tracks,np.where(np.isin(tracks[:,0],tmp[0,:],invert=True)),0)) # Remove tracks of length <2 from cache
                 self.viewer.layers.remove('Tracks')
                 self.viewer.add_tracks(tracks, name='Tracks')
                 self._mouse(State.default)
