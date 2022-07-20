@@ -109,6 +109,7 @@ class MMVTracking(QWidget):
             "Saving: Overwrites the file selected at the time of loading!"
         )
         load_save.setToolTip(load_save_tip)
+        
 
         # Buttons
         btn_load = QPushButton("Load")
@@ -134,6 +135,12 @@ class MMVTracking(QWidget):
         btn_grab_label.setToolTip("A")
         btn_export = QPushButton("Export")
         btn_adjust_seg_ids = QPushButton("Adjust Segmentation IDs")
+        
+        # Tooltips for Buttons
+        btn_adjust_seg_ids_tip = (
+            "WARNING: This will take a while"
+            )
+        btn_adjust_seg_ids.setToolTip(btn_adjust_seg_ids_tip)
 
         # Linking buttons to functions
         btn_load.clicked.connect(self._load_zarr)
@@ -148,6 +155,7 @@ class MMVTracking(QWidget):
         btn_remove_correspondence.clicked.connect(self._unlink)
         btn_insert_correspondence.clicked.connect(self._link)
         btn_export.clicked.connect(self._export)
+        btn_adjust_seg_ids.clicked.connect(self._adjust_ids)
        
         # Combo Boxes
         c_segmentation = QComboBox()
@@ -1014,17 +1022,6 @@ class MMVTracking(QWidget):
                 tmp = np.unique(self.tracks[:,0],return_counts = True) # Count occurrences of each id
                 tmp = np.delete(tmp,tmp[1] == 1,1)
                 self.tracks = np.delete(self.tracks,np.where(np.isin(self.tracks[:,0],tmp[0,:],invert=True)),0) # Remove tracks of length <2
-                """f = open('output.txt','w')
-                import sys
-                np.set_printoptions(threshold=sys.maxsize)
-                f.write("LAYER VERSION:")
-                f.write(tracks)
-                f.write("------------------------------------")
-                f.write("CACHE VERSION:")
-                f.write(self.tracks)
-                f.close()"""
-                
-                #self.tracks = np.copy(np.delete(self.tracks,np.where(np.isin(tracks[:,0],tmp[0,:],invert=True)),0)) # Remove tracks of length <2 from cache
                 self.viewer.layers.remove('Tracks')
                 self.viewer.add_tracks(tracks, name='Tracks')
                 self._mouse(State.default)
@@ -1130,3 +1127,32 @@ class MMVTracking(QWidget):
             except UnboundLocalError:
                 retval = np.array([[unique_id,avg_size,std_size]])
         self.size = retval
+        
+    def _adjust_ids(self):
+        """
+        Replaces Track ID 0 with new Track ID
+        Changes Segmentation IDs to corresponding Track IDs
+        """
+        try:
+            label_layer = self.viewer.layers[self.viewer.layers.index("Segmentation Data")]
+        except ValueError:
+            err = QMessageBox()
+            err.setText("No label layer found!")
+            err.exec()
+            return
+        i = 0
+        new_id = max(self.tracks[:,0]) + 1
+        while self.tracks[i,0] == 0: # Replace Track ID 0 as we cannot have Segmentation ID 0 (Background)
+            self.tracks[i,0] = new_id
+            i = i + 1
+        df = pd.DataFrame(self.tracks, columns=['ID', 'Z', 'Y', 'X'])
+        df.sort_values(['ID', 'Z'], ascending=True, inplace=True)
+        self.tracks = df.values
+        self.viewer.layers.remove("Tracks")
+        self.viewer.add_tracks(self.tracks,name='Tracks')
+        
+        label_layer.data[label_layer.data > 0] = label_layer.data[label_layer.data > 0] + new_id
+        for track in self.tracks:
+            label_layer.fill([track[1],track[2],track[3]],track[0])
+            pass
+            
