@@ -66,6 +66,8 @@ class SelectFromCollection:
     def apply(self):
         if self.ind == []:
             self.ind = -1
+        if min(self.parent.tracks[:,0] > 0):
+            self.ind = self.ind + 1
         self.parent._select_track(self.ind)
         self.parent.window.close()
         
@@ -720,7 +722,6 @@ class MMVTracking(QWidget):
         
         :param tracks: list of IDs of tracks to display
         """
-        print(tracks)
         if tracks == []:                
             if self.le_trajectory.text() == "": # Deleting the text returns the whole layer
                 try:
