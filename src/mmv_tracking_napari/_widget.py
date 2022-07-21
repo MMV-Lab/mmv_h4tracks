@@ -1,5 +1,6 @@
 import enum
 
+from napari.qt.threading import thread_worker
 import napari.layers.labels.labels
 import numpy as np
 import pandas as pd
@@ -1140,7 +1141,7 @@ class MMVTracking(QWidget):
             err.setText("No label layer found!")
             err.exec()
             return
-        i = 0
+        """i = 0
         new_id = max(self.tracks[:,0]) + 1
         while self.tracks[i,0] == 0: # Replace Track ID 0 as we cannot have Segmentation ID 0 (Background)
             self.tracks[i,0] = new_id
@@ -1153,6 +1154,30 @@ class MMVTracking(QWidget):
         
         label_layer.data[label_layer.data > 0] = label_layer.data[label_layer.data > 0] + new_id
         for track in self.tracks:
+            label_layer.fill([track[1],track[2],track[3]],track[0])"""
+        def _test(retVal):
+            print("DONE")
+        worker = self.worker_test(label_layer)
+        worker.yielded.connect(self.viewer.add_tracks)
+        worker.returned.connect(_test)
+        worker.start()
+
+    @thread_worker
+    def worker_test(self,label_layer):
+        i = 0
+        new_id = max(self.tracks[:,0]) + 1
+        while self.tracks[i,0] == 0: # Replace Track ID 0 as we cannot have Segmentation ID 0 (Background)
+            self.tracks[i,0] = new_id
+            i = i + 1
+        df = pd.DataFrame(self.tracks, columns=['ID', 'Z', 'Y', 'X'])
+        df.sort_values(['ID', 'Z'], ascending=True, inplace=True)
+        self.tracks = df.values
+        self.viewer.layers.remove("Tracks")
+        #viewer.add_tracks(self.tracks,name='Tracks')
+        yield self.tracks
+        
+        label_layer.data[label_layer.data > 0] = label_layer.data[label_layer.data > 0] + new_id
+        for track in self.tracks:
             label_layer.fill([track[1],track[2],track[3]],track[0])
-            pass
-            
+
+        
