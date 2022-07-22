@@ -1,77 +1,17 @@
-import enum
 
-from napari.qt.threading import thread_worker
 import napari.layers.labels.labels
 import numpy as np
 import pandas as pd
 import zarr
+from qtpy.QtCore import QThread#, pyqtSignal <- DOESN'T WORK FOR SOME REASON, THUS EXPLICITLY IMPORTED FROM PYQT5
 from qtpy.QtWidgets import (QCheckBox, QComboBox, QFileDialog, QGridLayout, QHBoxLayout,
-                            QLabel, QLineEdit, QMessageBox, QPushButton,
+                            QLabel, QLineEdit, QMessageBox, QProgressBar, QPushButton,
                             QScrollArea, QToolBox, QVBoxLayout, QWidget)
 from scipy import ndimage
 
+from ._ressources import State, Window, SelectFromCollection, Worker
 
-class State(enum.Enum):
-    test = -1
-    default =  0
-    remove = 1
-    recolour = 2
-    merge_from = 3
-    merge_to = 4
-    select = 5
-    link = 6
-    unlink = 7
-    
-class Window(QWidget):
-    def __init__(self):
-        super().__init__()
         
-class SelectFromCollection:
-    def __init__(self, parent, ax, collection, alpha_other=0.3):
-        self.canvas = ax.figure.canvas
-        self.collection = collection
-        self.alpha_other = alpha_other
-        self.parent = parent
-        
-        self.xys = collection.get_offsets()
-        self.Npts = len(self.xys)
-
-        # Ensure that we have separate colors for each object
-        self.fc = collection.get_facecolors()
-        if len(self.fc) == 0:
-            raise ValueError("Collection must have a facecolor")
-        elif len(self.fc) == 1:
-            self.fc = np.tile(self.fc, (self.Npts, 1))
-        
-        from matplotlib.widgets import LassoSelector
-        self.lasso = LassoSelector(ax, onselect = self.onselect, button = 1)
-        self.ind = []
-        
-    def onselect(self,verts):
-        from matplotlib.path import Path
-        path = Path(verts)
-        self.ind = np.nonzero(path.contains_points(self.xys))[0]
-        self.fc[:, :] = np.array([.8,.2,.0,1])
-        self.fc[self.ind, :] = np.array([0,.5,0,1])
-        self.collection.set_facecolors(self.fc)
-        self.canvas.draw_idle()
-        self.selected_coordinates = self.xys[self.ind].data
-        
-    def disconnect(self):
-        self.lasso.disconnect_events()
-        self.fc[:,-1] = 1
-        self.collection.set_facecolors(self.fc)
-        self.canvas.draw_idle()
-        
-    def apply(self):
-        if self.ind == []:
-            self.ind = -1
-        if min(self.parent.tracks[:,0] > 0):
-            self.ind = self.ind + 1
-        self.parent._select_track(self.ind)
-        self.parent.window.close()
-        
-
 class MMVTracking(QWidget):
     dock = None
     def __init__(self, napari_viewer):
@@ -182,7 +122,12 @@ class MMVTracking(QWidget):
         # Checkboxes: off -> 0, on -> 2 if not tristate
         self.ch_speed = QCheckBox("Speed")
         self.ch_size = QCheckBox("Size")
-
+        
+        # Progressbar
+        #self.progress = Progress()
+        self.pb_progress = QProgressBar()
+        #self.progress.bind_to(self._update_progress)
+        
         # Tool Box
         self.toolbox = QToolBox()
 
@@ -193,6 +138,7 @@ class MMVTracking(QWidget):
         q_seg_track.layout().addWidget(btn_track,0,1)
         q_seg_track.layout().addWidget(c_segmentation,1,0)
         q_seg_track.layout().addWidget(btn_adjust_seg_ids,2,0)
+        q_seg_track.layout().addWidget(self.pb_progress,2,1)
 
         # Loading/Saving .zarr file UI
         q_load = QWidget()
@@ -530,17 +476,17 @@ class MMVTracking(QWidget):
 
     def _save_zarr(self):
         """
-        Saves the (changed) layers to the zarr file
+        Saves the (changed) layers to a zarr file
         """
         
         # Useful if we later want to allow saving to new file
-        """try:
+        try:
             raw = self.viewer.layers.index("Raw Image")
         except ValueError:
             err = QMessageBox()
             err.setText("No Raw Data layer found!")
             err.exec()
-            return"""
+            return
         try: # Check if segmentation layer exists
             seg = self.viewer.layers.index("Segmentation Data")
         except ValueError:
@@ -569,22 +515,44 @@ class MMVTracking(QWidget):
             if ret == 4194304:
                 return
         if ret == 0: # save current tracks layer
-            #self.z1['raw_data'][:] = self.viewer.layers[raw].data
-            self.z1['segmentation_data'][:] = self.viewer.layers[seg].data
-            self.z1['tracking_data'].resize(self.viewer.layers[track].data.shape[0],self.viewer.layers[track].data.shape[1])
-            self.z1['tracking_data'][:] = self.viewer.layers[track].data
-            #self.z1.create_dataset('tracking_data', shape = self.viewer.layers[track].data.shape, dtype = 'i4', data = self.viewer.layers[track].data)
+            if self.z1 == None:
+                dialog = QFileDialog()
+                dialog.setNameFilter('*.zarr')
+                file = dialog.getSaveFileName(self, "Select location for zarr to be created")
+                self.file = file + ".zarr"
+                self.z1 = zarr.open(self.file,mode='w')
+                self.z1.create_dataset('raw_data', shape = self.viewer.layers[raw].data.shape, dtype = 'f8', data = self.viewer.layers[raw].data)
+                self.z1.create_dataset('segmentation_data', shape = self.viewer.layers[seg].data.shape, dtype = 'i4', data = self.viewer.layers[seg].data)
+                self.z1.create_dataset('tracking_data', shape = self.viewer.layers[track].data.shape, dtype = 'i4', data = self.viewer.layers[track].data)
+            else:
+                self.z1['raw_data'][:] = self.viewer.layers[raw].data
+                self.z1['segmentation_data'][:] = self.viewer.layers[seg].data
+                self.z1['tracking_data'].resize(self.viewer.layers[track].data.shape[0],self.viewer.layers[track].data.shape[1])
+                self.z1['tracking_data'][:] = self.viewer.layers[track].data
+                #self.z1.create_dataset('tracking_data', shape = self.viewer.layers[track].data.shape, dtype = 'i4', data = self.viewer.layers[track].data)
         else: # save complete tracks layer
-            #self.z1['raw_data'][:] = self.viewer.layers[raw].data
-            self.z1['segmentation_data'][:] = self.viewer.layers[seg].data
-            self.z1['tracking_data'].resize(self.tracks.shape[0],self.tracks.shape[1])
-            self.z1['tracking_data'][:] = self.viewer.layers[track].data
-            #self.z1.create_dataset('tracking_data', shape = self.tracks.shape, dtype = 'i4', data = self.tracks)
+            if self.z1 == None:
+                dialog = QFileDialog()
+                dialog.setNameFilter('*.zarr')
+                file = dialog.getSaveFileName(self, "Select location for zarr to be created")
+                self.file = file + ".zarr"
+                self.z1 = zarr.open(self.file,mode='w')
+                self.z1.create_dataset('raw_data', shape = self.viewer.layers[raw].data.shape, dtype = 'f8', data = self.viewer.layers[raw].data)
+                self.z1.create_dataset('segmentation_data', shape = self.viewer.layers[seg].data.shape, dtype = 'i4', data = self.viewer.layers[seg].data)
+                self.z1.create_dataset('tracking_data', shape = self.tracks, dtype = 'i4', data = self.tracks)
+            else:
+                self.z1['raw_data'][:] = self.viewer.layers[raw].data
+                self.z1['segmentation_data'][:] = self.viewer.layers[seg].data
+                self.z1['tracking_data'].resize(self.tracks.shape[0],self.tracks.shape[1])
+                self.z1['tracking_data'][:] = self.tracks
+                #self.z1.create_dataset('tracking_data', shape = self.tracks.shape, dtype = 'i4', data = self.tracks)
         msg = QMessageBox()
         msg.setText("Zarr file has been saved.")
         msg.exec()
 
     def _temp(self):
+        res = np.where(self.viewer.layers[self.viewer.layers.index("Segmentation Data")].data ==1)
+        print(res)
         pass
 
     def _plot(self):
@@ -1142,43 +1110,23 @@ class MMVTracking(QWidget):
             err.setText("No label layer found!")
             err.exec()
             return
-        """i = 0
-        new_id = max(self.tracks[:,0]) + 1
-        while self.tracks[i,0] == 0: # Replace Track ID 0 as we cannot have Segmentation ID 0 (Background)
-            self.tracks[i,0] = new_id
-            i = i + 1
-        df = pd.DataFrame(self.tracks, columns=['ID', 'Z', 'Y', 'X'])
-        df.sort_values(['ID', 'Z'], ascending=True, inplace=True)
-        self.tracks = df.values
-        self.viewer.layers.remove("Tracks")
-        self.viewer.add_tracks(self.tracks,name='Tracks')
-        
-        label_layer.data[label_layer.data > 0] = label_layer.data[label_layer.data > 0] + new_id
-        for track in self.tracks:
-            label_layer.fill([track[1],track[2],track[3]],track[0])"""
-        def _test(retVal):
-            print("DONE")
-        worker = self.worker_test(label_layer)
-        worker.yielded.connect(self.viewer.add_tracks)
-        worker.returned.connect(_test)
-        worker.start()
 
-    @thread_worker
-    def worker_test(self,label_layer):
-        i = 0
-        new_id = max(self.tracks[:,0]) + 1
-        while self.tracks[i,0] == 0: # Replace Track ID 0 as we cannot have Segmentation ID 0 (Background)
-            self.tracks[i,0] = new_id
-            i = i + 1
-        df = pd.DataFrame(self.tracks, columns=['ID', 'Z', 'Y', 'X'])
-        df.sort_values(['ID', 'Z'], ascending=True, inplace=True)
-        self.tracks = df.values
-        self.viewer.layers.remove("Tracks")
-        #viewer.add_tracks(self.tracks,name='Tracks')
-        yield self.tracks
+        self.thread = QThread()
+        self.worker = Worker(label_layer,self.tracks)
+        self.worker.moveToThread(self.thread)
+        self.thread.started.connect(self.worker.run)
+        self.worker.finished.connect(self.thread.quit)
+        self.worker.finished.connect(self.worker.deleteLater)
+        self.thread.finished.connect(self.thread.deleteLater)
+        self.worker.progress.connect(self._update_progress)
+        self.worker.tracks_ready.connect(self._replace_tracks)
+        self.thread.start()
         
-        label_layer.data[label_layer.data > 0] = label_layer.data[label_layer.data > 0] + new_id
-        for track in self.tracks:
-            label_layer.fill([track[1],track[2],track[3]],track[0])
-
+    def _replace_tracks(self,tracks):
+        self.viewer.layers.remove("Tracks")
+        self.viewer.add_tracks(tracks, name='Tracks')
+            
+    def _update_progress(self,value):
+        self.pb_progress.setValue(np.rint(value))
+        
         
