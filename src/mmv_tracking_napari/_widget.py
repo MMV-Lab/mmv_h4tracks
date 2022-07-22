@@ -23,7 +23,7 @@ class MMVTracking(QWidget):
         self.z1 = None
 
         # Variables to store clicked centroids for Tracking
-        self.to_track = np.empty((1,3),dtype=np.int8)
+        self.to_track = [] #np.empty((1,3),dtype=np.int8)
         self.to_cut = np.empty((1,3),dtype=np.int8)
 
         # Variable to hold complete (corrected) tracks layer
@@ -77,13 +77,14 @@ class MMVTracking(QWidget):
         btn_grab_label = QPushButton("Select")
         btn_grab_label.setToolTip("A")
         btn_export = QPushButton("Export")
-        btn_adjust_seg_ids = QPushButton("Adjust Segmentation IDs")
+        self.btn_adjust_seg_ids = QPushButton("Adjust Segmentation IDs")
+        btn_auto_track = QPushButton("Automatic tracking")
         
         # Tooltips for Buttons
         btn_adjust_seg_ids_tip = (
             "WARNING: This will take a while"
             )
-        btn_adjust_seg_ids.setToolTip(btn_adjust_seg_ids_tip)
+        self.btn_adjust_seg_ids.setToolTip(btn_adjust_seg_ids_tip)
 
         # Linking buttons to functions
         btn_load.clicked.connect(self._load_zarr)
@@ -98,7 +99,8 @@ class MMVTracking(QWidget):
         btn_remove_correspondence.clicked.connect(self._unlink)
         btn_insert_correspondence.clicked.connect(self._link)
         btn_export.clicked.connect(self._export)
-        btn_adjust_seg_ids.clicked.connect(self._adjust_ids)
+        self.btn_adjust_seg_ids.clicked.connect(self._adjust_ids)
+        btn_auto_track.clicked.connect(self._auto_track)
        
         # Combo Boxes
         c_segmentation = QComboBox()
@@ -137,7 +139,7 @@ class MMVTracking(QWidget):
         q_seg_track.layout().addWidget(btn_segment,0,0)
         q_seg_track.layout().addWidget(btn_track,0,1)
         q_seg_track.layout().addWidget(c_segmentation,1,0)
-        q_seg_track.layout().addWidget(btn_adjust_seg_ids,2,0)
+        q_seg_track.layout().addWidget(self.btn_adjust_seg_ids,2,0)
         q_seg_track.layout().addWidget(self.pb_progress,2,1)
 
         # Loading/Saving .zarr file UI
@@ -194,6 +196,7 @@ class MMVTracking(QWidget):
         q_tracking.layout().addWidget(help_trajectory)
         q_tracking.layout().addWidget(help_remove_correspondence)
         q_tracking.layout().addWidget(help_insert_correspondence)
+        q_tracking.layout().addWidget(btn_auto_track)
 
         # Evaluation UI
         help_plot = QWidget()
@@ -413,6 +416,7 @@ class MMVTracking(QWidget):
                         msg.setText("Missing label layer")
                         msg.exec()
                         self._mouse(State.default)
+                        return
                     selected_cell = label_layer.data[int(event.position[0]),int(event.position[1]),int(event.position[2])]
                     if selected_cell == 0: # Make sure a cell has been selected
                         self.viewer.layers.selection.active.help = "NO CELL SELECTED, DO BETTER NEXT TIME!"
@@ -420,6 +424,73 @@ class MMVTracking(QWidget):
                         return
                     centroid = ndimage.center_of_mass(label_layer.data[int(event.position[0])], labels = label_layer.data[int(event.position[0])], index = selected_cell)
                     self.to_cut.append([int(event.position[0]),int(np.rint(centroid[0])),int(np.rint(centroid[1]))])
+                    
+            elif mode == State.auto_track: # Automatically track cell if condition is met
+                self.viewer.layers.selection.active.help = "(8)"
+                if isinstance(layer,napari.layers.labels.labels.Labels):
+                    layer.mode = "pan_zoom"
+                @layer.mouse_drag_callbacks.append
+                def _track(layer,event):
+                    """
+                    TODO: documentation
+                    """
+                    try:
+                        self.viewer.layers[self.viewer.layers.index("Tracks")]
+                    except ValueError:
+                        self.tracks = np.empty((1,4),dtype=np.int8)
+                    try:
+                        label_layer = self.viewer.layers[self.viewer.layers.index("Segmentation Data")]
+                    except ValueError:
+                        msg = QMessageBox()
+                        msg.setText("Missing label layer")
+                        msg.exec()
+                        self._mouse(State.default)
+                        return
+                    selected_cell = label_layer.data[int(event.position[0]),int(event.position[1]),int(event.position[2])]
+                    if selected_cell == 0: # Make sure a cell has been selected
+                        self.viewer.layers.selection.active.help = "NO CELL SELECTED, DO BETTER NEXT TIME!"
+                        self._mouse(State.default)
+                        return
+                    cell = np.where(label_layer.data[int(event.position[0])]== selected_cell)
+                    my_slice = int(event.position[0])
+                    while my_slice + 1 < len(label_layer.data):
+                        matching = label_layer.data[my_slice + 1][cell]
+                        matches = np.unique(matching,return_counts = True)
+                        maximum = np.argmax(matches[1])
+                        if matches[1][maximum] <= 0.7 * len(cell):
+                            print("ABORTING")
+                            self._mouse(State.default)
+                            return
+                        if matches[0][maximum] == 0:
+                            print("ABORTING")
+                            self._mouse(State.default)
+                            return
+                        if my_slice == int(event.position[0]):
+                            centroid = ndimage.center_of_mass(label_layer.data[my_slice], labels = label_layer.data[my_slice], index = selected_cell)
+                            self.to_track.append([my_slice,int(np.rint(centroid[0])),int(np.rint(centroid[1]))])
+                        centroid = ndimage.center_of_mass(label_layer.data[my_slice + 1], labels = label_layer.data[my_slice + 1], index = matches[0][maximum])
+                        if [my_slice+1,int(np.rint(centroid[0])),int(np.rint(centroid[1]))] in self.tracks[:,1:4].tolist():
+                            print("Found tracked cell, aborting")
+                            if (len(self.to_track)) < 5:
+                                self.to_track = []
+                                self._mouse(State.default)
+                                return
+                            else:
+                                self._link(auto = True)
+                                self._mouse(State.default)
+                                return
+                            
+                        self.to_track.append([my_slice+1,int(np.rint(centroid[0])),int(np.rint(centroid[1]))])
+                        
+                        selected_cell = matches[0][maximum]
+                        my_slice = my_slice + 1
+                        cell = np.where(label_layer.data[my_slice] == selected_cell)
+                    if len(self.to_track) < 5:
+                        self.to_track = []
+                        self._mouse(State.default)
+                        return
+                    self._link(auto = True)
+                    self._mouse(State.default)
 
     @napari.Viewer.bind_key('q')
     def _hotkey_load_zarr(self):
@@ -519,7 +590,7 @@ class MMVTracking(QWidget):
                 dialog = QFileDialog()
                 dialog.setNameFilter('*.zarr')
                 file = dialog.getSaveFileName(self, "Select location for zarr to be created")
-                self.file = file + ".zarr"
+                self.file = file #+ ".zarr"
                 self.z1 = zarr.open(self.file,mode='w')
                 self.z1.create_dataset('raw_data', shape = self.viewer.layers[raw].data.shape, dtype = 'f8', data = self.viewer.layers[raw].data)
                 self.z1.create_dataset('segmentation_data', shape = self.viewer.layers[seg].data.shape, dtype = 'i4', data = self.viewer.layers[seg].data)
@@ -535,7 +606,7 @@ class MMVTracking(QWidget):
                 dialog = QFileDialog()
                 dialog.setNameFilter('*.zarr')
                 file = dialog.getSaveFileName(self, "Select location for zarr to be created")
-                self.file = file + ".zarr"
+                self.file = file[0] + ".zarr"
                 self.z1 = zarr.open(self.file,mode='w')
                 self.z1.create_dataset('raw_data', shape = self.viewer.layers[raw].data.shape, dtype = 'f8', data = self.viewer.layers[raw].data)
                 self.z1.create_dataset('segmentation_data', shape = self.viewer.layers[seg].data.shape, dtype = 'i4', data = self.viewer.layers[seg].data)
@@ -818,7 +889,7 @@ class MMVTracking(QWidget):
     def _hotkey_link(self):
         MMVTracking.dock._link()
 
-    def _link(self):
+    def _link(self, auto = False):
         """
         Links cells together to form a track
         Records inputs on first run, creates track on second run
@@ -847,7 +918,7 @@ class MMVTracking(QWidget):
                 self.le_trajectory.setText("")
                 self._select_track()
         for i in range(len(layer.mouse_drag_callbacks)):
-            if layer.mouse_drag_callbacks[i].__name__ == "_record": # Check if we are in recording mode already
+            if layer.mouse_drag_callbacks[i].__name__ == "_record" or auto: # Check if we are in recording mode already or are in auto mode
                 if len(self.to_track) < 2: # Less than two cells can not be tracked
                     self.to_track = []
                     self._mouse(State.default)
@@ -1110,17 +1181,24 @@ class MMVTracking(QWidget):
             err.setText("No label layer found!")
             err.exec()
             return
-
+        self._toggle_adjust_button()
         self.thread = QThread()
         self.worker = Worker(label_layer,self.tracks)
         self.worker.moveToThread(self.thread)
         self.thread.started.connect(self.worker.run)
         self.worker.finished.connect(self.thread.quit)
         self.worker.finished.connect(self.worker.deleteLater)
+        self.worker.finished.connect(self._toggle_adjust_button)
         self.thread.finished.connect(self.thread.deleteLater)
         self.worker.progress.connect(self._update_progress)
         self.worker.tracks_ready.connect(self._replace_tracks)
         self.thread.start()
+    
+    def _toggle_adjust_button(self):
+        if self.btn_adjust_seg_ids.isEnabled():
+            self.btn_adjust_seg_ids.setEnabled(False)
+        else:
+            self.btn_adjust_seg_ids.setEnabled(True)
         
     def _replace_tracks(self,tracks):
         self.viewer.layers.remove("Tracks")
@@ -1129,4 +1207,7 @@ class MMVTracking(QWidget):
     def _update_progress(self,value):
         self.pb_progress.setValue(np.rint(value))
         
+    def _auto_track(self):
+        self._mouse(State.auto_track)
+        pass
         

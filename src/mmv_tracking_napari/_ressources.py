@@ -17,6 +17,7 @@ class State(enum.Enum):
     select = 5
     link = 6
     unlink = 7
+    auto_track = 8
     
 class Window(QWidget):
     def __init__(self):
