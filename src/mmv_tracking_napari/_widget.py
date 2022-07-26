@@ -432,7 +432,9 @@ class MMVTracking(QWidget):
                 @layer.mouse_drag_callbacks.append
                 def _track(layer,event):
                     """
-                    TODO: documentation
+                    Tracks selected cell auomatically until overlap is not sufficiently large anymore
+                    
+                    :param event: Mouseclick event
                     """
                     try:
                         self.viewer.layers[self.viewer.layers.index("Tracks")]
@@ -655,7 +657,7 @@ class MMVTracking(QWidget):
             axes.set_title("Speed",{"fontsize": 18,"color": "white"})
             axes.set_xlabel("Average")
             axes.set_ylabel("Standard Deviation")
-            data = axes.scatter(speed[:,1],speed[:,2],c = np.array([[0,.5,0,1]]))
+            data = axes.scatter(speed[:,1],speed[:,2],c = np.array([[0,0.240802676,0.70703125,1]]))
             self.window.layout().addWidget(QLabel("Scatterplot Standard Deviation vs Average: Speed"))
         elif self.c_plots.currentIndex() == 1: # Size metric
             self._calculate_size()
@@ -663,7 +665,7 @@ class MMVTracking(QWidget):
             axes.set_title("Size",{"fontsize": 18,"color": "white"})
             axes.set_xlabel("Average")
             axes.set_ylabel("Standard Deviation")
-            data = axes.scatter(size[:,1],size[:,2],c = np.array([[0,.5,0,1]]))
+            data = axes.scatter(size[:,1],size[:,2],c = np.array([[0,0.240802676,0.70703125,1]]))
             self.window.layout().addWidget(QLabel("Scatterplot Standard Deviation vs Average: Size"))
         selector = SelectFromCollection(self, axes, data)
         
@@ -753,6 +755,9 @@ class MMVTracking(QWidget):
                 value.append(self.size[np.where(self.size[:,0] == track)[0],2][0])
             writer.writerow(value)
         csvfile.close()
+        msg = QMessageBox()
+        msg.setText("Export complete")
+        msg.exec()
                 
 
     def _select_track(self, tracks = []):

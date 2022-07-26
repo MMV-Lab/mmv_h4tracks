@@ -48,8 +48,8 @@ class SelectFromCollection:
         from matplotlib.path import Path
         path = Path(verts)
         self.ind = np.nonzero(path.contains_points(self.xys))[0]
-        self.fc[:, :] = np.array([.8,.2,.0,1])
-        self.fc[self.ind, :] = np.array([0,.5,0,1])
+        self.fc[:, :] = np.array([0.859375,0.1953125,0.125,1]) # .8,.2,.0,1
+        self.fc[self.ind, :] = np.array([0,0.240802676,0.70703125,1]) # 0,.5,0,1
         self.collection.set_facecolors(self.fc)
         self.canvas.draw_idle()
         self.selected_coordinates = self.xys[self.ind].data
@@ -87,14 +87,39 @@ class Worker(QObject):
         df.sort_values(['ID', 'Z'], ascending=True, inplace=True)
         self.tracks = df.values
         self.tracks_ready.emit(self.tracks)
+        self.progress.emit(0)
+        for i in range(len(self.label_layer.data[:])):
+            tracks_in_layer = self.tracks[self.tracks[:,1]==i]
+            for entry in tracks_in_layer:
+                centroid = entry[2:4]
+                self.label_layer.fill([i,centroid[0],centroid[1]],entry[0] + self.new_id)
+            self.progress.emit(100*(i+0.5)/len(self.label_layer.data[:]))
+            if len(np.unique(self.label_layer.data[i])) - 1 == len(np.unique(tracks_in_layer[:,0])):
+                for entry in tracks_in_layer:
+                    centroid = entry[2:4]
+                    self.label_layer.fill([i,centroid[0],centroid[1]],entry[0])
+            else:
+                ids = np.unique(self.label_layer.data[i])
+                untracked = np.where(ids < self.new_id,ids,0)
+                untracked = untracked[untracked != 0]
+                for entry in untracked:
+                    self.label_layer.data[i] = np.where(self.label_layer.data[i] == entry,self.label_layer.data[i] + self.new_id,self.label_layer.data[i])
+                untracked = untracked + self.new_id
+                
+                for entry in tracks_in_layer:
+                    centroid = entry[2:4]
+                    self.label_layer.fill([i,centroid[0],centroid[1]],entry[0])
+                #self.label_layer.data[i] = np.where(self.label_layer.data[i] > 0,self.label_layer.data[i] + self.new_id,self.label_layer.data[i])
+            self.progress.emit(100*(i+1)/len(self.label_layer.data[:]))
+                
         
-        self.label_layer.data[self.label_layer.data > 0] = self.label_layer.data[self.label_layer.data > 0] + self.new_id
+        """self.label_layer.data[self.label_layer.data > 0] = self.label_layer.data[self.label_layer.data > 0] + self.new_id
         done = 0
         for track in self.tracks:
             self.label_layer.fill([track[1],track[2],track[3]],track[0])
             #print(100*done/len(self.tracks))
             self.progress.emit(100*done/len(self.tracks))
             #self.progress.update(100*done/len(self.tracks))
-            done = done + 1
+            done = done + 1"""
         self.finished.emit()
         
