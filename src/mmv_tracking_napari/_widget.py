@@ -32,6 +32,7 @@ class MMVTracking(QWidget):
         # Variables to hold data for plot metrics
         self.speed = []
         self.size = []
+        self.direction = []
 
         # Labels
         title = QLabel("<font color='green'>HITL4Trk</font>")
@@ -47,51 +48,77 @@ class MMVTracking(QWidget):
         grab_label = QLabel("Select label:")
 
         # Tooltips for Labels
-        load_save_tip = (
+        load_save.setToolTip(
             "Loading: Select the .zarr directory to open the file.<br><br>\n\n"
-            "Saving: Overwrites the file selected at the time of loading!"
+            "Saving: Overwrites the file selected at the time of loading, or creates a new one if none was loaded"
         )
-        load_save.setToolTip(load_save_tip)
         
 
         # Buttons
         btn_load = QPushButton("Load")
-        btn_load.setToolTip("Q")
         btn_false_positive = QPushButton("Remove")
-        btn_false_positive.setToolTip("R")
         btn_false_merge = QPushButton("Cut")
-        btn_false_merge.setToolTip("T")
         btn_false_cut = QPushButton("Merge")
-        btn_false_cut.setToolTip("Z")
         btn_remove_correspondence = QPushButton("Unlink")
-        btn_remove_correspondence.setToolTip("I")
         btn_insert_correspondence = QPushButton("Link")
-        btn_insert_correspondence.setToolTip("U")
         btn_save = QPushButton("Save")
-        btn_save.setToolTip("W")
         btn_plot = QPushButton("Plot")
         btn_segment = QPushButton("Run instance segmentation")
         btn_track = QPushButton("Run tracking")
         btn_free_label = QPushButton("Load Label")
-        btn_free_label.setToolTip("E")
         btn_grab_label = QPushButton("Select")
-        btn_grab_label.setToolTip("A")
         btn_export = QPushButton("Export")
         self.btn_adjust_seg_ids = QPushButton("Adjust Segmentation IDs")
         btn_auto_track = QPushButton("Automatic tracking")
         
         # Tooltips for Buttons
-        btn_adjust_seg_ids_tip = (
+        self.btn_adjust_seg_ids.setToolTip(
             "WARNING: This will take a while"
             )
-        self.btn_adjust_seg_ids.setToolTip(btn_adjust_seg_ids_tip)
+        btn_remove_correspondence.setToolTip(
+            "HOTKEY: I<br><br>\n\n"
+            "Delete cells from their tracks"
+        )
+        btn_insert_correspondence.setToolTip(
+            "HOTKEY: U<br><br>\n\n"
+            "Add cells to new track"
+        )
+        btn_load.setToolTip(
+            "HOTKEY: Q<br><br>\n\n"
+            "Load a zarr file"
+        )
+        btn_false_positive.setToolTip(
+            "HOTKEY: R<br><br>\n\n"
+            "Remove label from segmentation"
+        )
+        btn_false_merge.setToolTip(
+            "HOTKEY: T<br><br>\n\n"
+            "Split two separate parts of the same label into two"
+        )
+        btn_false_cut.setToolTip(
+            "HOTKEY: Z<br><br>\n\n"
+            "Merge two separate labels into one"
+        )
+        btn_save.setToolTip(
+            "HOTKEY: W<br><br>\n\n"
+            "Save zarr file"            
+        )
+        btn_free_label.setToolTip(
+            "HOTKEY: E<br><br>\n\n"
+            "Load next free segmentation label"
+        )
+        btn_grab_label.setToolTip(
+            "A<br><br>\n\n"
+            "Load selected segmentation label"
+        )
 
         # Linking buttons to functions
         btn_load.clicked.connect(self._load_zarr)
         btn_plot.clicked.connect(self._plot)
         btn_save.clicked.connect(self._save_zarr)
         btn_false_positive.clicked.connect(self._remove_fp)
-        btn_segment.clicked.connect(self._temp)
+        btn_segment.clicked.connect(self._run_segmentation)
+        btn_track.clicked.connect(self._run_tracking)
         btn_false_merge.clicked.connect(self._false_merge)
         btn_free_label.clicked.connect(self._set_free_id)
         btn_false_cut.clicked.connect(self._false_cut)
@@ -114,6 +141,7 @@ class MMVTracking(QWidget):
         c_segmentation.addItem("model 4")
         self.c_plots.addItem("speed")
         self.c_plots.addItem("size")
+        self.c_plots.addItem("direction")
 
         # Line Edits
         self.le_trajectory = QLineEdit("")
@@ -124,6 +152,7 @@ class MMVTracking(QWidget):
         # Checkboxes: off -> 0, on -> 2 if not tristate
         self.ch_speed = QCheckBox("Speed")
         self.ch_size = QCheckBox("Size")
+        self.ch_direction = QCheckBox("Direction")
         
         # Progressbar
         #self.progress = Progress()
@@ -209,6 +238,7 @@ class MMVTracking(QWidget):
         q_eval.layout().addWidget(help_plot)
         q_eval.layout().addWidget(self.ch_speed)
         q_eval.layout().addWidget(self.ch_size)
+        q_eval.layout().addWidget(self.ch_direction)
         q_eval.layout().addWidget(btn_export)
 
         # Add zones to self.toolbox
@@ -667,6 +697,14 @@ class MMVTracking(QWidget):
             axes.set_ylabel("Standard Deviation")
             data = axes.scatter(size[:,1],size[:,2],c = np.array([[0,0.240802676,0.70703125,1]]))
             self.window.layout().addWidget(QLabel("Scatterplot Standard Deviation vs Average: Size"))
+        elif self.c_plots.currentIndex() == 2: # Direction metric
+            self._calculate_travel()
+            direction = self.direction
+            axes.set_title("Direction",{"fontsize": 18,"color": "white"})
+            axes.axvline(color='white')
+            axes.axhline(color='white')
+            data = axes.scatter(direction[:,1],direction[:,2],c = np.array([[0,0.240802676,0.70703125,1]]))
+            self.window.layout().addWidget(QLabel("Scatterplot: Travel direction & Distance"))
         selector = SelectFromCollection(self, axes, data)
         
         def accept(event):
@@ -692,7 +730,7 @@ class MMVTracking(QWidget):
         """
         Exports a CSV with selected metrics 
         """
-        if not (self.ch_speed.checkState() or self.ch_size.checkState()):
+        if not (self.ch_speed.checkState() or self.ch_size.checkState() or self.ch_direction.checkState()):
             msg = QMessageBox()
             msg.setWindowTitle("No metric selected")
             msg.setText("You selected no metrics")
@@ -735,13 +773,25 @@ class MMVTracking(QWidget):
             individual_metrics.append("Standard deviation of size")
             values.append(np.average(self.size[:,1]))
             values.append(np.std(self.size[:,1]))
+        if self.ch_direction.checkState() == 2:
+            self._calculate_travel()
+            metrics.append("Average direction")
+            metrics.append("Standard deviation of direction")
+            metrics.append("Average distance")
+            metrics.append("Standard deviation of distance")
+            individual_metrics.append("Direction")
+            individual_metrics.append("Distance")
+            values.append(np.average(self.direction[:,3]))
+            values.append(np.std(self.direction[:,3]))
+            values.append(np.average(self.direction[:,4]))
+            values.append(np.std(self.direction[:,4]))
         writer.writerow(metrics)
         writer.writerow(values)
         writer.writerow([None])
         writer.writerow([None])
         
         # Stats for each individual cell
-        if not (self.ch_speed.checkState() or self.ch_size.checkState()):
+        if not (self.ch_speed.checkState() or self.ch_size.checkState() or self.ch_direction.checkState()):
             csvfile.close()
             return
         writer.writerow(individual_metrics)
@@ -753,6 +803,9 @@ class MMVTracking(QWidget):
             if self.ch_size.checkState() == 2:
                 value.append(self.size[np.where(self.size[:,0] == track)[0],1][0])
                 value.append(self.size[np.where(self.size[:,0] == track)[0],2][0])
+            if self.ch_direction.checkState() == 2:
+                value.append(self.direction[np.where(self.direction[:,0] == track)[0],3][0])
+                value.append(self.direction[np.where(self.direction[:,0] == track)[0],4][0])
             writer.writerow(value)
         csvfile.close()
         msg = QMessageBox()
@@ -1174,6 +1227,36 @@ class MMVTracking(QWidget):
                 retval = np.array([[unique_id,avg_size,std_size]])
         self.size = retval
         
+    def _calculate_travel(self):
+        """
+        Calculates direction and distance traveled for all cells
+        """
+        for unique_id in np.unique(self.tracks[:,0]):
+            track = np.delete(self.tracks,np.where(self.tracks[:,0] != unique_id),0)
+            x = track[-1,3] - track[0,3]
+            y = track[0,2] - track[-1,2]
+            if y > 0:
+                if x == 0:
+                    direction = np.pi /2
+                else:
+                    direction = np.pi - np.arctan(np.abs(y/x))
+            elif y < 0:
+                if x == 0:
+                    direction = 1.5 * np.pi
+                else:
+                    direction = np.pi - np.arctan(np.abs(y/x))
+            else:
+                if x < 0:
+                    direction = np.pi
+                else:
+                    direction = 0
+            distance = np.sqrt(np.square(x) + np.square(y))
+            try:
+                retval = np.append(retval, [[unique_id,x,y,direction,distance]],0)
+            except UnboundLocalError:
+                retval = np.array([[unique_id,x,y,direction,distance]])
+        self.direction = retval
+        
     def _adjust_ids(self):
         """
         Replaces Track ID 0 with new Track ID
@@ -1214,5 +1297,14 @@ class MMVTracking(QWidget):
         
     def _auto_track(self):
         self._mouse(State.auto_track)
-        pass
+        
+    def _run_segmentation(self):
+        msg = QMessageBox()
+        msg.setText("Not implemented yet")
+        msg.exec()
+        
+    def _run_tracking(self):
+        msg = QMessageBox()
+        msg.setText("Not implemented yet")
+        msg.exec()
         
