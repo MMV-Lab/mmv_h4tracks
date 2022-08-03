@@ -731,7 +731,7 @@ class MMVTracking(QWidget):
             data = axes.scatter(direction[:,1],direction[:,2],c = np.array([[0,0.240802676,0.70703125,1]]))
             self.window.layout().addWidget(QLabel("Scatterplot: Travel direction & Distance"))
             self.direction_tracks = self.viewer.layers[self.viewer.layers.index("Tracks")].data
-        selector = SelectFromCollection(self, axes, data)
+        selector = SelectFromCollection(self, axes, data, np.unique(direction[:,0]))
         
         def accept(event):
             """
@@ -883,7 +883,8 @@ class MMVTracking(QWidget):
                     if track[0] == tracks
                 ]
                 if not tracks_data:
-                    print("No tracking data found for id " + str(track))
+                    print("No tracking data found for id " + str(tracks) + ", displaying all tracks instead")
+                    self.viewer.add_tracks(self.tracks, name='Tracks')
                     return
                 self.viewer.add_tracks(tracks_data, name='Tracks')
             self._mouse(State.default)
