@@ -33,6 +33,11 @@ class MMVTracking(QWidget):
         self.speed = []
         self.size = []
         self.direction = []
+        
+        # Variables to hold state of layers from when metrics were last run
+        self.speed_tracks = []
+        self.size_seg = []
+        self.direction_tracks = []
 
         # Labels
         title = QLabel("<font color='green'>HITL4Trk</font>")
@@ -46,6 +51,7 @@ class MMVTracking(QWidget):
         insert_correspondence = QLabel("ID should be tracked with second ID:")
         metric = QLabel("Evaluation metrics:")
         grab_label = QLabel("Select label:")
+        progress_description = QLabel("Descriptive Description")
 
         # Tooltips for Labels
         load_save.setToolTip(
@@ -108,7 +114,7 @@ class MMVTracking(QWidget):
             "Load next free segmentation label"
         )
         btn_grab_label.setToolTip(
-            "A<br><br>\n\n"
+            "HOTKEY: A<br><br>\n\n"
             "Load selected segmentation label"
         )
 
@@ -157,6 +163,7 @@ class MMVTracking(QWidget):
         # Progressbar
         #self.progress = Progress()
         self.pb_progress = QProgressBar()
+        self.pb_global_progress = QProgressBar()
         #self.progress.bind_to(self._update_progress)
         
         # Tool Box
@@ -246,6 +253,13 @@ class MMVTracking(QWidget):
         self.toolbox.addItem(q_segmentation, "Segmentation correction")
         self.toolbox.addItem(q_tracking, "Tracking correction")
         self.toolbox.addItem(q_eval, "Evaluation")
+        
+        # Progress UI
+        help_progress = QWidget()
+        help_progress.setLayout(QVBoxLayout())
+        help_progress.layout().addWidget(progress_description)
+        help_progress.layout().addWidget(self.pb_global_progress)
+        self.pb_global_progress.setValue(50)
 
         # Assemble UI elements in ScrollArea
         scroll_area = QScrollArea()
@@ -253,6 +267,7 @@ class MMVTracking(QWidget):
         scroll_area.layout().addWidget(title)
         scroll_area.layout().addWidget(q_load)
         scroll_area.layout().addWidget(self.toolbox)
+        scroll_area.layout().addWidget(help_progress)
 
         # Set ScrollArea as content of plugin
         self.setLayout(QVBoxLayout())
@@ -567,10 +582,15 @@ class MMVTracking(QWidget):
         try:
             self.viewer.add_image(self.z1['raw_data'][:], name = 'Raw Image')
             self.viewer.add_labels(self.z1['segmentation_data'][:], name = 'Segmentation Data')
-            self.viewer.add_tracks(self.z1['tracking_data'][:], name = 'Tracks') # Use graph argument for inheritance (https://napari.org/howtos/layers/tracks.html)
+            #self.viewer.add_tracks(self.z1['tracking_data'][:], name = 'Tracks') # Use graph argument for inheritance (https://napari.org/howtos/layers/tracks.html)
             self.tracks = self.z1['tracking_data'][:] # Cache data of tracks layer
         except:
             print("File is either no Zarr file or does not adhere to required structure")
+        else:
+            tmp = np.unique(self.tracks[:,0],return_counts = True) # Count occurrences of each id
+            tmp = np.delete(tmp,tmp[1] == 1,1)
+            self.tracks = np.delete(self.tracks,np.where(np.isin(self.tracks[:,0],tmp[0,:],invert=True)),0) # Remove tracks of length <2
+            self.viewer.add_tracks(self.tracks, name='Tracks')
         self._mouse(State.default)
     
     @napari.Viewer.bind_key('w')
@@ -682,29 +702,35 @@ class MMVTracking(QWidget):
         self.window.setLayout(QVBoxLayout())
         
         if self.c_plots.currentIndex() == 0: # Speed metric
-            self._calculate_speed()
+            if not (type(self.speed) == np.ndarray and np.array_equal(self.viewer.layers[self.viewer.layers.index("Tracks")].data,self.speed_tracks)):
+                self._calculate_speed()
             speed = self.speed
             axes.set_title("Speed",{"fontsize": 18,"color": "white"})
             axes.set_xlabel("Average")
             axes.set_ylabel("Standard Deviation")
             data = axes.scatter(speed[:,1],speed[:,2],c = np.array([[0,0.240802676,0.70703125,1]]))
             self.window.layout().addWidget(QLabel("Scatterplot Standard Deviation vs Average: Speed"))
+            self.speed_tracks = self.viewer.layers[self.viewer.layers.index("Tracks")].data
         elif self.c_plots.currentIndex() == 1: # Size metric
-            self._calculate_size()
+            if not (type(self.size) == np.ndarray and np.array_equal(self.viewer.layers[self.viewer.layers.index("Segmentation Data")].data,self.size_seg)):
+                self._calculate_size()
             size = self.size
             axes.set_title("Size",{"fontsize": 18,"color": "white"})
             axes.set_xlabel("Average")
             axes.set_ylabel("Standard Deviation")
             data = axes.scatter(size[:,1],size[:,2],c = np.array([[0,0.240802676,0.70703125,1]]))
             self.window.layout().addWidget(QLabel("Scatterplot Standard Deviation vs Average: Size"))
+            self.size_seg = self.viewer.layers[self.viewer.layers.index("Segmentation Data")].data
         elif self.c_plots.currentIndex() == 2: # Direction metric
-            self._calculate_travel()
+            if not (type(self.direction) == np.ndarray and np.array_equal(self.viewer.layers[self.viewer.layers.index("Tracks")].data,self.direction_tracks)):
+                self._calculate_travel()
             direction = self.direction
             axes.set_title("Direction",{"fontsize": 18,"color": "white"})
             axes.axvline(color='white')
             axes.axhline(color='white')
             data = axes.scatter(direction[:,1],direction[:,2],c = np.array([[0,0.240802676,0.70703125,1]]))
             self.window.layout().addWidget(QLabel("Scatterplot: Travel direction & Distance"))
+            self.direction_tracks = self.viewer.layers[self.viewer.layers.index("Tracks")].data
         selector = SelectFromCollection(self, axes, data)
         
         def accept(event):
@@ -719,7 +745,6 @@ class MMVTracking(QWidget):
                 fig.canvas.draw()
                 
         fig.canvas.mpl_connect("key_press_event",accept)
-        #axes.set_title("Press enter to accept selected points.")
         self.window.layout().addWidget(canvas)
         btn_apply = QPushButton("Apply")
         btn_apply.clicked.connect(selector.apply)
@@ -758,7 +783,8 @@ class MMVTracking(QWidget):
         individual_metrics = ["ID"]
         values = [len(np.unique(self.tracks[:,0]))]
         if self.ch_speed.checkState() == 2:
-            self._calculate_speed()
+            if not (type(self.speed) == np.ndarray and np.array_equal(self.viewer.layers[self.viewer.layers.index("Tracks")].data,self.speed_tracks)):
+                self._calculate_speed()
             metrics.append("Average speed")
             metrics.append("Standard deviation of speed")
             individual_metrics.append("Average speed")
@@ -766,7 +792,8 @@ class MMVTracking(QWidget):
             values.append(np.average(self.speed[:,1]))
             values.append(np.std(self.speed[:,1]))
         if self.ch_size.checkState() == 2:
-            self._calculate_size()
+            if not (type(self.size) == np.ndarray and np.array_equal(self.viewer.layers[self.viewer.layers.index("Segmentation Data")].data,self.size_seg)):
+                self._calculate_size()
             metrics.append("Average size")
             metrics.append("Standard deviation of size")
             individual_metrics.append("Average size")
@@ -774,7 +801,8 @@ class MMVTracking(QWidget):
             values.append(np.average(self.size[:,1]))
             values.append(np.std(self.size[:,1]))
         if self.ch_direction.checkState() == 2:
-            self._calculate_travel()
+            if not (type(self.direction) == np.ndarray and np.array_equal(self.viewer.layers[self.viewer.layers.index("Tracks")].data,self.direction_tracks)):
+                self._calculate_travel()
             metrics.append("Average direction")
             metrics.append("Standard deviation of direction")
             metrics.append("Average distance")
@@ -1186,8 +1214,8 @@ class MMVTracking(QWidget):
             distance = []
             for i in range(0,len(track)-1):
                 distance.append(np.hypot(track[i,2] - track[i+1,2],track[i,3] - track[i+1,3]))
-            avg_speed = np.average(distance)
-            std_speed = np.std(distance)
+            avg_speed = np.around(np.average(distance),3)
+            std_speed = np.around(np.std(distance),3)
             try:
                 retval = np.append(retval, [[unique_id,avg_speed,std_speed]],0)
             except UnboundLocalError:
@@ -1213,14 +1241,14 @@ class MMVTracking(QWidget):
             err.setText("No label layer found!")
             err.exec()
             return
-        for unique_id in np.unique(self.tracks[:,0]):
+        for unique_id in np.unique(self.tracks[:,0]): 
             track = np.delete(self.tracks,np.where(self.tracks[:,0] != unique_id),0)
             size = []
             for i in range(0,len(track)-1):
                 seg_id = label_layer.data[track[i,1],track[i,2],track[i,3]]
                 size.append(len(np.where(label_layer.data[track[i,1]] == seg_id)[0]))
-            avg_size = np.average(size)
-            std_size = np.std(size)
+            avg_size = np.around(np.average(size),3)
+            std_size = np.around(np.std(size),3)
             try:
                 retval = np.append(retval, [[unique_id,avg_size,std_size]],0)
             except UnboundLocalError:
@@ -1250,7 +1278,7 @@ class MMVTracking(QWidget):
                     direction = np.pi
                 else:
                     direction = 0
-            distance = np.sqrt(np.square(x) + np.square(y))
+            distance = np.around(np.sqrt(np.square(x) + np.square(y)),2)
             try:
                 retval = np.append(retval, [[unique_id,x,y,direction,distance]],0)
             except UnboundLocalError:
@@ -1269,24 +1297,32 @@ class MMVTracking(QWidget):
             err.setText("No label layer found!")
             err.exec()
             return
-        self._toggle_adjust_button()
+        self.btn_adjust_seg_ids.setEnabled(False)
         self.thread = QThread()
         self.worker = Worker(label_layer,self.tracks)
         self.worker.moveToThread(self.thread)
         self.thread.started.connect(self.worker.run)
         self.worker.finished.connect(self.thread.quit)
         self.worker.finished.connect(self.worker.deleteLater)
-        self.worker.finished.connect(self._toggle_adjust_button)
+        self.worker.finished.connect(self._enable_adjust_button)
         self.thread.finished.connect(self.thread.deleteLater)
         self.worker.progress.connect(self._update_progress)
         self.worker.tracks_ready.connect(self._replace_tracks)
         self.thread.start()
+        """
+        self.thread2 = QThread()
+        from._ressources import Worker2
+        self.worker2 = Worker2([function],label_layer,self.tracks)
+        self.worker2.moteToThread(self.thread2)
+        self.thread2.started.connect(self.worker2.run)
+        self.worker2.finished.connect(self.thread2.quit)
+        self.worker2.finished.connect(self.worker2.deleteLater)
+        self.thread2.finished.connect(self.thread2.deleteLater)
+        self.thread2.start()
+        """
     
-    def _toggle_adjust_button(self):
-        if self.btn_adjust_seg_ids.isEnabled():
-            self.btn_adjust_seg_ids.setEnabled(False)
-        else:
-            self.btn_adjust_seg_ids.setEnabled(True)
+    def _enable_adjust_button(self):
+        self.btn_adjust_seg_ids.setEnabled(True)
         
     def _replace_tracks(self,tracks):
         self.viewer.layers.remove("Tracks")
