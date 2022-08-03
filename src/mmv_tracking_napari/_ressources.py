@@ -70,6 +70,7 @@ class SelectFromCollection:
         
 class Worker(QObject):
     tracks_ready = pyqtSignal(np.ndarray)
+    starting = pyqtSignal()
     finished = pyqtSignal()
     progress = pyqtSignal(float)
     def __init__(self,label_layer,tracks):
@@ -123,3 +124,18 @@ class Worker(QObject):
             done = done + 1"""
         self.finished.emit()
         
+class Worker2(QObject):
+    value = pyqtSignal(object)
+    starting = pyqtSignal()
+    finished = pyqtSignal()
+    def __init__(self, function, *args):
+        super().__init__()
+        self.function = function
+        self.args = args
+    
+    def run(self):
+        self.starting.emit()
+        self.function(self.args)
+        self.finished.emit()
+    
+    
