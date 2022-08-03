@@ -24,11 +24,12 @@ class Window(QWidget):
         super().__init__()
         
 class SelectFromCollection:
-    def __init__(self, parent, ax, collection, alpha_other=0.3):
+    def __init__(self, parent, ax, collection, track_ids, alpha_other=0.3):
         self.canvas = ax.figure.canvas
         self.collection = collection
         self.alpha_other = alpha_other
         self.parent = parent
+        self.track_ids = track_ids
         
         self.xys = collection.get_offsets()
         self.Npts = len(self.xys)
@@ -63,8 +64,8 @@ class SelectFromCollection:
     def apply(self):
         if self.ind == []:
             self.ind = -1
-        if min(self.parent.tracks[:,0] > 0):
-            self.ind = self.ind + 1
+        else:
+            self.ind = self.track_ids[self.ind]
         self.parent._select_track(self.ind)
         self.parent.window.close()
         
