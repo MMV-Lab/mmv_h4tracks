@@ -125,10 +125,98 @@ class Worker(QObject):
             done = done + 1"""
         self.finished.emit()
         
-class Worker2(QObject):
+class AdjustTracksWorker(QObject):
+    tracks_ready = pyqtSignal(np.ndarray)
+    starting = pyqtSignal()
+    finished = pyqtSignal()
+    status = pyqtSignal(str)
+    progress = pyqtSignal(float)
+    def __init__(self,parent,tracks):
+        super().__init__()
+        self.parent = parent
+        self.tracks = tracks
+    
+    def run(self):
+        self.starting.emit()
+        self.status.emit("Adjusting Tracks")
+        i = 0
+        self.new_id = max(self.tracks[:,0]) + 1
+        self.parent.new_id = self.new_id
+        while self.tracks[i,0] == 0: # Replace Track ID 0 as we cannot have Segmentation ID 0 (Background)
+            self.tracks[i,0] = self.new_id
+            i = i + 1
+            self.progress.emit(i/len(self.tracks)*100)
+        df = pd.DataFrame(self.tracks, columns=['ID', 'Z', 'Y', 'X'])
+        df.sort_values(['ID', 'Z'], ascending=True, inplace=True)
+        self.tracks = df.values
+        self.tracks_ready.emit(self.tracks)
+        self.status.emit("Done")
+        self.finished.emit()
+        
+class AdjustSegWorker(QObject):
+    starting = pyqtSignal()
+    finished = pyqtSignal()
+    status = pyqtSignal(tuple)
+    progress = pyqtSignal(tuple)
+    def __init__(self,parent,label_layer,tracks,start,end,worker_id):
+        super().__init__()
+        self.label_layer = label_layer
+        self.tracks = tracks
+        self.parent = parent
+        self.start = start
+        self.end = end
+        self.worker_id = worker_id
+    
+    def run(self):
+        self.starting.emit()
+        self.status.emit(("Adjusting Segmentation IDs",self.worker_id-1))
+        self.progress.emit((0,self.worker_id-1))
+        self.new_id = self.parent.new_id
+        
+        
+        for i in range(self.start,self.end):
+            print("Thread " + str(self.worker_id) + ": Adjusting Slice " + str(i))
+        #for i in range(len(self.label_layer.data[:])):
+            tracks_in_layer = self.tracks[self.tracks[:,1]==i]
+            for entry in tracks_in_layer:
+                centroid = entry[2:4]
+                self.label_layer.fill([i,centroid[0],centroid[1]],entry[0] + self.new_id)
+            self.progress.emit((100*(i-self.start+0.5)/(self.end-self.start),self.worker_id-1))   #len(self.label_layer.data[:]))
+            if len(np.unique(self.label_layer.data[i])) - 1 == len(np.unique(tracks_in_layer[:,0])):
+                for entry in tracks_in_layer:
+                    centroid = entry[2:4]
+                    self.label_layer.fill([i,centroid[0],centroid[1]],entry[0])
+            else:
+                ids = np.unique(self.label_layer.data[i])
+                untracked = np.where(ids < self.new_id,ids,0)
+                untracked = untracked[untracked != 0]
+                for entry in untracked:
+                    self.label_layer.data[i] = np.where(self.label_layer.data[i] == entry,self.label_layer.data[i] + self.new_id,self.label_layer.data[i])
+                untracked = untracked + self.new_id
+                
+                for entry in tracks_in_layer:
+                    centroid = entry[2:4]
+                    self.label_layer.fill([i,centroid[0],centroid[1]],entry[0])
+                #self.label_layer.data[i] = np.where(self.label_layer.data[i] > 0,self.label_layer.data[i] + self.new_id,self.label_layer.data[i])
+            self.progress.emit((100*(i-self.start+1)/(self.end-self.start),self.worker_id-1))   #len(self.label_layer.data[:]))
+                
+        
+        """self.label_layer.data[self.label_layer.data > 0] = self.label_layer.data[self.label_layer.data > 0] + self.new_id
+        done = 0
+        for track in self.tracks:
+            self.label_layer.fill([track[1],track[2],track[3]],track[0])
+            #print(100*done/len(self.tracks))
+            self.progress.emit(100*done/len(self.tracks))
+            #self.progress.update(100*done/len(self.tracks))
+            done = done + 1"""
+        self.status.emit(("Done",self.worker_id-1))
+        self.finished.emit()
+        
+class GenericWorker(QObject):
     value = pyqtSignal(object)
     starting = pyqtSignal()
     finished = pyqtSignal()
+    progress = pyqtSignal(float)
     def __init__(self, function, *args):
         super().__init__()
         self.function = function
@@ -136,7 +224,7 @@ class Worker2(QObject):
     
     def run(self):
         self.starting.emit()
-        self.function(self.args)
+        self.value.emit(self.function(self.args))
         self.finished.emit()
     
     
