@@ -9,7 +9,7 @@ from qtpy.QtWidgets import (QCheckBox, QComboBox, QFileDialog, QGridLayout, QHBo
                             QScrollArea, QToolBox, QVBoxLayout, QWidget)
 from scipy import ndimage
 
-from ._ressources import State, Window, SelectFromCollection, Worker
+from ._ressources import State, Window, SelectFromCollection, Worker, AdjustSegWorker, AdjustTracksWorker
 
         
 class MMVTracking(QWidget):
@@ -38,20 +38,22 @@ class MMVTracking(QWidget):
         self.speed_tracks = []
         self.size_seg = []
         self.direction_tracks = []
-
+        
         # Labels
         title = QLabel("<font color='green'>HITL4Trk</font>")
         next_free = QLabel("Next free label:")
         trajectory = QLabel("Select ID for trajectory:")
         load_save = QLabel("Load/Save .zarr file:")
         false_positive = QLabel("Remove false positive for ID:")
-        false_merge = QLabel("Cut falsely merged ID:")
+        false_merge = QLabel("Separate falsely merged ID:")
         false_cut = QLabel("Merge falsely cut ID and second ID:")
         remove_correspondence = QLabel("Remove tracking for later Slices for ID:")
         insert_correspondence = QLabel("ID should be tracked with second ID:")
         metric = QLabel("Evaluation metrics:")
         grab_label = QLabel("Select label:")
-        progress_description = QLabel("Descriptive Description")
+        self.progress_description = QLabel("Descriptive Description")
+        self.progress_state = QLabel("")
+        self.progress_info = QLabel("")
 
         # Tooltips for Labels
         load_save.setToolTip(
@@ -63,9 +65,9 @@ class MMVTracking(QWidget):
         # Buttons
         btn_load = QPushButton("Load")
         btn_false_positive = QPushButton("Remove")
-        btn_false_merge = QPushButton("Cut")
+        btn_false_merge = QPushButton("Separate")
         btn_false_cut = QPushButton("Merge")
-        btn_remove_correspondence = QPushButton("Unlink")
+        self.btn_remove_correspondence = QPushButton("Unlink")
         btn_insert_correspondence = QPushButton("Link")
         btn_save = QPushButton("Save")
         btn_plot = QPushButton("Plot")
@@ -81,7 +83,7 @@ class MMVTracking(QWidget):
         self.btn_adjust_seg_ids.setToolTip(
             "WARNING: This will take a while"
             )
-        btn_remove_correspondence.setToolTip(
+        self.btn_remove_correspondence.setToolTip(
             "HOTKEY: I<br><br>\n\n"
             "Delete cells from their tracks"
         )
@@ -129,7 +131,7 @@ class MMVTracking(QWidget):
         btn_free_label.clicked.connect(self._set_free_id)
         btn_false_cut.clicked.connect(self._false_cut)
         btn_grab_label.clicked.connect(self._grab_label)
-        btn_remove_correspondence.clicked.connect(self._unlink)
+        self.btn_remove_correspondence.clicked.connect(self._unlink)
         btn_insert_correspondence.clicked.connect(self._link)
         btn_export.clicked.connect(self._export)
         self.btn_adjust_seg_ids.clicked.connect(self._adjust_ids)
@@ -222,7 +224,7 @@ class MMVTracking(QWidget):
         help_remove_correspondence = QWidget()
         help_remove_correspondence.setLayout(QHBoxLayout())
         help_remove_correspondence.layout().addWidget(remove_correspondence)
-        help_remove_correspondence.layout().addWidget(btn_remove_correspondence)
+        help_remove_correspondence.layout().addWidget(self.btn_remove_correspondence)
         help_insert_correspondence = QWidget()
         help_insert_correspondence.setLayout(QHBoxLayout())
         help_insert_correspondence.layout().addWidget(insert_correspondence)
@@ -257,9 +259,11 @@ class MMVTracking(QWidget):
         # Progress UI
         help_progress = QWidget()
         help_progress.setLayout(QVBoxLayout())
-        help_progress.layout().addWidget(progress_description)
+        help_progress.layout().addWidget(self.progress_description)
         help_progress.layout().addWidget(self.pb_global_progress)
-        self.pb_global_progress.setValue(50)
+        self.pb_global_progress.setValue(100)
+        help_progress.layout().addWidget(self.progress_state)
+        help_progress.layout().addWidget(self.progress_info)
 
         # Assemble UI elements in ScrollArea
         scroll_area = QScrollArea()
@@ -442,6 +446,10 @@ class MMVTracking(QWidget):
                         return
                     centroid = ndimage.center_of_mass(label_layer.data[int(event.position[0])], labels = label_layer.data[int(event.position[0])], index = selected_cell)
                     self.to_track.append([int(event.position[0]),int(np.rint(centroid[0])),int(np.rint(centroid[1]))])
+                    if self.progress_info.text():
+                        self.progress_info.setText(self.progress_info.text() + ", " + str(int(event.position[0])))
+                    else:
+                        self.progress_info.setText(str(int(event.position[0])))
 
             elif mode == State.unlink: # Removes Track -- Removes cells from track
                 self.viewer.layers.selection.active.help = "(7)"
@@ -469,6 +477,10 @@ class MMVTracking(QWidget):
                         return
                     centroid = ndimage.center_of_mass(label_layer.data[int(event.position[0])], labels = label_layer.data[int(event.position[0])], index = selected_cell)
                     self.to_cut.append([int(event.position[0]),int(np.rint(centroid[0])),int(np.rint(centroid[1]))])
+                    if self.progress_info.text():
+                        self.progress_info.setText(self.progress_info.text() + ", "+ str(int(event.position[0])))
+                    else:
+                        self.progress_info.setText(str(int(event.position[0])))
                     
             elif mode == State.auto_track: # Automatically track cell if condition is met
                 self.viewer.layers.selection.active.help = "(8)"
@@ -705,6 +717,7 @@ class MMVTracking(QWidget):
             if not (type(self.speed) == np.ndarray and np.array_equal(self.viewer.layers[self.viewer.layers.index("Tracks")].data,self.speed_tracks)):
                 self._calculate_speed()
             speed = self.speed
+            unique_ids = np.unique(speed[:,0])
             axes.set_title("Speed",{"fontsize": 18,"color": "white"})
             axes.set_xlabel("Average")
             axes.set_ylabel("Standard Deviation")
@@ -715,6 +728,7 @@ class MMVTracking(QWidget):
             if not (type(self.size) == np.ndarray and np.array_equal(self.viewer.layers[self.viewer.layers.index("Segmentation Data")].data,self.size_seg)):
                 self._calculate_size()
             size = self.size
+            unique_ids = np.unique(size[:,0])
             axes.set_title("Size",{"fontsize": 18,"color": "white"})
             axes.set_xlabel("Average")
             axes.set_ylabel("Standard Deviation")
@@ -725,13 +739,14 @@ class MMVTracking(QWidget):
             if not (type(self.direction) == np.ndarray and np.array_equal(self.viewer.layers[self.viewer.layers.index("Tracks")].data,self.direction_tracks)):
                 self._calculate_travel()
             direction = self.direction
+            unique_ids = np.unique(direction[:,0])
             axes.set_title("Direction",{"fontsize": 18,"color": "white"})
             axes.axvline(color='white')
             axes.axhline(color='white')
             data = axes.scatter(direction[:,1],direction[:,2],c = np.array([[0,0.240802676,0.70703125,1]]))
             self.window.layout().addWidget(QLabel("Scatterplot: Travel direction & Distance"))
             self.direction_tracks = self.viewer.layers[self.viewer.layers.index("Tracks")].data
-        selector = SelectFromCollection(self, axes, data, np.unique(direction[:,0]))
+        selector = SelectFromCollection(self, axes, data, unique_ids)
         
         def accept(event):
             """
@@ -1009,6 +1024,8 @@ class MMVTracking(QWidget):
                 if len(self.to_track) < 2: # Less than two cells can not be tracked
                     self.to_track = []
                     self._mouse(State.default)
+                    self._set_state()
+                    self._set_state_info()
                     return
                 if len(np.asarray(self.to_track)[:,0]) != len(set(np.asarray(self.to_track)[:,0])): # Check for duplicates
                     msg = QMessageBox()
@@ -1018,6 +1035,8 @@ class MMVTracking(QWidget):
                     msg.exec()
                     self.to_track = []
                     self._mouse(State.default)
+                    self._set_state()
+                    self._set_state_info()
                     return
                 self.to_track.sort()
                 try: # Check if tracks layer must be created
@@ -1059,10 +1078,13 @@ class MMVTracking(QWidget):
                 self.tracks = df.values
                 self.viewer.add_tracks(df.values, name='Tracks')
                 self._mouse(State.default)
+                self._set_state()
+                self._set_state_info()
                 return
         self.viewer.layers.selection.active.help = ""
         self.to_track = []
         self._mouse(State.link)
+        self._set_state("Selected cells to link in slices:")
 
     @napari.Viewer.bind_key('i')
     def _hotkey_unlink(self):
@@ -1098,6 +1120,9 @@ class MMVTracking(QWidget):
                     msg.exec()
                     self.to_cut = []
                     self._mouse(State.default)
+                    self._switch_button()
+                    self._set_state()
+                    self._set_state_info()
                     return
                 self.to_cut.sort()
                 track = 0
@@ -1153,9 +1178,20 @@ class MMVTracking(QWidget):
                 self.viewer.layers.remove('Tracks')
                 self.viewer.add_tracks(tracks, name='Tracks')
                 self._mouse(State.default)
+                self._switch_button()
+                self._set_state()
+                self._set_state_info()
                 return
         self.to_cut = []
         self._mouse(State.unlink)
+        self._switch_button()
+        self._set_state("Selected cells to unlink in slices:")
+        
+    def _switch_button(self):
+        if not self.btn_remove_correspondence.text() == "Unlink":
+            self.btn_remove_correspondence.setText("Unlink")
+        else:
+            self.btn_remove_correspondence.setText("Confirm")
             
     @napari.Viewer.bind_key('x')
     def _default_hotkey(self):
@@ -1299,38 +1335,152 @@ class MMVTracking(QWidget):
             err.exec()
             return
         self.btn_adjust_seg_ids.setEnabled(False)
-        self.thread = QThread()
-        self.worker = Worker(label_layer,self.tracks)
-        self.worker.moveToThread(self.thread)
-        self.thread.started.connect(self.worker.run)
-        self.worker.finished.connect(self.thread.quit)
+        
+        self.prog = [0] * 8
+        self.desc = [""] * 8
+        self.new_id = 0
+        self.completed = 0
+        
+        self.thread1 = QThread()
+        self.thread2 = QThread()
+        self.thread3 = QThread()
+        self.thread4 = QThread()
+        self.thread5 = QThread()
+        self.thread6 = QThread()
+        self.thread7 = QThread()
+        self.thread8 = QThread()
+        
+        self.thread1.finished.connect(self.thread1.deleteLater)
+        self.thread2.finished.connect(self.thread2.deleteLater)
+        self.thread3.finished.connect(self.thread3.deleteLater)
+        self.thread4.finished.connect(self.thread4.deleteLater)
+        self.thread5.finished.connect(self.thread5.deleteLater)
+        self.thread6.finished.connect(self.thread6.deleteLater)
+        self.thread7.finished.connect(self.thread7.deleteLater)
+        self.thread8.finished.connect(self.thread8.deleteLater)
+        
+        self.tracks_worker = AdjustTracksWorker(self,self.tracks)
+        self.tracks_worker.moveToThread(self.thread1)
+        self.thread1.started.connect(self.tracks_worker.run)
+        self.tracks_worker.progress.connect(self._update_progress)
+        self.tracks_worker.tracks_ready.connect(self._replace_tracks)
+        self.tracks_worker.finished.connect(self.thread2.start)
+        self.tracks_worker.finished.connect(self.thread3.start)
+        self.tracks_worker.finished.connect(self.thread4.start)
+        self.tracks_worker.finished.connect(self.thread5.start)
+        self.tracks_worker.finished.connect(self.thread6.start)
+        self.tracks_worker.finished.connect(self.thread7.start)
+        self.tracks_worker.finished.connect(self.thread8.start)
+        self.tracks_worker.status.connect(self._set_description)
+        self.tracks_worker.finished.connect(self.tracks_worker.deleteLater)
+        
+        key_ids = [1]
+        for i in range(1,8):
+            key_ids.append(key_ids[-1] + int(len(label_layer.data)/8) + (len(label_layer.data)%8 > i))
+            i = i + 1
+        key_ids.append(len(label_layer.data))
+        
+        self.seg_worker1 = AdjustSegWorker(self,label_layer,self.tracks,key_ids[0],key_ids[1],1)
+        self.seg_worker2 = AdjustSegWorker(self,label_layer,self.tracks,key_ids[1],key_ids[2],2)
+        self.seg_worker3 = AdjustSegWorker(self,label_layer,self.tracks,key_ids[2],key_ids[3],3)
+        self.seg_worker4 = AdjustSegWorker(self,label_layer,self.tracks,key_ids[3],key_ids[4],4)
+        self.seg_worker5 = AdjustSegWorker(self,label_layer,self.tracks,key_ids[4],key_ids[5],5)
+        self.seg_worker6 = AdjustSegWorker(self,label_layer,self.tracks,key_ids[5],key_ids[6],6)
+        self.seg_worker7 = AdjustSegWorker(self,label_layer,self.tracks,key_ids[6],key_ids[7],7)
+        self.seg_worker8 = AdjustSegWorker(self,label_layer,self.tracks,key_ids[7],key_ids[8],8)
+        
+        self.seg_worker1.moveToThread(self.thread1)
+        self.seg_worker2.moveToThread(self.thread2)
+        self.seg_worker3.moveToThread(self.thread3)
+        self.seg_worker4.moveToThread(self.thread4)
+        self.seg_worker5.moveToThread(self.thread5)
+        self.seg_worker6.moveToThread(self.thread6)
+        self.seg_worker7.moveToThread(self.thread7)
+        self.seg_worker8.moveToThread(self.thread8)
+        
+        self.tracks_worker.finished.connect(self.seg_worker1.run)
+        self.thread2.started.connect(self.seg_worker2.run)
+        self.thread3.started.connect(self.seg_worker3.run)
+        self.thread4.started.connect(self.seg_worker4.run)
+        self.thread5.started.connect(self.seg_worker5.run)
+        self.thread6.started.connect(self.seg_worker6.run)
+        self.thread7.started.connect(self.seg_worker7.run)
+        self.thread8.started.connect(self.seg_worker8.run)
+        
+        self.seg_worker1.progress.connect(self._multithread_progress)        
+        self.seg_worker2.progress.connect(self._multithread_progress)        
+        self.seg_worker3.progress.connect(self._multithread_progress)        
+        self.seg_worker4.progress.connect(self._multithread_progress)        
+        self.seg_worker5.progress.connect(self._multithread_progress)        
+        self.seg_worker6.progress.connect(self._multithread_progress)        
+        self.seg_worker7.progress.connect(self._multithread_progress)        
+        self.seg_worker8.progress.connect(self._multithread_progress)
+        
+        self.seg_worker1.status.connect(self._multithread_description)
+        self.seg_worker2.status.connect(self._multithread_description)
+        self.seg_worker3.status.connect(self._multithread_description)
+        self.seg_worker4.status.connect(self._multithread_description)
+        self.seg_worker5.status.connect(self._multithread_description)
+        self.seg_worker6.status.connect(self._multithread_description)
+        self.seg_worker7.status.connect(self._multithread_description)
+        self.seg_worker8.status.connect(self._multithread_description)
+        
+        self.seg_worker1.finished.connect(self.seg_worker1.deleteLater)
+        self.seg_worker2.finished.connect(self.seg_worker2.deleteLater)
+        self.seg_worker3.finished.connect(self.seg_worker3.deleteLater)
+        self.seg_worker4.finished.connect(self.seg_worker4.deleteLater)
+        self.seg_worker5.finished.connect(self.seg_worker5.deleteLater)
+        self.seg_worker6.finished.connect(self.seg_worker6.deleteLater)
+        self.seg_worker7.finished.connect(self.seg_worker7.deleteLater)
+        self.seg_worker8.finished.connect(self.seg_worker8.deleteLater)
+        
+        self.seg_worker1.finished.connect(self.thread1.quit)
+        self.seg_worker2.finished.connect(self.thread2.quit)
+        self.seg_worker3.finished.connect(self.thread3.quit)
+        self.seg_worker4.finished.connect(self.thread4.quit)
+        self.seg_worker5.finished.connect(self.thread5.quit)
+        self.seg_worker6.finished.connect(self.thread6.quit)
+        self.seg_worker7.finished.connect(self.thread7.quit)
+        self.seg_worker8.finished.connect(self.thread8.quit)
+        
+        self.thread1.finished.connect(self._enable_adjust_button)
+        self.thread2.finished.connect(self._enable_adjust_button)
+        self.thread3.finished.connect(self._enable_adjust_button)
+        self.thread4.finished.connect(self._enable_adjust_button)
+        self.thread5.finished.connect(self._enable_adjust_button)
+        self.thread6.finished.connect(self._enable_adjust_button)
+        self.thread7.finished.connect(self._enable_adjust_button)
+        self.thread8.finished.connect(self._enable_adjust_button)
+        
+        
+        
+        self.thread1.start()
+        """self.worker = Worker(label_layer,self.tracks)
+        self.worker.moveToThread(self.thread1)
+        self.thread1.started.connect(self.worker.run)
+        self.worker.finished.connect(self.thread1.quit)
         self.worker.finished.connect(self.worker.deleteLater)
         self.worker.finished.connect(self._enable_adjust_button)
-        self.thread.finished.connect(self.thread.deleteLater)
+        self.thread1.finished.connect(self.thread1.deleteLater)
         self.worker.progress.connect(self._update_progress)
         self.worker.tracks_ready.connect(self._replace_tracks)
-        self.thread.start()
-        """
-        self.thread2 = QThread()
-        from._ressources import Worker2
-        self.worker2 = Worker2([function],label_layer,self.tracks)
-        self.worker2.moteToThread(self.thread2)
-        self.thread2.started.connect(self.worker2.run)
-        self.worker2.finished.connect(self.thread2.quit)
-        self.worker2.finished.connect(self.worker2.deleteLater)
-        self.thread2.finished.connect(self.thread2.deleteLater)
-        self.thread2.start()
-        """
+        self.thread1.start()"""
     
     def _enable_adjust_button(self):
-        self.btn_adjust_seg_ids.setEnabled(True)
+        self.completed = self.completed + 1
+        if self.completed == 8:
+            self.btn_adjust_seg_ids.setEnabled(True)
         
     def _replace_tracks(self,tracks):
         self.viewer.layers.remove("Tracks")
         self.viewer.add_tracks(tracks, name='Tracks')
+        
+    def _multithread_progress(self,value):
+        self.prog[value[1]] = value[0]
+        self._update_progress(np.average(self.prog))
             
     def _update_progress(self,value):
-        self.pb_progress.setValue(np.rint(value))
+        self.pb_global_progress.setValue(np.rint(value))
         
     def _auto_track(self):
         self._mouse(State.auto_track)
@@ -1344,4 +1494,20 @@ class MMVTracking(QWidget):
         msg = QMessageBox()
         msg.setText("Not implemented yet")
         msg.exec()
+        
+    def _set_state(self,state=""):
+        self.progress_state.setText(state)
+        
+    def _set_state_info(self,info=""):
+        self.progress_info.setText(info)
+    
+    def _multithread_description(self,value):
+        self.desc[value[1]] = value[0]
+        if self.desc.count(self.desc[0]) == len(self.desc):
+            self._set_description(self.desc[0])
+        
+    def _set_description(self,description=""):
+        self.progress_description.setText(description)
+        
+        
         
