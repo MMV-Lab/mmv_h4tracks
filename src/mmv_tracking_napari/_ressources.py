@@ -139,6 +139,7 @@ class AdjustTracksWorker(QObject):
     def run(self):
         self.starting.emit()
         self.status.emit("Adjusting Tracks")
+        print("Adjusting Tracks")
         i = 0
         self.new_id = max(self.tracks[:,0]) + 1
         self.parent.new_id = self.new_id
@@ -156,19 +157,54 @@ class AdjustTracksWorker(QObject):
 class AdjustSegWorker(QObject):
     starting = pyqtSignal()
     finished = pyqtSignal()
-    status = pyqtSignal(tuple)
-    progress = pyqtSignal(tuple)
-    def __init__(self,parent,label_layer,tracks,start,end,worker_id):
+    status = pyqtSignal(str)
+    #progress = pyqtSignal(tuple)
+    update_progress = pyqtSignal()
+    def __init__(self,parent,label_layer,tracks,counter,completed):
         super().__init__()
         self.label_layer = label_layer
         self.tracks = tracks
         self.parent = parent
-        self.start = start
-        self.end = end
-        self.worker_id = worker_id
+        self.counter = counter
+        self.completed = completed
     
     def run(self):
+        
         self.starting.emit()
+        self.status.emit("Adjusting Segmentation IDs")
+        self.new_id = self.parent.new_id
+        slice_id = self.counter.getSlice()
+        self.update_progress.emit()
+        while slice_id < len(self.label_layer.data):
+            print("Adjusting Slice " + str(slice_id))
+            tracks_in_layer = self.tracks[self.tracks[:,1]==slice_id]
+            for entry in tracks_in_layer:
+                centroid = entry[2:4]
+                self.label_layer.fill([slice_id,centroid[0],centroid[1]],entry[0] + self.new_id)
+            if len(np.unique(self.label_layer.data[slice_id])) - 1 == len(np.unique(tracks_in_layer[:,0])):
+                for entry in tracks_in_layer:
+                    centroid = entry[2:4]
+                    self.label_layer.fill([slice_id,centroid[0],centroid[1]],entry[0])
+            else:
+                ids = np.unique(self.label_layer.data[slice_id])
+                untracked = np.where(ids < self.new_id,ids,0)
+                untracked = untracked[untracked != 0]
+                for entry in untracked:
+                    self.label_layer.data[slice_id] = np.where(self.label_layer.data[slice_id] == entry,self.label_layer.data[slice_id] + self.new_id,self.label_layer.data[slice_id])
+                untracked = untracked + self.new_id
+                
+                for entry in tracks_in_layer:
+                    centroid = entry[2:4]
+                    self.label_layer.fill([slice_id,centroid[0],centroid[1]],entry[0])
+            self.completed.increment()
+            self.update_progress.emit()
+            slice_id = self.counter.getSlice()
+        
+        self.status.emit("Done")
+        self.finished.emit()
+        
+        
+        """self.starting.emit()
         self.status.emit(("Adjusting Segmentation IDs",self.worker_id-1))
         self.progress.emit((0,self.worker_id-1))
         self.new_id = self.parent.new_id
@@ -198,7 +234,7 @@ class AdjustSegWorker(QObject):
                     centroid = entry[2:4]
                     self.label_layer.fill([i,centroid[0],centroid[1]],entry[0])
                 #self.label_layer.data[i] = np.where(self.label_layer.data[i] > 0,self.label_layer.data[i] + self.new_id,self.label_layer.data[i])
-            self.progress.emit((100*(i-self.start+1)/(self.end-self.start),self.worker_id-1))   #len(self.label_layer.data[:]))
+            self.progress.emit((100*(i-self.start+1)/(self.end-self.start),self.worker_id-1))   #len(self.label_layer.data[:]))"""
                 
         
         """self.label_layer.data[self.label_layer.data > 0] = self.label_layer.data[self.label_layer.data > 0] + self.new_id
@@ -208,9 +244,9 @@ class AdjustSegWorker(QObject):
             #print(100*done/len(self.tracks))
             self.progress.emit(100*done/len(self.tracks))
             #self.progress.update(100*done/len(self.tracks))
-            done = done + 1"""
+            done = done + 1
         self.status.emit(("Done",self.worker_id-1))
-        self.finished.emit()
+        self.finished.emit()"""
         
 class GenericWorker(QObject):
     value = pyqtSignal(object)
@@ -226,5 +262,30 @@ class GenericWorker(QObject):
         self.starting.emit()
         self.value.emit(self.function(self.args))
         self.finished.emit()
+        
+
+from threading import Lock
+class SliceCounter():
+    def __init__(self):
+        self._counter = - 1
+        self._lock = Lock()
+    
+    def getSlice(self):
+        with self._lock:
+            self._counter += 1
+            return self._counter
+        
+class ThreadSafeCounter():
+    def __init__(self):
+        self._counter = 0
+        self._lock = Lock()
+        
+    def increment(self):
+        with self._lock:
+            self._counter += 1
+            
+    def value(self):
+        with self._lock:
+            return self._counter
     
     

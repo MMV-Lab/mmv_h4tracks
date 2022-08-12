@@ -6,10 +6,10 @@ import zarr
 from qtpy.QtCore import QThread#, pyqtSignal <- DOESN'T WORK FOR SOME REASON, THUS EXPLICITLY IMPORTED FROM PYQT5
 from qtpy.QtWidgets import (QCheckBox, QComboBox, QFileDialog, QGridLayout, QHBoxLayout,
                             QLabel, QLineEdit, QMessageBox, QProgressBar, QPushButton,
-                            QScrollArea, QToolBox, QVBoxLayout, QWidget)
+                            QScrollArea, QToolBox, QVBoxLayout, QWidget, QRadioButton)
 from scipy import ndimage
 
-from ._ressources import State, Window, SelectFromCollection, Worker, AdjustSegWorker, AdjustTracksWorker
+from ._ressources import State, Window, SelectFromCollection, AdjustSegWorker, AdjustTracksWorker, SliceCounter, ThreadSafeCounter
 
         
 class MMVTracking(QWidget):
@@ -126,7 +126,7 @@ class MMVTracking(QWidget):
         btn_save.clicked.connect(self._save_zarr)
         btn_false_positive.clicked.connect(self._remove_fp)
         btn_segment.clicked.connect(self._run_segmentation)
-        btn_track.clicked.connect(self._run_tracking)
+        btn_track.clicked.connect(self._temp)
         btn_false_merge.clicked.connect(self._false_merge)
         btn_free_label.clicked.connect(self._set_free_id)
         btn_false_cut.clicked.connect(self._false_cut)
@@ -164,12 +164,16 @@ class MMVTracking(QWidget):
         
         # Progressbar
         #self.progress = Progress()
-        self.pb_progress = QProgressBar()
         self.pb_global_progress = QProgressBar()
         #self.progress.bind_to(self._update_progress)
         
         # Tool Box
         self.toolbox = QToolBox()
+        
+        # Radio Buttons
+        self.rb_eco = QRadioButton("Eco")
+        self.rb_eco.toggle()
+        self.rb_heavy = QRadioButton("Heavy")
 
         # Running segmentation/tracking UI
         q_seg_track = QWidget()
@@ -178,7 +182,6 @@ class MMVTracking(QWidget):
         q_seg_track.layout().addWidget(btn_track,0,1)
         q_seg_track.layout().addWidget(c_segmentation,1,0)
         q_seg_track.layout().addWidget(self.btn_adjust_seg_ids,2,0)
-        q_seg_track.layout().addWidget(self.pb_progress,2,1)
 
         # Loading/Saving .zarr file UI
         q_load = QWidget()
@@ -264,11 +267,18 @@ class MMVTracking(QWidget):
         self.pb_global_progress.setValue(100)
         help_progress.layout().addWidget(self.progress_state)
         help_progress.layout().addWidget(self.progress_info)
+        
+        # Computation Mode selection
+        help_mode = QWidget()
+        help_mode.setLayout(QHBoxLayout())
+        help_mode.layout().addWidget(self.rb_eco)
+        help_mode.layout().addWidget(self.rb_heavy)
 
         # Assemble UI elements in ScrollArea
         scroll_area = QScrollArea()
         scroll_area.setLayout(QVBoxLayout())
         scroll_area.layout().addWidget(title)
+        scroll_area.layout().addWidget(help_mode)
         scroll_area.layout().addWidget(q_load)
         scroll_area.layout().addWidget(self.toolbox)
         scroll_area.layout().addWidget(help_progress)
@@ -519,10 +529,20 @@ class MMVTracking(QWidget):
                         if matches[1][maximum] <= 0.7 * len(cell):
                             print("ABORTING")
                             self._mouse(State.default)
+                            if len(self.to_track) < 5:
+                                self.to_track = []
+                                self._mouse(State.default)
+                                return
+                            self._link(auto = True)
                             return
                         if matches[0][maximum] == 0:
                             print("ABORTING")
                             self._mouse(State.default)
+                            if len(self.to_track) < 5:
+                                self.to_track = []
+                                self._mouse(State.default)
+                                return
+                            self._link(auto = True)
                             return
                         if my_slice == int(event.position[0]):
                             centroid = ndimage.center_of_mass(label_layer.data[my_slice], labels = label_layer.data[my_slice], index = selected_cell)
@@ -604,6 +624,11 @@ class MMVTracking(QWidget):
             self.tracks = np.delete(self.tracks,np.where(np.isin(self.tracks[:,0],tmp[0,:],invert=True)),0) # Remove tracks of length <2
             self.viewer.add_tracks(self.tracks, name='Tracks')
         self._mouse(State.default)
+        
+        import sys
+        print(sys.getsizeof(self.viewer.layers[self.viewer.layers.index("Raw Image")].data)) # <- huge for whatever reason
+        print(sys.getsizeof(self.viewer.layers))
+        print(sys.getsizeof(self.tracks))
     
     @napari.Viewer.bind_key('w')
     def _hotkey_save_zarr(self):
@@ -686,8 +711,9 @@ class MMVTracking(QWidget):
         msg.exec()
 
     def _temp(self):
-        res = np.where(self.viewer.layers[self.viewer.layers.index("Segmentation Data")].data ==1)
-        print(res)
+        print(globals())
+        """import gc
+        gc.collect()"""
         pass
 
     def _plot(self):
@@ -1327,6 +1353,11 @@ class MMVTracking(QWidget):
         Replaces Track ID 0 with new Track ID
         Changes Segmentation IDs to corresponding Track IDs
         """
+        import multiprocessing
+        if self.rb_eco.isChecked():
+            self.AMOUNT_OF_THREADS = np.maximum(1,int(multiprocessing.cpu_count() * 0.4))
+        else:
+            self.AMOUNT_OF_THREADS = np.maximum(1,int(multiprocessing.cpu_count() * 0.8))
         try:
             label_layer = self.viewer.layers[self.viewer.layers.index("Segmentation Data")]
         except ValueError:
@@ -1335,13 +1366,54 @@ class MMVTracking(QWidget):
             err.exec()
             return
         self.btn_adjust_seg_ids.setEnabled(False)
+        self.rb_eco.setEnabled(False)
+        self.rb_heavy.setEnabled(False)
         
-        self.prog = [0] * 8
-        self.desc = [""] * 8
+        self.prog = [0] * self.AMOUNT_OF_THREADS
+        self.done = ThreadSafeCounter() 
         self.new_id = 0
-        self.completed = 0
+        self.completed = ThreadSafeCounter()
+        next_slice = SliceCounter()
         
-        self.thread1 = QThread()
+        self.threads = [QThread() for _ in range(self.AMOUNT_OF_THREADS)]
+        
+        for thread in self.threads:
+            thread.finished.connect(thread.deleteLater)
+            
+        self.tracks_worker = AdjustTracksWorker(self,self.tracks)
+        self.tracks_worker.moveToThread(self.threads[0])
+        self.threads[0].started.connect(self.tracks_worker.run)
+        self.tracks_worker.progress.connect(self._update_progress)
+        self.tracks_worker.tracks_ready.connect(self._replace_tracks)
+        for thread in self.threads[1:self.AMOUNT_OF_THREADS]:
+            self.tracks_worker.finished.connect(thread.start)
+        self.tracks_worker.status.connect(self._set_description)
+        self.tracks_worker.finished.connect(self.tracks_worker.deleteLater)
+        
+        self.seg_workers = [AdjustSegWorker(self, label_layer, self.tracks, next_slice, self.completed) for _ in range(self.AMOUNT_OF_THREADS)]
+        
+        for i in range(0,self.AMOUNT_OF_THREADS):
+            self.seg_workers[i].moveToThread(self.threads[i])
+            
+        self.tracks_worker.finished.connect(self.seg_workers[0].run)
+        for i in range(1,self.AMOUNT_OF_THREADS):
+            self.threads[i].started.connect(self.seg_workers[i].run)
+        
+        for seg_worker in self.seg_workers:
+            seg_worker.update_progress.connect(self._multithread_progress)
+            seg_worker.status.connect(self._multithread_description)
+            seg_worker.finished.connect(seg_worker.deleteLater)
+            
+        for i in range(0,self.AMOUNT_OF_THREADS):
+            self.seg_workers[i].finished.connect(self.threads[i].quit)
+            
+        for thread in self.threads:
+            thread.finished.connect(self._enable_adjust_button)
+            
+        self.threads[0].start()
+        print("(>\'-\')>")
+        
+        """self.thread1 = QThread()
         self.thread2 = QThread()
         self.thread3 = QThread()
         self.thread4 = QThread()
@@ -1450,12 +1522,12 @@ class MMVTracking(QWidget):
         self.thread5.finished.connect(self._enable_adjust_button)
         self.thread6.finished.connect(self._enable_adjust_button)
         self.thread7.finished.connect(self._enable_adjust_button)
-        self.thread8.finished.connect(self._enable_adjust_button)
+        self.thread8.finished.connect(self._enable_adjust_button)"""
         
         
         
-        self.thread1.start()
-        """self.worker = Worker(label_layer,self.tracks)
+        """self.thread1.start()
+        self.worker = Worker(label_layer,self.tracks)
         self.worker.moveToThread(self.thread1)
         self.thread1.started.connect(self.worker.run)
         self.worker.finished.connect(self.thread1.quit)
@@ -1467,17 +1539,21 @@ class MMVTracking(QWidget):
         self.thread1.start()"""
     
     def _enable_adjust_button(self):
-        self.completed = self.completed + 1
-        if self.completed == 8:
+        if self.completed.value() == len(self.viewer.layers[self.viewer.layers.index("Raw Image")].data):
             self.btn_adjust_seg_ids.setEnabled(True)
+            self.rb_eco.setEnabled(True)
+            self.rb_heavy.setEnabled(True)
         
     def _replace_tracks(self,tracks):
         self.viewer.layers.remove("Tracks")
         self.viewer.add_tracks(tracks, name='Tracks')
         
-    def _multithread_progress(self,value):
+    """def _multithread_progress(self,value):
         self.prog[value[1]] = value[0]
-        self._update_progress(np.average(self.prog))
+        self._update_progress(np.average(self.prog))"""
+        
+    def _multithread_progress(self):
+        self._update_progress(self.completed.value() / len(self.viewer.layers[self.viewer.layers.index("Raw Image")].data) * 100)
             
     def _update_progress(self,value):
         self.pb_global_progress.setValue(np.rint(value))
@@ -1502,9 +1578,12 @@ class MMVTracking(QWidget):
         self.progress_info.setText(info)
     
     def _multithread_description(self,value):
-        self.desc[value[1]] = value[0]
-        if self.desc.count(self.desc[0]) == len(self.desc):
-            self._set_description(self.desc[0])
+        if value == "Adjusting Segmentation IDs":
+            self._set_description("Adjusting Segmentation IDs")
+        else:
+            self.done.increment()
+            if self.done.value() == self.AMOUNT_OF_THREADS:
+                self._set_description("Done")
         
     def _set_description(self,description=""):
         self.progress_description.setText(description)
