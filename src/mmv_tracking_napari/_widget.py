@@ -138,15 +138,15 @@ class MMVTracking(QWidget):
         btn_auto_track.clicked.connect(self._auto_track)
        
         # Combo Boxes
-        c_segmentation = QComboBox()
+        self.c_segmentation = QComboBox()
         self.c_plots = QComboBox()
 
         # Adding entries to Combo Boxes
-        c_segmentation.addItem("select model")
-        c_segmentation.addItem("model 1")
-        c_segmentation.addItem("model 2")
-        c_segmentation.addItem("model 3")
-        c_segmentation.addItem("model 4")
+        self.c_segmentation.addItem("select model")
+        self.c_segmentation.addItem("model 1")
+        self.c_segmentation.addItem("model 2")
+        self.c_segmentation.addItem("model 3")
+        self.c_segmentation.addItem("model 4")
         self.c_plots.addItem("speed")
         self.c_plots.addItem("size")
         self.c_plots.addItem("direction")
@@ -180,7 +180,7 @@ class MMVTracking(QWidget):
         q_seg_track.setLayout(QGridLayout())
         q_seg_track.layout().addWidget(btn_segment,0,0)
         q_seg_track.layout().addWidget(btn_track,0,1)
-        q_seg_track.layout().addWidget(c_segmentation,1,0)
+        q_seg_track.layout().addWidget(self.c_segmentation,1,0)
         q_seg_track.layout().addWidget(self.btn_adjust_seg_ids,2,0)
 
         # Loading/Saving .zarr file UI
@@ -1285,7 +1285,7 @@ class MMVTracking(QWidget):
                 retval = np.array([[unique_id,avg_speed,std_speed]])
         self.speed =  retval
     
-    def _calculate_size(self):
+    def _calculate_size(self): #TODO: Multithread
         """
         Calculates average size and standard deviation for all cells
         """
@@ -1562,9 +1562,40 @@ class MMVTracking(QWidget):
         self._mouse(State.auto_track)
         
     def _run_segmentation(self):
-        msg = QMessageBox()
-        msg.setText("Not implemented yet")
-        msg.exec()
+        from cellpose import models
+        try:
+            data = self.viewer.layers[self.viewer.layers.index("Raw Image")].data
+        except ValueError:
+            err = QMessageBox()
+            err.setText("No image layer found!")
+            err.exec()
+            return
+        selected_model = self.c_segmentation.currentText()
+        if selected_model == "model 1":
+            model_path = 'models/cellpose_neutrophils'
+            diameter=15
+            chan=0
+            chan2=0
+            flow_threshold = 0.4
+            cellprob_threshold=0
+            
+            
+            pass
+        elif selected_model == "Cellpose Tumor Cell":
+            pass
+        elif selected_model == "EmbedSeg":
+            pass
+            
+        model = models.CellposeModel(gpu=True, pretrained_model=model_path)
+        diameter = model.diam_labels if diameter==0 else diameter
+        masks = model.eval(list(data), 
+                                      channels=[chan, chan2],
+                                      diameter=diameter,
+                                      flow_threshold=flow_threshold,
+                                      cellprob_threshold=cellprob_threshold
+                                      )[0]
+    
+        self.viewer.add_labels(np.asarray(masks), name = "NEW SEG")
         
     def _run_tracking(self):
         msg = QMessageBox()

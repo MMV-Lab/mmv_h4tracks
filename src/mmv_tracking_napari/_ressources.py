@@ -248,6 +248,24 @@ class AdjustSegWorker(QObject):
         self.status.emit(("Done",self.worker_id-1))
         self.finished.emit()"""
         
+class SizeWorker(QObject):
+    starting = pyqtSignal()
+    finished = pyqtSignal()
+    status = pyqtSignal(str)
+    update_progress = pyqtSignal()
+    
+    def __init__(self):
+        super.__init__()
+        pass
+    
+    def run(self):
+        self.starting.emit()
+        self.status.emit("Calculating Size")
+        
+        
+        self.status.emit("Done")
+        self.finished.emit()
+        
 class GenericWorker(QObject):
     value = pyqtSignal(object)
     starting = pyqtSignal()
