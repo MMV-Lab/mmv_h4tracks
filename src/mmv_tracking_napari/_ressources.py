@@ -158,7 +158,6 @@ class AdjustSegWorker(QObject):
     starting = pyqtSignal()
     finished = pyqtSignal()
     status = pyqtSignal(str)
-    #progress = pyqtSignal(tuple)
     update_progress = pyqtSignal()
     def __init__(self,parent,label_layer,tracks,counter,completed):
         super().__init__()
@@ -203,66 +202,128 @@ class AdjustSegWorker(QObject):
         self.status.emit("Done")
         self.finished.emit()
         
-        
-        """self.starting.emit()
-        self.status.emit(("Adjusting Segmentation IDs",self.worker_id-1))
-        self.progress.emit((0,self.worker_id-1))
-        self.new_id = self.parent.new_id
-        
-        
-        for i in range(self.start,self.end):
-            print("Thread " + str(self.worker_id) + ": Adjusting Slice " + str(i))
-        #for i in range(len(self.label_layer.data[:])):
-            tracks_in_layer = self.tracks[self.tracks[:,1]==i]
-            for entry in tracks_in_layer:
-                centroid = entry[2:4]
-                self.label_layer.fill([i,centroid[0],centroid[1]],entry[0] + self.new_id)
-            self.progress.emit((100*(i-self.start+0.5)/(self.end-self.start),self.worker_id-1))   #len(self.label_layer.data[:]))
-            if len(np.unique(self.label_layer.data[i])) - 1 == len(np.unique(tracks_in_layer[:,0])):
-                for entry in tracks_in_layer:
-                    centroid = entry[2:4]
-                    self.label_layer.fill([i,centroid[0],centroid[1]],entry[0])
-            else:
-                ids = np.unique(self.label_layer.data[i])
-                untracked = np.where(ids < self.new_id,ids,0)
-                untracked = untracked[untracked != 0]
-                for entry in untracked:
-                    self.label_layer.data[i] = np.where(self.label_layer.data[i] == entry,self.label_layer.data[i] + self.new_id,self.label_layer.data[i])
-                untracked = untracked + self.new_id
-                
-                for entry in tracks_in_layer:
-                    centroid = entry[2:4]
-                    self.label_layer.fill([i,centroid[0],centroid[1]],entry[0])
-                #self.label_layer.data[i] = np.where(self.label_layer.data[i] > 0,self.label_layer.data[i] + self.new_id,self.label_layer.data[i])
-            self.progress.emit((100*(i-self.start+1)/(self.end-self.start),self.worker_id-1))   #len(self.label_layer.data[:]))"""
-                
-        
-        """self.label_layer.data[self.label_layer.data > 0] = self.label_layer.data[self.label_layer.data > 0] + self.new_id
-        done = 0
-        for track in self.tracks:
-            self.label_layer.fill([track[1],track[2],track[3]],track[0])
-            #print(100*done/len(self.tracks))
-            self.progress.emit(100*done/len(self.tracks))
-            #self.progress.update(100*done/len(self.tracks))
-            done = done + 1
-        self.status.emit(("Done",self.worker_id-1))
-        self.finished.emit()"""
-        
 class SizeWorker(QObject):
     starting = pyqtSignal()
     finished = pyqtSignal()
     status = pyqtSignal(str)
     update_progress = pyqtSignal()
-    
-    def __init__(self):
-        super.__init__()
-        pass
+    values = pyqtSignal(tuple)
+    def __init__(self,parent,label_layer,tracks,counter,completed):
+        super().__init__()
+        self.parent = parent
+        self.label_layer = label_layer
+        self.tracks = tracks
+        self.counter = counter
+        self.completed = completed
     
     def run(self):
         self.starting.emit()
         self.status.emit("Calculating Size")
         
+        unique_id = self.counter.getSlice()
+        while unique_id < np.amax(self.tracks[:,0]):
+            print("Evaluating track " + str(unique_id))
+            if not unique_id in np.unique(self.tracks[:,0]):
+                print("None for " + str(unique_id))
+                unique_id = self.counter.getSlice()
+                continue
+            track = np.delete(self.tracks,np.where(self.tracks[:,0] != unique_id),0)
+            size = []
+            for i in range(0,len(track)-1):
+                seg_id = self.label_layer.data[track[i,1],track[i,2],track[i,3]]
+                size.append(len(np.where(self.label_layer.data[track[i,1]] == seg_id)[0]))
+            avg_size = np.around(np.average(size),3)
+            std_size = np.around(np.std(size),3)
+            
+            self.values.emit((unique_id,avg_size,std_size))
+            print("Returned results for " + str(unique_id))
+            unique_id = self.counter.getSlice()
+            self.completed.increment()
+            self.update_progress.emit()
         
+        self.status.emit("Done")
+        print("Closing Thread")
+        print(self.parent.size)
+        self.finished.emit()
+        
+class CPUSegWorker(QObject):
+    starting = pyqtSignal()
+    finished = pyqtSignal()
+    status = pyqtSignal(str)
+    update_progress = pyqtSignal()
+    
+    def __init__(self,parent,model,result,counter,image,completed,diameter,channels,flow_threshold,cellprob_threshold):
+        super().__init__()
+        self.parent = parent
+        self.model = model
+        self.result = result
+        self.counter = counter
+        self.image = image
+        self.completed = completed
+        self.diameter = diameter
+        self.chan = channels[0]
+        self.chan2 = channels[1]
+        self.flow_threshold = flow_threshold
+        self.cellprob_threshold = cellprob_threshold
+    
+    def run(self):
+        self.starting.emit()
+        self.status.emit("Calculating Segmentation")
+        print("Thread started")
+        
+        slice_id = self.counter.getSlice()
+        self.diameter = self.model.diam_labels if self.diameter==0 else self.diameter
+        while slice_id < len(self.image):
+            print("Segmenting Slice " + str(slice_id))
+            data = self.image[slice_id]
+            
+            mask = self.model.eval(data, channels=[self.chan, self.chan2], diameter=self.diameter, flow_threshold=self.flow_threshold, cellprob_threshold=self.cellprob_threshold )[0]
+            
+            self.result[slice_id] = mask
+            slice_id = self.counter.getSlice()
+            self.completed.increment()
+            self.update_progress.emit()
+        
+        self.status.emit("Done")
+        self.finished.emit()
+        
+class GPUSegWorker(QObject):
+    starting = pyqtSignal()
+    finished = pyqtSignal()
+    status = pyqtSignal(str)
+    update_progress = pyqtSignal(float)
+    segmentation = pyqtSignal(tuple)
+    
+    def __init__(self,parent,model,image,diameter,channels,flow_threshold,cellprob_threshold):
+        super().__init__()
+        self.model = model
+        self.parent = parent
+        self.image = image
+        self.diameter = diameter
+        self.chan = channels[0]
+        self.chan2 = channels[1]
+        self.flow_threshold = flow_threshold
+        self.cellprob_threshold = cellprob_threshold
+        
+    def run(self):
+        self.starting.emit()
+        self.status.emit("Calculating Segmentation (GPU)")
+        print("Thread started")
+        
+        i = 0
+        self.diameter = self.model.diam_labels if self.diameter==0 else self.diameter
+        result = []
+        while i < len(self.image):
+            print("Segmenting Slice " + str(i))
+            data = self.image[i]
+            mask = self.model.eval(data, channels=[self.chan, self.chan2], diameter=self.diameter, flow_threshold=self.flow_threshold, cellprob_threshold=self.cellprob_threshold )[0]
+            
+            result.append(mask)
+            
+            i += 1
+            self.update_progress.emit(i / len(self.image) * 100)
+        
+        self.segmentation.emit((np.asarray(result,dtype="int8"), "GPU SEGMENTATION"))
         self.status.emit("Done")
         self.finished.emit()
         
@@ -294,8 +355,8 @@ class SliceCounter():
             return self._counter
         
 class ThreadSafeCounter():
-    def __init__(self):
-        self._counter = 0
+    def __init__(self, value):
+        self._counter = value
         self._lock = Lock()
         
     def increment(self):
