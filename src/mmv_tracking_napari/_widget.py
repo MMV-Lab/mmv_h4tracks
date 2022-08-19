@@ -9,7 +9,7 @@ from qtpy.QtWidgets import (QCheckBox, QComboBox, QFileDialog, QGridLayout, QHBo
                             QScrollArea, QToolBox, QVBoxLayout, QWidget, QRadioButton)
 from scipy import ndimage
 
-from ._ressources import State, Window, SelectFromCollection, AdjustSegWorker, AdjustTracksWorker, SliceCounter, ThreadSafeCounter
+from ._ressources import State, Window, SelectFromCollection, AdjustSegWorker, AdjustTracksWorker, SliceCounter, ThreadSafeCounter, SizeWorker, CPUSegWorker, GPUSegWorker
 
         
 class MMVTracking(QWidget):
@@ -72,6 +72,7 @@ class MMVTracking(QWidget):
         btn_save = QPushButton("Save")
         btn_plot = QPushButton("Plot")
         btn_segment = QPushButton("Run instance segmentation")
+        btn_preview_segment = QPushButton("Preview Segmentation")
         btn_track = QPushButton("Run tracking")
         btn_free_label = QPushButton("Load Label")
         btn_grab_label = QPushButton("Select")
@@ -126,6 +127,7 @@ class MMVTracking(QWidget):
         btn_save.clicked.connect(self._save_zarr)
         btn_false_positive.clicked.connect(self._remove_fp)
         btn_segment.clicked.connect(self._run_segmentation)
+        btn_preview_segment.clicked.connect(self._run_demo_segmentation)
         btn_track.clicked.connect(self._temp)
         btn_false_merge.clicked.connect(self._false_merge)
         btn_free_label.clicked.connect(self._set_free_id)
@@ -165,7 +167,6 @@ class MMVTracking(QWidget):
         # Progressbar
         #self.progress = Progress()
         self.pb_global_progress = QProgressBar()
-        #self.progress.bind_to(self._update_progress)
         
         # Tool Box
         self.toolbox = QToolBox()
@@ -177,11 +178,15 @@ class MMVTracking(QWidget):
 
         # Running segmentation/tracking UI
         q_seg_track = QWidget()
+        q_help = QWidget()
+        q_help.setLayout(QVBoxLayout())
+        q_help.layout().addWidget(btn_segment)
+        q_help.layout().addWidget(btn_preview_segment)
         q_seg_track.setLayout(QGridLayout())
-        q_seg_track.layout().addWidget(btn_segment,0,0)
+        q_seg_track.layout().addWidget(q_help,0,0)
         q_seg_track.layout().addWidget(btn_track,0,1)
-        q_seg_track.layout().addWidget(self.c_segmentation,1,0)
-        q_seg_track.layout().addWidget(self.btn_adjust_seg_ids,2,0)
+        q_seg_track.layout().addWidget(self.c_segmentation,2,0)
+        q_seg_track.layout().addWidget(self.btn_adjust_seg_ids,3,0)
 
         # Loading/Saving .zarr file UI
         q_load = QWidget()
@@ -625,10 +630,10 @@ class MMVTracking(QWidget):
             self.viewer.add_tracks(self.tracks, name='Tracks')
         self._mouse(State.default)
         
-        import sys
+        """import sys
         print(sys.getsizeof(self.viewer.layers[self.viewer.layers.index("Raw Image")].data)) # <- huge for whatever reason
         print(sys.getsizeof(self.viewer.layers))
-        print(sys.getsizeof(self.tracks))
+        print(sys.getsizeof(self.tracks))"""
     
     @napari.Viewer.bind_key('w')
     def _hotkey_save_zarr(self):
@@ -716,7 +721,7 @@ class MMVTracking(QWidget):
         gc.collect()"""
         pass
 
-    def _plot(self):
+    def _plot(self): # TODO: test running thread from thread, move to separate thread to allow multithreading for size calculation
         """
         Plots the data for the selected metric
         """
@@ -1296,7 +1301,8 @@ class MMVTracking(QWidget):
             - mean
             - peak?
             - minimum?
-        """
+        """            
+        
         try:
             label_layer = self.viewer.layers[self.viewer.layers.index("Segmentation Data")]
         except ValueError:
@@ -1304,6 +1310,53 @@ class MMVTracking(QWidget):
             err.setText("No label layer found!")
             err.exec()
             return
+        """#def __init__(self,parent,label_layer,tracks,counter,completed):
+        import multiprocessing
+        if self.rb_eco.isChecked():
+            self.AMOUNT_OF_THREADS = np.maximum(1,int(multiprocessing.cpu_count() * 0.4))
+        else:
+            self.AMOUNT_OF_THREADS = np.maximum(1,int(multiprocessing.cpu_count() * 0.8))
+        
+        self.rb_eco.setEnabled(False)
+        self.rb_heavy.setEnabled(False)
+        
+        self.done = ThreadSafeCounter(0)
+        self.completed = ThreadSafeCounter(0)
+        next_id = SliceCounter()
+        
+        self.threads = [QThread() for _ in range(self.AMOUNT_OF_THREADS)]
+        self.workers = [SizeWorker(self, label_layer, self.tracks, next_id, self.completed) for _ in range(self.AMOUNT_OF_THREADS)]
+        
+        for i in range(0,self.AMOUNT_OF_THREADS):
+            self.workers[i].moveToThread(self.threads[i])
+            self.threads[i].started.connect(self.workers[i].run)
+            self.workers[i].finished.connect(self.threads[i].quit)
+            
+        def _test():
+            print("TEST")
+        for worker in self.workers:
+            worker.starting.connect(_test)
+            worker.update_progress.connect(self._multithread_progress)
+            worker.status.connect(self._multithread_description)
+            worker.values.connect(self._append_size)
+            worker.finished.connect(worker.deleteLater)
+            
+        self._update_progress(0)
+            
+        for thread in self.threads:
+            thread.finished.connect(thread.deleteLater)
+            thread.finished.connect(self._enable_rb)
+            thread.finished.connect(self._sort_size)
+            thread.start()
+            
+        print("Main thread now waiting for worker threads")
+        #self.threads[0].wait()
+        for thread in self.threads:
+            thread.wait()
+            print("Thread done waiting")
+            
+        print("(╯°□°)╯︵ ┻━┻")"""
+            
         for unique_id in np.unique(self.tracks[:,0]): 
             track = np.delete(self.tracks,np.where(self.tracks[:,0] != unique_id),0)
             size = []
@@ -1317,6 +1370,18 @@ class MMVTracking(QWidget):
             except UnboundLocalError:
                 retval = np.array([[unique_id,avg_size,std_size]])
         self.size = retval
+        
+    def _append_size(self, values):
+        try:
+            self.size = np.append(self.size, [[values[0],values[1],values[2]]],0)
+        except ValueError:
+            self.size = np.array([[values[0],values[1],values[2]]])
+        
+    def _sort_size(self):
+        if self.completed.value() == len(self.viewer.layers[self.viewer.layers.index("Raw Image")].data):
+            df = pd.DataFrame(self.size, columns=['ID','AVG','STD'])
+            df.sort_values(['ID'],ascending=True, inplace=True)
+            self.size = df.values
         
     def _calculate_travel(self):
         """
@@ -1369,10 +1434,9 @@ class MMVTracking(QWidget):
         self.rb_eco.setEnabled(False)
         self.rb_heavy.setEnabled(False)
         
-        self.prog = [0] * self.AMOUNT_OF_THREADS
-        self.done = ThreadSafeCounter() 
+        self.done = ThreadSafeCounter(0) 
         self.new_id = 0
-        self.completed = ThreadSafeCounter()
+        self.completed = ThreadSafeCounter(0)
         next_slice = SliceCounter()
         
         self.threads = [QThread() for _ in range(self.AMOUNT_OF_THREADS)]
@@ -1391,7 +1455,6 @@ class MMVTracking(QWidget):
         self.tracks_worker.finished.connect(self.tracks_worker.deleteLater)
         
         self.seg_workers = [AdjustSegWorker(self, label_layer, self.tracks, next_slice, self.completed) for _ in range(self.AMOUNT_OF_THREADS)]
-        
         for i in range(0,self.AMOUNT_OF_THREADS):
             self.seg_workers[i].moveToThread(self.threads[i])
             
@@ -1412,145 +1475,20 @@ class MMVTracking(QWidget):
             
         self.threads[0].start()
         print("(>\'-\')>")
-        
-        """self.thread1 = QThread()
-        self.thread2 = QThread()
-        self.thread3 = QThread()
-        self.thread4 = QThread()
-        self.thread5 = QThread()
-        self.thread6 = QThread()
-        self.thread7 = QThread()
-        self.thread8 = QThread()
-        
-        self.thread1.finished.connect(self.thread1.deleteLater)
-        self.thread2.finished.connect(self.thread2.deleteLater)
-        self.thread3.finished.connect(self.thread3.deleteLater)
-        self.thread4.finished.connect(self.thread4.deleteLater)
-        self.thread5.finished.connect(self.thread5.deleteLater)
-        self.thread6.finished.connect(self.thread6.deleteLater)
-        self.thread7.finished.connect(self.thread7.deleteLater)
-        self.thread8.finished.connect(self.thread8.deleteLater)
-        
-        self.tracks_worker = AdjustTracksWorker(self,self.tracks)
-        self.tracks_worker.moveToThread(self.thread1)
-        self.thread1.started.connect(self.tracks_worker.run)
-        self.tracks_worker.progress.connect(self._update_progress)
-        self.tracks_worker.tracks_ready.connect(self._replace_tracks)
-        self.tracks_worker.finished.connect(self.thread2.start)
-        self.tracks_worker.finished.connect(self.thread3.start)
-        self.tracks_worker.finished.connect(self.thread4.start)
-        self.tracks_worker.finished.connect(self.thread5.start)
-        self.tracks_worker.finished.connect(self.thread6.start)
-        self.tracks_worker.finished.connect(self.thread7.start)
-        self.tracks_worker.finished.connect(self.thread8.start)
-        self.tracks_worker.status.connect(self._set_description)
-        self.tracks_worker.finished.connect(self.tracks_worker.deleteLater)
-        
-        key_ids = [1]
-        for i in range(1,8):
-            key_ids.append(key_ids[-1] + int(len(label_layer.data)/8) + (len(label_layer.data)%8 > i))
-            i = i + 1
-        key_ids.append(len(label_layer.data))
-        
-        self.seg_worker1 = AdjustSegWorker(self,label_layer,self.tracks,key_ids[0],key_ids[1],1)
-        self.seg_worker2 = AdjustSegWorker(self,label_layer,self.tracks,key_ids[1],key_ids[2],2)
-        self.seg_worker3 = AdjustSegWorker(self,label_layer,self.tracks,key_ids[2],key_ids[3],3)
-        self.seg_worker4 = AdjustSegWorker(self,label_layer,self.tracks,key_ids[3],key_ids[4],4)
-        self.seg_worker5 = AdjustSegWorker(self,label_layer,self.tracks,key_ids[4],key_ids[5],5)
-        self.seg_worker6 = AdjustSegWorker(self,label_layer,self.tracks,key_ids[5],key_ids[6],6)
-        self.seg_worker7 = AdjustSegWorker(self,label_layer,self.tracks,key_ids[6],key_ids[7],7)
-        self.seg_worker8 = AdjustSegWorker(self,label_layer,self.tracks,key_ids[7],key_ids[8],8)
-        
-        self.seg_worker1.moveToThread(self.thread1)
-        self.seg_worker2.moveToThread(self.thread2)
-        self.seg_worker3.moveToThread(self.thread3)
-        self.seg_worker4.moveToThread(self.thread4)
-        self.seg_worker5.moveToThread(self.thread5)
-        self.seg_worker6.moveToThread(self.thread6)
-        self.seg_worker7.moveToThread(self.thread7)
-        self.seg_worker8.moveToThread(self.thread8)
-        
-        self.tracks_worker.finished.connect(self.seg_worker1.run)
-        self.thread2.started.connect(self.seg_worker2.run)
-        self.thread3.started.connect(self.seg_worker3.run)
-        self.thread4.started.connect(self.seg_worker4.run)
-        self.thread5.started.connect(self.seg_worker5.run)
-        self.thread6.started.connect(self.seg_worker6.run)
-        self.thread7.started.connect(self.seg_worker7.run)
-        self.thread8.started.connect(self.seg_worker8.run)
-        
-        self.seg_worker1.progress.connect(self._multithread_progress)        
-        self.seg_worker2.progress.connect(self._multithread_progress)        
-        self.seg_worker3.progress.connect(self._multithread_progress)        
-        self.seg_worker4.progress.connect(self._multithread_progress)        
-        self.seg_worker5.progress.connect(self._multithread_progress)        
-        self.seg_worker6.progress.connect(self._multithread_progress)        
-        self.seg_worker7.progress.connect(self._multithread_progress)        
-        self.seg_worker8.progress.connect(self._multithread_progress)
-        
-        self.seg_worker1.status.connect(self._multithread_description)
-        self.seg_worker2.status.connect(self._multithread_description)
-        self.seg_worker3.status.connect(self._multithread_description)
-        self.seg_worker4.status.connect(self._multithread_description)
-        self.seg_worker5.status.connect(self._multithread_description)
-        self.seg_worker6.status.connect(self._multithread_description)
-        self.seg_worker7.status.connect(self._multithread_description)
-        self.seg_worker8.status.connect(self._multithread_description)
-        
-        self.seg_worker1.finished.connect(self.seg_worker1.deleteLater)
-        self.seg_worker2.finished.connect(self.seg_worker2.deleteLater)
-        self.seg_worker3.finished.connect(self.seg_worker3.deleteLater)
-        self.seg_worker4.finished.connect(self.seg_worker4.deleteLater)
-        self.seg_worker5.finished.connect(self.seg_worker5.deleteLater)
-        self.seg_worker6.finished.connect(self.seg_worker6.deleteLater)
-        self.seg_worker7.finished.connect(self.seg_worker7.deleteLater)
-        self.seg_worker8.finished.connect(self.seg_worker8.deleteLater)
-        
-        self.seg_worker1.finished.connect(self.thread1.quit)
-        self.seg_worker2.finished.connect(self.thread2.quit)
-        self.seg_worker3.finished.connect(self.thread3.quit)
-        self.seg_worker4.finished.connect(self.thread4.quit)
-        self.seg_worker5.finished.connect(self.thread5.quit)
-        self.seg_worker6.finished.connect(self.thread6.quit)
-        self.seg_worker7.finished.connect(self.thread7.quit)
-        self.seg_worker8.finished.connect(self.thread8.quit)
-        
-        self.thread1.finished.connect(self._enable_adjust_button)
-        self.thread2.finished.connect(self._enable_adjust_button)
-        self.thread3.finished.connect(self._enable_adjust_button)
-        self.thread4.finished.connect(self._enable_adjust_button)
-        self.thread5.finished.connect(self._enable_adjust_button)
-        self.thread6.finished.connect(self._enable_adjust_button)
-        self.thread7.finished.connect(self._enable_adjust_button)
-        self.thread8.finished.connect(self._enable_adjust_button)"""
-        
-        
-        
-        """self.thread1.start()
-        self.worker = Worker(label_layer,self.tracks)
-        self.worker.moveToThread(self.thread1)
-        self.thread1.started.connect(self.worker.run)
-        self.worker.finished.connect(self.thread1.quit)
-        self.worker.finished.connect(self.worker.deleteLater)
-        self.worker.finished.connect(self._enable_adjust_button)
-        self.thread1.finished.connect(self.thread1.deleteLater)
-        self.worker.progress.connect(self._update_progress)
-        self.worker.tracks_ready.connect(self._replace_tracks)
-        self.thread1.start()"""
     
     def _enable_adjust_button(self):
         if self.completed.value() == len(self.viewer.layers[self.viewer.layers.index("Raw Image")].data):
             self.btn_adjust_seg_ids.setEnabled(True)
+            self._enable_rb()
+            
+    def _enable_rb(self):
+        if self.completed.value() == len(self.viewer.layers[self.viewer.layers.index("Raw Image")].data):
             self.rb_eco.setEnabled(True)
             self.rb_heavy.setEnabled(True)
         
     def _replace_tracks(self,tracks):
         self.viewer.layers.remove("Tracks")
         self.viewer.add_tracks(tracks, name='Tracks')
-        
-    """def _multithread_progress(self,value):
-        self.prog[value[1]] = value[0]
-        self._update_progress(np.average(self.prog))"""
         
     def _multithread_progress(self):
         self._update_progress(self.completed.value() / len(self.viewer.layers[self.viewer.layers.index("Raw Image")].data) * 100)
@@ -1561,7 +1499,11 @@ class MMVTracking(QWidget):
     def _auto_track(self):
         self._mouse(State.auto_track)
         
-    def _run_segmentation(self):
+    def _run_demo_segmentation(self):
+        self._run_segmentation(True)
+        pass
+        
+    def _run_segmentation(self, demo = False):
         from cellpose import models
         try:
             data = self.viewer.layers[self.viewer.layers.index("Raw Image")].data
@@ -1570,6 +1512,8 @@ class MMVTracking(QWidget):
             err.setText("No image layer found!")
             err.exec()
             return
+        if demo:
+            data = data[0:5]
         selected_model = self.c_segmentation.currentText()
         if selected_model == "model 1":
             model_path = 'models/cellpose_neutrophils'
@@ -1578,24 +1522,79 @@ class MMVTracking(QWidget):
             chan2=0
             flow_threshold = 0.4
             cellprob_threshold=0
-            
-            
-            pass
         elif selected_model == "Cellpose Tumor Cell":
             pass
         elif selected_model == "EmbedSeg":
             pass
+        #from cellpose import core
+        #gpu = core.use_gpu() # TODO: fix w/ justin
+        gpu = False
+        if not gpu:
+            import multiprocessing
+            if self.rb_eco.isChecked():
+                self.AMOUNT_OF_THREADS = np.maximum(1,int(multiprocessing.cpu_count() * 0.4))
+            else:
+                self.AMOUNT_OF_THREADS = np.maximum(1,int(multiprocessing.cpu_count() * 0.8))
             
-        model = models.CellposeModel(gpu=True, pretrained_model=model_path)
-        diameter = model.diam_labels if diameter==0 else diameter
-        masks = model.eval(list(data), 
-                                      channels=[chan, chan2],
-                                      diameter=diameter,
-                                      flow_threshold=flow_threshold,
-                                      cellprob_threshold=cellprob_threshold
-                                      )[0]
-    
-        self.viewer.add_labels(np.asarray(masks), name = "NEW SEG")
+            self.rb_eco.setEnabled(False)
+            self.rb_heavy.setEnabled(False)
+            
+            self.done = ThreadSafeCounter(0) 
+            self.completed = ThreadSafeCounter(0)
+            next_slice = SliceCounter()
+            self.result = np.zeros(data.shape)
+            model = [models.CellposeModel(gpu=False, pretrained_model=model_path) for _ in range(self.AMOUNT_OF_THREADS)]
+            
+            self.threads = [QThread() for _ in range(self.AMOUNT_OF_THREADS)]
+            self.workers = []
+            for i in range(self.AMOUNT_OF_THREADS):
+                self.workers.append(CPUSegWorker(self, model[i], self.result, next_slice, data, self.completed, diameter, (chan, chan2), flow_threshold, cellprob_threshold))
+            
+            for i in range(0,self.AMOUNT_OF_THREADS):
+                self.workers[i].moveToThread(self.threads[i])
+                self.threads[i].started.connect(self.workers[i].run)
+                self.workers[i].finished.connect(self.threads[i].quit)
+                
+            for worker in self.workers:
+                worker.update_progress.connect(self._multithread_progress)
+                worker.status.connect(self._multithread_description)
+                worker.finished.connect(worker.deleteLater)
+                
+            self._update_progress(0)
+                
+            for thread in self.threads:
+                thread.finished.connect(thread.deleteLater)
+                thread.finished.connect(self._enable_rb)
+                thread.finished.connect(self._multithread_add_labels)
+                thread.start()
+                
+            print("<(\'.\'<)")
+        else:
+            
+            model = models.CellposeModel(gpu=True, pretrained_model=model_path)
+            self.thread = QThread()
+            self.worker = GPUSegWorker(self,model,data,diameter, (chan,chan2), flow_threshold, cellprob_threshold)
+            self.worker.moveToThread(self.thread)
+            self.thread.started.connect(self.worker.run)
+            self.worker.finished.connect(self.thread.quit)
+            self.worker.status.connect(self._set_description)
+            self.worker.update_progress.connect(self._update_progress)
+            self.worker.finished.connect(self.worker.deleteLater)
+            self.thread.finished.connect(self.thread.deleteLater)
+            self.worker.segmentation.connect(self._add_labels_help)
+            self._update_progress(0)
+            self.thread.start()
+            print("<(\'.\')>")
+        
+    def _multithread_add_labels(self,name="CPU SEGMENTATION"):
+        if self.done.value() == self.AMOUNT_OF_THREADS:
+            self._add_labels(np.asarray(self.result,dtype="int8"),name)
+        
+    def _add_labels(self,data,name = "Segmentation Data"):
+        self.viewer.add_labels(data, name = name)
+        
+    def _add_labels_help(self, param):
+        self._add_labels(param[0],param[1])
         
     def _run_tracking(self):
         msg = QMessageBox()
@@ -1611,10 +1610,15 @@ class MMVTracking(QWidget):
     def _multithread_description(self,value):
         if value == "Adjusting Segmentation IDs":
             self._set_description("Adjusting Segmentation IDs")
+        elif value == "Calculating Segmentation":
+            self._set_description("Calculating Segmentation")
+        elif value == "Calculating Size":
+            self._set_description("Calculating Size")
         else:
             self.done.increment()
             if self.done.value() == self.AMOUNT_OF_THREADS:
                 self._set_description("Done")
+                self._update_progress(100)
         
     def _set_description(self,description=""):
         self.progress_description.setText(description)
