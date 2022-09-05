@@ -166,7 +166,7 @@ class MMVTracking(QWidget):
         # Link functions to line edits
         self.le_trajectory.editingFinished.connect(self._select_track)
         
-        # Checkboxes: off -> 0, on -> 2 if not tristate
+        # Checkboxes: off -> 0, on -> 2 if not tristate         # what exactly is done here?
         self.ch_speed = QCheckBox("Speed")
         self.ch_size = QCheckBox("Size")
         self.ch_direction = QCheckBox("Direction") # example
@@ -896,13 +896,21 @@ class MMVTracking(QWidget):
             values.append(np.std(self.direction[:,3]))
             values.append(np.average(self.direction[:,4]))
             values.append(np.std(self.direction[:,4]))
+        if self.ch_euclidean_distance.checkState() == 2:
+            if not (type(self.euclidean_distance) == np.ndarray and np.array_equal(self.viewer.layers[self.viewer.layers.index("Tracks")].data,self.euclidean_distance_tracks)):
+                self._calculate_travel()
+            metrics.append("Average euclidean distance")
+            metrics.append("Standard deviation of euclidean distance")
+            individual_metrics.append("Euclidean distance")
+            values.append(np.average(self.euclidean_distance[:,1]))
+            values.append(np.std(self.euclidean_distance[:,1]))              
         writer.writerow(metrics)
         writer.writerow(values)
         writer.writerow([None])
         writer.writerow([None])
         
         # Stats for each individual cell
-        if not (self.ch_speed.checkState() or self.ch_size.checkState() or self.ch_direction.checkState()):
+        if not (self.ch_speed.checkState() or self.ch_size.checkState() or self.ch_direction.checkState() or self.ch_euclidean_distance.checkState()):
             csvfile.close()
             return
         writer.writerow(individual_metrics)
@@ -917,6 +925,9 @@ class MMVTracking(QWidget):
             if self.ch_direction.checkState() == 2:
                 value.append(self.direction[np.where(self.direction[:,0] == track)[0],3][0])
                 value.append(self.direction[np.where(self.direction[:,0] == track)[0],4][0])
+            if self.ch_euclidean_distance.checkState() == 2:
+                value.append(self.euclidean_distance[np.where(self.euclidean_distance[:,0] == track)[0],1][0])
+                value.append(self.euclidean_distance[np.where(self.euclidean_distance[:,0] == track)[0],2][0])              
             writer.writerow(value)
         csvfile.close()
         msg = QMessageBox()
