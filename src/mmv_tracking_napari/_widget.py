@@ -30,12 +30,12 @@ class MMVTracking(QWidget):
         self.tracks = np.empty((1,4),dtype=np.int8)
         
         # Variables to hold data for plot metrics
-        self.speed = []
+        self.speed = [] # example
         self.size = []
         self.direction = []
         
         # Variables to hold state of layers from when metrics were last run
-        self.speed_tracks = []
+        self.speed_tracks = [] # example
         self.size_seg = []
         self.direction_tracks = []
         
@@ -54,6 +54,8 @@ class MMVTracking(QWidget):
         self.progress_description = QLabel("Descriptive Description")
         self.progress_state = QLabel("")
         self.progress_info = QLabel("")
+        min_movement = QLabel("Movement Minimum")
+        min_duration = QLabel("Minimum Track Length")
 
         # Tooltips for Labels
         load_save.setToolTip(
@@ -152,9 +154,12 @@ class MMVTracking(QWidget):
         self.c_plots.addItem("speed")
         self.c_plots.addItem("size")
         self.c_plots.addItem("direction")
+        self.c_plots.addItem("example")
 
         # Line Edits
         self.le_trajectory = QLineEdit("")
+        self.le_movement = QLineEdit("")
+        self.le_track_duration = QLineEdit("")
 
         # Link functions to line edits
         self.le_trajectory.editingFinished.connect(self._select_track)
@@ -162,7 +167,7 @@ class MMVTracking(QWidget):
         # Checkboxes: off -> 0, on -> 2 if not tristate
         self.ch_speed = QCheckBox("Speed")
         self.ch_size = QCheckBox("Size")
-        self.ch_direction = QCheckBox("Direction")
+        self.ch_direction = QCheckBox("Direction") # example
         
         # Progressbar
         #self.progress = Progress()
@@ -245,6 +250,14 @@ class MMVTracking(QWidget):
         q_tracking.layout().addWidget(btn_auto_track)
 
         # Evaluation UI
+        help_movement = QWidget()
+        help_movement.setLayout(QHBoxLayout())
+        help_movement.layout().addWidget(min_movement)
+        help_movement.layout().addWidget(self.le_movement)
+        help_track_length = QWidget()
+        help_track_length.setLayout(QHBoxLayout())
+        help_track_length.layout().addWidget(min_duration)
+        help_track_length.layout().addWidget(self.le_track_duration)
         help_plot = QWidget()
         help_plot.setLayout(QHBoxLayout())
         help_plot.layout().addWidget(metric)
@@ -252,10 +265,12 @@ class MMVTracking(QWidget):
         help_plot.layout().addWidget(btn_plot)
         q_eval = QWidget()
         q_eval.setLayout(QVBoxLayout())
+        q_eval.layout().addWidget(help_movement)
+        q_eval.layout().addWidget(help_track_length)
         q_eval.layout().addWidget(help_plot)
         q_eval.layout().addWidget(self.ch_speed)
         q_eval.layout().addWidget(self.ch_size)
-        q_eval.layout().addWidget(self.ch_direction)
+        q_eval.layout().addWidget(self.ch_direction) # example
         q_eval.layout().addWidget(btn_export)
 
         # Add zones to self.toolbox
@@ -462,9 +477,14 @@ class MMVTracking(QWidget):
                     centroid = ndimage.center_of_mass(label_layer.data[int(event.position[0])], labels = label_layer.data[int(event.position[0])], index = selected_cell)
                     self.to_track.append([int(event.position[0]),int(np.rint(centroid[0])),int(np.rint(centroid[1]))])
                     if self.progress_info.text():
-                        self.progress_info.setText(self.progress_info.text() + ", " + str(int(event.position[0])))
+                        self.test.append(int(event.position[0]))
+                        self.test.sort()
+                        self.progress_info.setText(str(self.test))
+                        #self.progress_info.setText(self.progress_info.text() + ", " + str(int(event.position[0])))
                     else:
-                        self.progress_info.setText(str(int(event.position[0])))
+                        self.test = [int(event.position[0])]
+                        self.progress_info.setText(str(self.test))
+                        #self.progress_info.setText(str(int(event.position[0])))
 
             elif mode == State.unlink: # Removes Track -- Removes cells from track
                 self.viewer.layers.selection.active.help = "(7)"
@@ -532,7 +552,7 @@ class MMVTracking(QWidget):
                         matches = np.unique(matching,return_counts = True)
                         maximum = np.argmax(matches[1])
                         if matches[1][maximum] <= 0.7 * len(cell):
-                            print("ABORTING")
+                            print("ABORTING1")
                             self._mouse(State.default)
                             if len(self.to_track) < 5:
                                 self.to_track = []
@@ -541,7 +561,7 @@ class MMVTracking(QWidget):
                             self._link(auto = True)
                             return
                         if matches[0][maximum] == 0:
-                            print("ABORTING")
+                            print("ABORTING2")
                             self._mouse(State.default)
                             if len(self.to_track) < 5:
                                 self.to_track = []
@@ -748,7 +768,7 @@ class MMVTracking(QWidget):
             if not (type(self.speed) == np.ndarray and np.array_equal(self.viewer.layers[self.viewer.layers.index("Tracks")].data,self.speed_tracks)):
                 self._calculate_speed()
             speed = self.speed
-            unique_ids = np.unique(speed[:,0])
+            unique_ids = np.unique(speed[:,0]).astype(int)
             axes.set_title("Speed",{"fontsize": 18,"color": "white"})
             axes.set_xlabel("Average")
             axes.set_ylabel("Standard Deviation")
@@ -759,7 +779,7 @@ class MMVTracking(QWidget):
             if not (type(self.size) == np.ndarray and np.array_equal(self.viewer.layers[self.viewer.layers.index("Segmentation Data")].data,self.size_seg)):
                 self._calculate_size()
             size = self.size
-            unique_ids = np.unique(size[:,0])
+            unique_ids = np.unique(size[:,0]).astype(int)
             axes.set_title("Size",{"fontsize": 18,"color": "white"})
             axes.set_xlabel("Average")
             axes.set_ylabel("Standard Deviation")
@@ -767,10 +787,10 @@ class MMVTracking(QWidget):
             self.window.layout().addWidget(QLabel("Scatterplot Standard Deviation vs Average: Size"))
             self.size_seg = self.viewer.layers[self.viewer.layers.index("Segmentation Data")].data
         elif self.c_plots.currentIndex() == 2: # Direction metric
-            if not (type(self.direction) == np.ndarray and np.array_equal(self.viewer.layers[self.viewer.layers.index("Tracks")].data,self.direction_tracks)):
+            if not (type(self.direction) == np.ndarray and np.array_equal(self.viewer.layers[self.viewer.layers.index("Tracks")].data,self.direction_tracks)): # example
                 self._calculate_travel()
             direction = self.direction
-            unique_ids = np.unique(direction[:,0])
+            unique_ids = np.unique(direction[:,0]).astype(int)
             axes.set_title("Direction",{"fontsize": 18,"color": "white"})
             axes.axvline(color='white')
             axes.axhline(color='white')
@@ -827,7 +847,7 @@ class MMVTracking(QWidget):
         # Stats for all cells combined
         metrics = ["Number of cells"]
         individual_metrics = ["ID"]
-        values = [len(np.unique(self.tracks[:,0]))]
+        values = [len(np.unique(self.tracks[:,0]))] # example
         if self.ch_speed.checkState() == 2:
             if not (type(self.speed) == np.ndarray and np.array_equal(self.viewer.layers[self.viewer.layers.index("Tracks")].data,self.speed_tracks)):
                 self._calculate_speed()
@@ -871,7 +891,7 @@ class MMVTracking(QWidget):
         writer.writerow(individual_metrics)
         for track in np.unique(self.tracks[:,0]):
             value = [track]
-            if self.ch_speed.checkState() == 2:
+            if self.ch_speed.checkState() == 2: # example
                 value.append(self.speed[np.where(self.speed[:,0] == track)[0],1][0])
                 value.append(self.speed[np.where(self.speed[:,0] == track)[0],2][0])
             if self.ch_size.checkState() == 2:
@@ -1052,7 +1072,9 @@ class MMVTracking(QWidget):
                 self._select_track()
         for i in range(len(layer.mouse_drag_callbacks)):
             if layer.mouse_drag_callbacks[i].__name__ == "_record" or auto: # Check if we are in recording mode already or are in auto mode
+                print("yes auto")
                 if len(self.to_track) < 2: # Less than two cells can not be tracked
+                    print("too little slices for track")
                     self.to_track = []
                     self._mouse(State.default)
                     self._set_state()
@@ -1112,6 +1134,7 @@ class MMVTracking(QWidget):
                 self._set_state()
                 self._set_state_info()
                 return
+        print("never should have come here")
         self.viewer.layers.selection.active.help = ""
         self.to_track = []
         self._mouse(State.link)
@@ -1412,6 +1435,10 @@ class MMVTracking(QWidget):
             except UnboundLocalError:
                 retval = np.array([[unique_id,x,y,direction,distance]])
         self.direction = retval
+        
+        
+        # example 
+        ###### METRICS HERE
         
     def _adjust_ids(self):
         """
