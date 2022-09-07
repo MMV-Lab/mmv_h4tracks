@@ -1485,7 +1485,7 @@ class MMVTracking(QWidget):
         ###### METRICS HERE
     def _calculate_euclidean_distance(self):            # Already implemented in _calculate_travel, we could combine these
         """
-        Calculates euclidean distance between first and laste frame a cell is tracked
+        Calculates euclidean distance between first and last frame in which a cell is tracked
         """    
         for unique_id in np.unique(self.tracks[:,0]):
             track = np.delete(self.tracks,np.where(self.tracks[:,0] != unique_id),0)
