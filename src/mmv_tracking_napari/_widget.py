@@ -33,12 +33,16 @@ class MMVTracking(QWidget):
         self.speed = [] # example
         self.size = []
         self.direction = []
+        self.euclidean_distance = [] 
+        self.accumulated_distance = []
         
         # Variables to hold state of layers from when metrics were last run
         self.speed_tracks = [] # example
         self.size_seg = []
         self.direction_tracks = []
-        
+        self.euclidean_distance_tracks = [] 
+        self.accumulated_distance_tracks = []
+
         # Labels
         title = QLabel("<font color='green'>HITL4Trk</font>")
         next_free = QLabel("Next free label:")
@@ -154,7 +158,8 @@ class MMVTracking(QWidget):
         self.c_plots.addItem("speed")
         self.c_plots.addItem("size")
         self.c_plots.addItem("direction")
-        self.c_plots.addItem("example")
+        self.c_plots.addItem("euclidean distance")  # example
+        self.c_plots.addItem("accumulated distance")
 
         # Line Edits
         self.le_trajectory = QLineEdit("")
@@ -168,6 +173,8 @@ class MMVTracking(QWidget):
         self.ch_speed = QCheckBox("Speed")
         self.ch_size = QCheckBox("Size")
         self.ch_direction = QCheckBox("Direction") # example
+        self.ch_euclidean_distance = QCheckBox("Euclidean distance") 
+        self.ch_accumulated_distance = QCheckBox("Accumulated distance")
         
         # Progressbar
         #self.progress = Progress()
@@ -271,6 +278,8 @@ class MMVTracking(QWidget):
         q_eval.layout().addWidget(self.ch_speed)
         q_eval.layout().addWidget(self.ch_size)
         q_eval.layout().addWidget(self.ch_direction) # example
+        q_eval.layout().addWidget(self.ch_euclidean_distance) 
+        q_eval.layout().addWidget(self.ch_accumulated_distance) 
         q_eval.layout().addWidget(btn_export)
 
         # Add zones to self.toolbox
@@ -797,6 +806,30 @@ class MMVTracking(QWidget):
             data = axes.scatter(direction[:,1],direction[:,2],c = np.array([[0,0.240802676,0.70703125,1]]))
             self.window.layout().addWidget(QLabel("Scatterplot: Travel direction & Distance"))
             self.direction_tracks = self.viewer.layers[self.viewer.layers.index("Tracks")].data
+        elif self.c_plots.currentIndex() == 3: # Euclidean distance metric
+            if not (type(self.euclidean_distance) == np.ndarray and np.array_equal(self.viewer.layers[self.viewer.layers.index("Tracks")].data,self.euclidean_distance_tracks)): 
+                self._calculate_euclidean_distance()   
+            euclidean_distance = self.euclidean_distance  
+            unique_ids = np.unique(euclidean_distance[:,0]).astype(int) 
+            axes.set_title("Euclidean distance",{"fontsize": 18,"color": "white"})
+            axes.set_xlabel("x")
+            axes.set_ylabel("y")     
+            data = axes.scatter(euclidean_distance[:,1],euclidean_distance[:,2],c = np.array([[0,0.240802676,0.70703125,1]]))    
+            self.window.layout().addWidget(QLabel("Scatterplot x vs y"))
+            self.euclidean_distance_tracks = self.viewer.layers[self.viewer.layers.index("Tracks")].data   
+        elif self.c_plots.currentIndex() == 4: # Accumulated distance metric
+            if not (type(self.accumulated_distance) == np.ndarray and np.array_equal(self.viewer.layers[self.viewer.layers.index("Tracks")].data,self.accumulated_distance_tracks)): 
+                self._calculate_accumulated_distance()   
+            accumulated_distance = self.accumulated_distance  
+            unique_ids = np.unique(accumulated_distance[:,0]).astype(int) 
+            axes.set_title("Accumulated distance",{"fontsize": 18,"color": "white"})
+            axes.set_xlabel("x")
+            axes.set_ylabel("y")     
+            data = axes.scatter(accumulated_distance[:,1],accumulated_distance[:,2],c = np.array([[0,0.240802676,0.70703125,1]]))    
+            self.window.layout().addWidget(QLabel("Scatterplot x vs y"))
+            self.euclidean_distance_tracks = self.viewer.layers[self.viewer.layers.index("Tracks")].data               
+            
+                                    
         selector = SelectFromCollection(self, axes, data, unique_ids)
         
         def accept(event):
@@ -821,7 +854,7 @@ class MMVTracking(QWidget):
         """
         Exports a CSV with selected metrics 
         """
-        if not (self.ch_speed.checkState() or self.ch_size.checkState() or self.ch_direction.checkState()):
+        if not (self.ch_speed.checkState() or self.ch_size.checkState() or self.ch_direction.checkState() or self.ch_euclidean_distance.checkState() or self.ch_accumulated_distance.checkState()):     # example
             msg = QMessageBox()
             msg.setWindowTitle("No metric selected")
             msg.setText("You selected no metrics")
@@ -879,13 +912,29 @@ class MMVTracking(QWidget):
             values.append(np.std(self.direction[:,3]))
             values.append(np.average(self.direction[:,4]))
             values.append(np.std(self.direction[:,4]))
+        if self.ch_euclidean_distance.checkState() == 2:
+            if not (type(self.euclidean_distance) == np.ndarray and np.array_equal(self.viewer.layers[self.viewer.layers.index("Tracks")].data,self.euclidean_distance_tracks)):
+                self._calculate_euclidean_distance()
+            metrics.append("Average euclidean distance")
+            metrics.append("Standard deviation of euclidean distance")
+            individual_metrics.append("Euclidean distance")
+            values.append(np.average(self.euclidean_distance[:,1]))
+            values.append(np.std(self.euclidean_distance[:,1]))  
+        if self.ch_accumulated_distance.checkState() == 2:
+            if not (type(self.accumulated_distance) == np.ndarray and np.array_equal(self.viewer.layers[self.viewer.layers.index("Tracks")].data,self.accumulated_distance_tracks)):
+                self._calculate_accumulated_distance()
+            metrics.append("Average accumulated distance")
+            metrics.append("Standard deviation of accumulated distance")
+            individual_metrics.append("Accumulated distance")
+            values.append(np.average(self.accumulated_distance[:,1]))
+            values.append(np.std(self.accumulated_distance[:,1]))                        
         writer.writerow(metrics)
         writer.writerow(values)
         writer.writerow([None])
         writer.writerow([None])
         
         # Stats for each individual cell
-        if not (self.ch_speed.checkState() or self.ch_size.checkState() or self.ch_direction.checkState()):
+        if not (self.ch_speed.checkState() or self.ch_size.checkState() or self.ch_direction.checkState() or self.ch_euclidean_distance.checkState()):
             csvfile.close()
             return
         writer.writerow(individual_metrics)
@@ -900,6 +949,10 @@ class MMVTracking(QWidget):
             if self.ch_direction.checkState() == 2:
                 value.append(self.direction[np.where(self.direction[:,0] == track)[0],3][0])
                 value.append(self.direction[np.where(self.direction[:,0] == track)[0],4][0])
+            if self.ch_euclidean_distance.checkState() == 2:
+                value.append(self.euclidean_distance[np.where(self.euclidean_distance[:,0] == track)[0],1][0])       
+            if self.ch_euclidean_distance.checkState() == 2:
+                value.append(self.accumulated_distance[np.where(self.accumulated_distance[:,0] == track)[0],1][0])                      
             writer.writerow(value)
         csvfile.close()
         msg = QMessageBox()
@@ -1439,6 +1492,37 @@ class MMVTracking(QWidget):
         
         # example 
         ###### METRICS HERE
+    def _calculate_euclidean_distance(self):            # Already implemented in _calculate_travel, we could combine these
+        """
+        Calculates euclidean distance between first and last frame in which a cell is tracked
+        """    
+        for unique_id in np.unique(self.tracks[:,0]):
+            track = np.delete(self.tracks,np.where(self.tracks[:,0] != unique_id),0)
+            x = track[-1,3] - track[0,3]
+            y = track[0,2] - track[-1,2]            
+            euclidean_distance = np.around(np.sqrt(np.square(x) + np.square(y)),2)
+            try:
+                retval = np.append(retval, [[unique_id,euclidean_distance,0]],0)
+            except UnboundLocalError:
+                retval = np.array([[unique_id,euclidean_distance,0]])
+        self.euclidean_distance = retval
+
+    def _calculate_accumulated_distance(self):
+        """
+        Calculates accumulated distance for each cell
+        """
+        for unique_id in np.unique(self.tracks[:,0]):
+            track = np.delete(self.tracks,np.where(self.tracks[:,0] != unique_id),0)
+            distance = []
+            for i in range(0,len(track)-1):
+                distance.append(np.hypot(track[i,2] - track[i+1,2],track[i,3] - track[i+1,3]))
+            accumulated_distance = np.around(np.sum(distance),3)
+            try:
+                retval = np.append(retval, [[unique_id,accumulated_distance,0]],0)
+            except UnboundLocalError:
+                retval = np.array([[unique_id,accumulated_distance,0]])
+        self.accumulated_distance =  retval        
+
         
     def _adjust_ids(self):
         """
