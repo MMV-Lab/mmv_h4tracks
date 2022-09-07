@@ -934,7 +934,7 @@ class MMVTracking(QWidget):
         writer.writerow([None])
         
         # Stats for each individual cell
-        if not (self.ch_speed.checkState() or self.ch_size.checkState() or self.ch_direction.checkState() or self.ch_euclidean_distance.checkState()):
+        if not (self.ch_speed.checkState() or self.ch_size.checkState() or self.ch_direction.checkState() or self.ch_euclidean_distance.checkState() or self.ch_accumulated_distance.checkState()):
             csvfile.close()
             return
         writer.writerow(individual_metrics)
@@ -951,7 +951,7 @@ class MMVTracking(QWidget):
                 value.append(self.direction[np.where(self.direction[:,0] == track)[0],4][0])
             if self.ch_euclidean_distance.checkState() == 2:
                 value.append(self.euclidean_distance[np.where(self.euclidean_distance[:,0] == track)[0],1][0])       
-            if self.ch_euclidean_distance.checkState() == 2:
+            if self.ch_accumulated_distance.checkState() == 2:
                 value.append(self.accumulated_distance[np.where(self.accumulated_distance[:,0] == track)[0],1][0])                      
             writer.writerow(value)
         csvfile.close()
