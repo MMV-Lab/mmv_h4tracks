@@ -194,6 +194,8 @@ class AdjustSegWorker(QObject):
                 
                 for entry in tracks_in_layer:
                     centroid = entry[2:4]
+                    if self.label_layer.data[slice_id,centroid[0],centroid[1]] == 0:
+                        pass
                     self.label_layer.fill([slice_id,centroid[0],centroid[1]],entry[0])
             self.completed.increment()
             self.update_progress.emit()
