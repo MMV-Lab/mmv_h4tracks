@@ -877,10 +877,37 @@ class MMVTracking(QWidget):
         csvfile = open(file[0],'w', newline='')
         writer = csv.writer(csvfile)
         
+        if not (type(self.size) == np.ndarray and np.array_equal(self.viewer.layers[self.viewer.layers.index("Segmentation Data")].data,self.size_seg)):
+            self._calculate_travel()
+        
+        try:
+            min_movement = int(self.le_movement.text())
+        except ValueError:
+            min_movement = 0
+            movement_mask = np.unique(self.tracks[:,0])
+        else:
+            movement_mask = self.direction[np.where(self.direction[:,4] >= min_movement)[0],0]
+             
+        try:
+            min_duration = int(self.le_track_duration.text())
+        except ValueError:
+            min_duration = 0
+            duration_mask = np.unique(self.tracks[:,0])
+        else:
+            duration_mask = np.unique(self.tracks[:,0])[np.where(np.unique(self.tracks[:,0],return_counts=True)[1]>= min_duration)]
+            
+        combined_mask = np.intersect1d(movement_mask,duration_mask)
+        #print(combined_mask)
+        #print(np.unique(self.tracks[:,0]))
+        
         # Stats for all cells combined
-        metrics = ["Number of cells"]
-        individual_metrics = ["ID"]
-        values = [len(np.unique(self.tracks[:,0]))] # example
+        metrics = [""]
+        metrics.append("Number of cells","Average track duration","Standard deviation of track duration")
+        individual_metrics = ["ID","Track duration"]
+        all_values = ["all"]
+        all_values.append(len(np.unique(self.tracks[:,0]))) # example
+        valid_values = ["valid"]
+        valid_values.append(len(combined_mask))
         if self.ch_speed.checkState() == 2:
             if not (type(self.speed) == np.ndarray and np.array_equal(self.viewer.layers[self.viewer.layers.index("Tracks")].data,self.speed_tracks)):
                 self._calculate_speed()
@@ -888,8 +915,11 @@ class MMVTracking(QWidget):
             metrics.append("Standard deviation of speed")
             individual_metrics.append("Average speed")
             individual_metrics.append("Standard deviation of speed")
-            values.append(np.average(self.speed[:,1]))
-            values.append(np.std(self.speed[:,1]))
+            #print(self.speed)
+            all_values.append(np.average(self.speed[:,1]))
+            all_values.append(np.std(self.speed[:,1]))
+            valid_values.append(np.average( [self.speed[i,1] for i in range(0,len(self.speed)) if self.speed[i,0] in combined_mask]))
+            valid_values.append(np.std( [self.speed[i,1] for i in range(0,len(self.speed)) if self.speed[i,0] in combined_mask]))
         if self.ch_size.checkState() == 2:
             if not (type(self.size) == np.ndarray and np.array_equal(self.viewer.layers[self.viewer.layers.index("Segmentation Data")].data,self.size_seg)):
                 self._calculate_size()
@@ -897,8 +927,10 @@ class MMVTracking(QWidget):
             metrics.append("Standard deviation of size")
             individual_metrics.append("Average size")
             individual_metrics.append("Standard deviation of size")
-            values.append(np.average(self.size[:,1]))
-            values.append(np.std(self.size[:,1]))
+            all_values.append(np.average(self.size[:,1]))
+            all_values.append(np.std(self.size[:,1]))
+            valid_values.append(np.average( [self.size[i,1] for i in range(0,len(self.size)) if self.size[i,0] in combined_mask]))
+            valid_values.append(np.std( [self.size[i,1] for i in range(0,len(self.size)) if self.size[i,0] in combined_mask]))
         if self.ch_direction.checkState() == 2:
             if not (type(self.direction) == np.ndarray and np.array_equal(self.viewer.layers[self.viewer.layers.index("Tracks")].data,self.direction_tracks)):
                 self._calculate_travel()
@@ -908,37 +940,49 @@ class MMVTracking(QWidget):
             metrics.append("Standard deviation of distance")
             individual_metrics.append("Direction")
             individual_metrics.append("Distance")
-            values.append(np.average(self.direction[:,3]))
-            values.append(np.std(self.direction[:,3]))
-            values.append(np.average(self.direction[:,4]))
-            values.append(np.std(self.direction[:,4]))
+            all_values.append(np.average(self.direction[:,3]))
+            all_values.append(np.std(self.direction[:,3]))
+            all_values.append(np.average(self.direction[:,4]))
+            all_values.append(np.std(self.direction[:,4]))
+            valid_values.append(np.average( [self.direction[i,3] for i in range(0,len(self.direction)) if self.direction[i,0] in combined_mask]))
+            valid_values.append(np.std( [self.direction[i,3] for i in range(0,len(self.direction)) if self.direction[i,0] in combined_mask]))
+            valid_values.append(np.average( [self.direction[i,4] for i in range(0,len(self.direction)) if self.direction[i,0] in combined_mask]))
+            valid_values.append(np.std( [self.direction[i,4] for i in range(0,len(self.direction)) if self.direction[i,0] in combined_mask]))
         if self.ch_euclidean_distance.checkState() == 2:
             if not (type(self.euclidean_distance) == np.ndarray and np.array_equal(self.viewer.layers[self.viewer.layers.index("Tracks")].data,self.euclidean_distance_tracks)):
                 self._calculate_euclidean_distance()
             metrics.append("Average euclidean distance")
             metrics.append("Standard deviation of euclidean distance")
             individual_metrics.append("Euclidean distance")
-            values.append(np.average(self.euclidean_distance[:,1]))
-            values.append(np.std(self.euclidean_distance[:,1]))  
+            all_values.append(np.average(self.euclidean_distance[:,1]))
+            all_values.append(np.std(self.euclidean_distance[:,1]))
+            valid_values.append(np.average( [self.euclidean_distance[i,1] for i in range(0,len(self.euclidean_distance)) if self.euclidean_distance[i,0] in combined_mask]))
+            valid_values.append(np.std( [self.euclidean_distance[i,1] for i in range(0,len(self.euclidean_distance)) if self.euclidean_distance[i,0] in combined_mask]))
         if self.ch_accumulated_distance.checkState() == 2:
             if not (type(self.accumulated_distance) == np.ndarray and np.array_equal(self.viewer.layers[self.viewer.layers.index("Tracks")].data,self.accumulated_distance_tracks)):
                 self._calculate_accumulated_distance()
             metrics.append("Average accumulated distance")
             metrics.append("Standard deviation of accumulated distance")
             individual_metrics.append("Accumulated distance")
-            values.append(np.average(self.accumulated_distance[:,1]))
-            values.append(np.std(self.accumulated_distance[:,1]))                        
+            all_values.append(np.average(self.accumulated_distance[:,1]))
+            all_values.append(np.std(self.accumulated_distance[:,1]))
+            valid_values.append(np.average( [self.accumulated_distance[i,1] for i in range(0,len(self.accumulated_distance)) if self.accumulated_distance[i,0] in combined_mask]))
+            valid_values.append(np.std( [self.accumulated_distance[i,1] for i in range(0,len(self.accumulated_distance)) if self.accumulated_distance[i,0] in combined_mask]))
         writer.writerow(metrics)
-        writer.writerow(values)
+        writer.writerow(all_values)
+        writer.writerow(valid_values)
+        writer.writerow(["Movement Threshold: " + str(min_movement),"Duration Threshold: " + str(min_duration)])
         writer.writerow([None])
         writer.writerow([None])
         
         # Stats for each individual cell
         if not (self.ch_speed.checkState() or self.ch_size.checkState() or self.ch_direction.checkState() or self.ch_euclidean_distance.checkState() or self.ch_accumulated_distance.checkState()):
             csvfile.close()
+            msg = QMessageBox()
+            msg.setText("Export complete")
             return
         writer.writerow(individual_metrics)
-        for track in np.unique(self.tracks[:,0]):
+        for track in combined_mask:
             value = [track]
             if self.ch_speed.checkState() == 2: # example
                 value.append(self.speed[np.where(self.speed[:,0] == track)[0],1][0])
@@ -954,6 +998,29 @@ class MMVTracking(QWidget):
             if self.ch_accumulated_distance.checkState() == 2:
                 value.append(self.accumulated_distance[np.where(self.accumulated_distance[:,0] == track)[0],1][0])                      
             writer.writerow(value)
+            
+        if not np.array_equal(np.unique(self.tracks[:,0]),combined_mask):
+            writer.writerow([None])
+            writer.writerow([None])
+            writer.writerow(["invalid cells"])
+            for track in np.unique(self.tracks[:,0]):
+                if track in combined_mask:
+                    continue
+                value = [track]
+                if self.ch_speed.checkState() == 2: # example
+                    value.append(self.speed[np.where(self.speed[:,0] == track)[0],1][0])
+                    value.append(self.speed[np.where(self.speed[:,0] == track)[0],2][0])
+                if self.ch_size.checkState() == 2:
+                    value.append(self.size[np.where(self.size[:,0] == track)[0],1][0])
+                    value.append(self.size[np.where(self.size[:,0] == track)[0],2][0])
+                if self.ch_direction.checkState() == 2:
+                    value.append(self.direction[np.where(self.direction[:,0] == track)[0],3][0])
+                    value.append(self.direction[np.where(self.direction[:,0] == track)[0],4][0])
+                if self.ch_euclidean_distance.checkState() == 2:
+                    value.append(self.euclidean_distance[np.where(self.euclidean_distance[:,0] == track)[0],1][0])       
+                if self.ch_accumulated_distance.checkState() == 2:
+                    value.append(self.accumulated_distance[np.where(self.accumulated_distance[:,0] == track)[0],1][0])                      
+                writer.writerow(value)
         csvfile.close()
         msg = QMessageBox()
         msg.setText("Export complete")
@@ -981,7 +1048,7 @@ class MMVTracking(QWidget):
                 tracks = []
                 try:
                     for i in range(0,len(txt.split(","))):
-                        tracks.append(int(txt.split(",")[i]))
+                        tracks.append(int((txt.split(",")[i])))
                 except ValueError:
                     msg = QMessageBox()
                     msg.setText("Please use a single integer (whole number) or a comma separated list of integers")
@@ -1010,7 +1077,7 @@ class MMVTracking(QWidget):
         else: # Multiple values, tracks is instance of "list"
             tracks = list(dict.fromkeys(tracks)) # Removes duplicate values
             for i in range(0,len(tracks)): # Remove illegal values (<0) from tracks
-                if tracks[i] < 0:
+                if int(tracks[i]) < 0:
                     tracks.pop(i)
             # ID now only contains legal values, can be written back to line edit
             txt = ""
