@@ -902,7 +902,9 @@ class MMVTracking(QWidget):
         
         # Stats for all cells combined
         metrics = [""]
-        metrics.append("Number of cells","Average track duration","Standard deviation of track duration")
+        metrics.append("Number of cells")
+        metrics.append("Average track duration")
+        metrics.append("Standard deviation of track duration")
         individual_metrics = ["ID","Track duration"]
         all_values = ["all"]
         all_values.append(len(np.unique(self.tracks[:,0]))) # example
