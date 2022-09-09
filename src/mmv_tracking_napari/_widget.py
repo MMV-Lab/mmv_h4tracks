@@ -879,26 +879,58 @@ class MMVTracking(QWidget):
         
         if not (type(self.size) == np.ndarray and np.array_equal(self.viewer.layers[self.viewer.layers.index("Segmentation Data")].data,self.size_seg)):
             self._calculate_travel()
-        
-        try:
-            min_movement = int(self.le_movement.text())
-        except ValueError:
+            
+        if self.le_movement.text() == "":
             min_movement = 0
             movement_mask = np.unique(self.tracks[:,0])
         else:
-            movement_mask = self.direction[np.where(self.direction[:,4] >= min_movement)[0],0]
+            try:
+                min_movement = int(self.le_movement.text())
+            except ValueError:
+                err = QMessageBox()
+                err.setWindowTitle("Wrong type")
+                err.setText("String detected")
+                err.setInformativeText("Please use integer instead of text")
+                err.exec()
+                return
+            else:
+                if min_movement != float(self.le_movement.text()):
+                    err = QMessageBox()
+                    err.setWindowTitle("Wrong type")
+                    err.setText("Float detected")
+                    err.setInformativeText("Please use integer instead of float")
+                    err.exec()
+                    return
+                movement_mask = self.direction[np.where(self.direction[:,4] >= min_movement)[0],0]
              
-        try:
-            min_duration = int(self.le_track_duration.text())
-        except ValueError:
+        if self.le_track_duration.text() == "":
             min_duration = 0
             duration_mask = np.unique(self.tracks[:,0])
         else:
-            duration_mask = np.unique(self.tracks[:,0])[np.where(np.unique(self.tracks[:,0],return_counts=True)[1]>= min_duration)]
+            try:
+                min_duration = int(self.le_track_duration.text())
+            except ValueError:
+                err = QMessageBox()
+                err.setWindowTitle("Wrong type")
+                err.setText("String detected")
+                err.setInformativeText("Please use integer instead of text")
+                err.exec()
+                return
+            else:
+                if min_duration != float(self.le_track_duration.text()):
+                    err = QMessageBox()
+                    err.setWindowTitle("Wrong type")
+                    err.setText("Float detected")
+                    err.setInformativeText("Please use integer instead of float")
+                    err.exec()
+                    return
+                duration_mask = np.unique(self.tracks[:,0])[np.where(np.unique(self.tracks[:,0],return_counts=True)[1]>= min_duration)]
             
         combined_mask = np.intersect1d(movement_mask,duration_mask)
         #print(combined_mask)
         #print(np.unique(self.tracks[:,0]))
+        
+        duration = np.asarray([ [i,np.count_nonzero(self.tracks[:,0] == i)] for i in np.unique(self.tracks[:,0])])
         
         # Stats for all cells combined
         metrics = [""]
@@ -908,20 +940,25 @@ class MMVTracking(QWidget):
         individual_metrics = ["ID","Track duration"]
         all_values = ["all"]
         all_values.append(len(np.unique(self.tracks[:,0]))) # example
+        #all_values.append(len(self.tracks[:,0])/len(np.unique(self.tracks[:,0])))
+        all_values.append(np.around(np.average(duration[:,1]),3))
+        all_values.append(np.around(np.std(duration[:,1]),3))
         valid_values = ["valid"]
         valid_values.append(len(combined_mask))
+        valid_values.append(np.around(np.average( [duration[i,1] for i in range(0,len(duration)) if duration[i,0] in combined_mask]),3))
+        valid_values.append(np.around(np.std( [duration[i,1] for i in range(0,len(duration)) if duration[i,0] in combined_mask]),3))
         if self.ch_speed.checkState() == 2:
             if not (type(self.speed) == np.ndarray and np.array_equal(self.viewer.layers[self.viewer.layers.index("Tracks")].data,self.speed_tracks)):
                 self._calculate_speed()
             metrics.append("Average speed")
-            metrics.append("Standard deviation of speed")
+            #metrics.append("Standard deviation of speed")
             individual_metrics.append("Average speed")
             individual_metrics.append("Standard deviation of speed")
             #print(self.speed)
-            all_values.append(np.average(self.speed[:,1]))
-            all_values.append(np.std(self.speed[:,1]))
-            valid_values.append(np.average( [self.speed[i,1] for i in range(0,len(self.speed)) if self.speed[i,0] in combined_mask]))
-            valid_values.append(np.std( [self.speed[i,1] for i in range(0,len(self.speed)) if self.speed[i,0] in combined_mask]))
+            all_values.append(np.around(np.average(self.speed[:,1]),3))
+            #all_values.append(np.around(np.std(self.speed[:,1]),3))
+            valid_values.append(np.around(np.average( [self.speed[i,1] for i in range(0,len(self.speed)) if self.speed[i,0] in combined_mask]),3))
+            #valid_values.append(np.around(np.std( [self.speed[i,1] for i in range(0,len(self.speed)) if self.speed[i,0] in combined_mask]),3))
         if self.ch_size.checkState() == 2:
             if not (type(self.size) == np.ndarray and np.array_equal(self.viewer.layers[self.viewer.layers.index("Segmentation Data")].data,self.size_seg)):
                 self._calculate_size()
@@ -929,47 +966,63 @@ class MMVTracking(QWidget):
             metrics.append("Standard deviation of size")
             individual_metrics.append("Average size")
             individual_metrics.append("Standard deviation of size")
-            all_values.append(np.average(self.size[:,1]))
-            all_values.append(np.std(self.size[:,1]))
-            valid_values.append(np.average( [self.size[i,1] for i in range(0,len(self.size)) if self.size[i,0] in combined_mask]))
-            valid_values.append(np.std( [self.size[i,1] for i in range(0,len(self.size)) if self.size[i,0] in combined_mask]))
+            all_values.append(np.around(np.average(self.size[:,1]),3))
+            all_values.append(np.around(np.std(self.size[:,1]),3))
+            valid_values.append(np.around(np.average( [self.size[i,1] for i in range(0,len(self.size)) if self.size[i,0] in combined_mask]),3))
+            valid_values.append(np.around(np.std( [self.size[i,1] for i in range(0,len(self.size)) if self.size[i,0] in combined_mask]),3))
         if self.ch_direction.checkState() == 2:
             if not (type(self.direction) == np.ndarray and np.array_equal(self.viewer.layers[self.viewer.layers.index("Tracks")].data,self.direction_tracks)):
                 self._calculate_travel()
             metrics.append("Average direction")
             metrics.append("Standard deviation of direction")
             metrics.append("Average distance")
-            metrics.append("Standard deviation of distance")
+            #metrics.append("Standard deviation of distance")
             individual_metrics.append("Direction")
             individual_metrics.append("Distance")
-            all_values.append(np.average(self.direction[:,3]))
-            all_values.append(np.std(self.direction[:,3]))
-            all_values.append(np.average(self.direction[:,4]))
-            all_values.append(np.std(self.direction[:,4]))
-            valid_values.append(np.average( [self.direction[i,3] for i in range(0,len(self.direction)) if self.direction[i,0] in combined_mask]))
-            valid_values.append(np.std( [self.direction[i,3] for i in range(0,len(self.direction)) if self.direction[i,0] in combined_mask]))
-            valid_values.append(np.average( [self.direction[i,4] for i in range(0,len(self.direction)) if self.direction[i,0] in combined_mask]))
-            valid_values.append(np.std( [self.direction[i,4] for i in range(0,len(self.direction)) if self.direction[i,0] in combined_mask]))
+            all_values.append(np.around(np.average(self.direction[:,3]),3))
+            all_values.append(np.around(np.std(self.direction[:,3]),3))
+            all_values.append(np.around(np.average(self.direction[:,4]),3))
+            #all_values.append(np.around(np.std(self.direction[:,4]),3))
+            valid_values.append(np.around(np.average( [self.direction[i,3] for i in range(0,len(self.direction)) if self.direction[i,0] in combined_mask]),3))
+            valid_values.append(np.around(np.std( [self.direction[i,3] for i in range(0,len(self.direction)) if self.direction[i,0] in combined_mask]),3))
+            valid_values.append(np.around(np.average( [self.direction[i,4] for i in range(0,len(self.direction)) if self.direction[i,0] in combined_mask]),3))
+            #valid_values.append(np.around(np.std( [self.direction[i,4] for i in range(0,len(self.direction)) if self.direction[i,0] in combined_mask]),3))
         if self.ch_euclidean_distance.checkState() == 2:
             if not (type(self.euclidean_distance) == np.ndarray and np.array_equal(self.viewer.layers[self.viewer.layers.index("Tracks")].data,self.euclidean_distance_tracks)):
                 self._calculate_euclidean_distance()
             metrics.append("Average euclidean distance")
-            metrics.append("Standard deviation of euclidean distance")
+            #metrics.append("Standard deviation of euclidean distance")
+            metrics.append("Average directed speed")
+            #metrics.append("Standard deviation of directed speed")
             individual_metrics.append("Euclidean distance")
-            all_values.append(np.average(self.euclidean_distance[:,1]))
-            all_values.append(np.std(self.euclidean_distance[:,1]))
-            valid_values.append(np.average( [self.euclidean_distance[i,1] for i in range(0,len(self.euclidean_distance)) if self.euclidean_distance[i,0] in combined_mask]))
-            valid_values.append(np.std( [self.euclidean_distance[i,1] for i in range(0,len(self.euclidean_distance)) if self.euclidean_distance[i,0] in combined_mask]))
+            individual_metrics.append("Directed speed")
+            all_values.append(np.around(np.average(self.euclidean_distance[:,1]),3))
+            #all_values.append(np.around(np.std(self.euclidean_distance[:,1]),3))
+            all_values.append(np.around(np.average(self.euclidean_distance[:,1]/len(np.unique(self.tracks[:,0]))),3))
+            #all_values.append(np.around(np.std(self.euclidean_distance[:,1]/len(np.unique(self.tracks[:,0]))),3))
+            valid_values.append(np.around(np.average( [self.euclidean_distance[i,1] for i in range(0,len(self.euclidean_distance)) if self.euclidean_distance[i,0] in combined_mask]),3))
+            #valid_values.append(np.around(np.std( [self.euclidean_distance[i,1] for i in range(0,len(self.euclidean_distance)) if self.euclidean_distance[i,0] in combined_mask]),3))
+            valid_values.append(np.around(np.average( [self.euclidean_distance[i,1]/duration[i,1] for i in range(0,len(self.euclidean_distance)) if self.euclidean_distance[i,0] in combined_mask]),3))
+            #valid_values.append(np.around(np.std( [self.euclidean_distance[i,1]/duration[i,1] for i in range(0,len(self.euclidean_distance)) if self.euclidean_distance[i,0] in combined_mask]),3))
         if self.ch_accumulated_distance.checkState() == 2:
             if not (type(self.accumulated_distance) == np.ndarray and np.array_equal(self.viewer.layers[self.viewer.layers.index("Tracks")].data,self.accumulated_distance_tracks)):
                 self._calculate_accumulated_distance()
             metrics.append("Average accumulated distance")
-            metrics.append("Standard deviation of accumulated distance")
+            #metrics.append("Standard deviation of accumulated distance")
             individual_metrics.append("Accumulated distance")
-            all_values.append(np.average(self.accumulated_distance[:,1]))
-            all_values.append(np.std(self.accumulated_distance[:,1]))
-            valid_values.append(np.average( [self.accumulated_distance[i,1] for i in range(0,len(self.accumulated_distance)) if self.accumulated_distance[i,0] in combined_mask]))
-            valid_values.append(np.std( [self.accumulated_distance[i,1] for i in range(0,len(self.accumulated_distance)) if self.accumulated_distance[i,0] in combined_mask]))
+            all_values.append(np.around(np.average(self.accumulated_distance[:,1]),3))
+            #all_values.append(np.around(np.std(self.accumulated_distance[:,1]),3))
+            valid_values.append(np.around(np.average( [self.accumulated_distance[i,1] for i in range(0,len(self.accumulated_distance)) if self.accumulated_distance[i,0] in combined_mask]),3))
+            #valid_values.append(np.around(np.std( [self.accumulated_distance[i,1] for i in range(0,len(self.accumulated_distance)) if self.accumulated_distance[i,0] in combined_mask]),3))
+            if self.ch_euclidean_distance.checkState() == 2:
+                metrics.append("Average directness")
+                #metrics.append("Standard deviation of directness")
+                individual_metrics.append("Directness")
+                directness = np.asarray([ [self.euclidean_distance[i,0],self.euclidean_distance[i,1]/self.accumulated_distance[i,1]] for i in range(0,len(np.unique(self.tracks[:,0])))])
+                all_values.append(np.around(np.average(directness[:,1]),3))
+                #all_values.append(np.around(np.std(directness[:,1]),3))
+                valid_values.append(np.around(np.average( [directness[i,1] for i in range(0,len(directness)) if directness[i,0] in combined_mask]),3))
+                #valid_values.append(np.around(np.std( [directness[i,1] for i in range(0,len(directness)) if directness[i,0] in combined_mask]),3))
         writer.writerow(metrics)
         writer.writerow(all_values)
         writer.writerow(valid_values)
@@ -986,6 +1039,7 @@ class MMVTracking(QWidget):
         writer.writerow(individual_metrics)
         for track in combined_mask:
             value = [track]
+            value.append(np.count_nonzero(self.tracks[:,0] == track))
             if self.ch_speed.checkState() == 2: # example
                 value.append(self.speed[np.where(self.speed[:,0] == track)[0],1][0])
                 value.append(self.speed[np.where(self.speed[:,0] == track)[0],2][0])
@@ -996,9 +1050,12 @@ class MMVTracking(QWidget):
                 value.append(self.direction[np.where(self.direction[:,0] == track)[0],3][0])
                 value.append(self.direction[np.where(self.direction[:,0] == track)[0],4][0])
             if self.ch_euclidean_distance.checkState() == 2:
-                value.append(self.euclidean_distance[np.where(self.euclidean_distance[:,0] == track)[0],1][0])       
+                value.append(self.euclidean_distance[np.where(self.euclidean_distance[:,0] == track)[0],1][0])
+                value.append(np.around(self.euclidean_distance[np.where(self.euclidean_distance[:,0] == track)[0],1][0]/np.count_nonzero(self.tracks[:,0] == track),3))
             if self.ch_accumulated_distance.checkState() == 2:
-                value.append(self.accumulated_distance[np.where(self.accumulated_distance[:,0] == track)[0],1][0])                      
+                value.append(self.accumulated_distance[np.where(self.accumulated_distance[:,0] == track)[0],1][0])
+                if self.ch_accumulated_distance.checkState() == 2:
+                    value.append(np.around(directness[np.where(directness[:,0] == track)[0],1][0],3))      
             writer.writerow(value)
             
         if not np.array_equal(np.unique(self.tracks[:,0]),combined_mask):
@@ -1009,6 +1066,7 @@ class MMVTracking(QWidget):
                 if track in combined_mask:
                     continue
                 value = [track]
+                value.append(np.count_nonzero(self.tracks[:,0] == track))
                 if self.ch_speed.checkState() == 2: # example
                     value.append(self.speed[np.where(self.speed[:,0] == track)[0],1][0])
                     value.append(self.speed[np.where(self.speed[:,0] == track)[0],2][0])
@@ -1019,9 +1077,12 @@ class MMVTracking(QWidget):
                     value.append(self.direction[np.where(self.direction[:,0] == track)[0],3][0])
                     value.append(self.direction[np.where(self.direction[:,0] == track)[0],4][0])
                 if self.ch_euclidean_distance.checkState() == 2:
-                    value.append(self.euclidean_distance[np.where(self.euclidean_distance[:,0] == track)[0],1][0])       
+                    value.append(self.euclidean_distance[np.where(self.euclidean_distance[:,0] == track)[0],1][0])
+                    value.append(np.around(self.euclidean_distance[np.where(self.euclidean_distance[:,0] == track)[0],1][0]/np.count_nonzero(self.tracks[:,0] == track),3))
                 if self.ch_accumulated_distance.checkState() == 2:
-                    value.append(self.accumulated_distance[np.where(self.accumulated_distance[:,0] == track)[0],1][0])                      
+                    value.append(self.accumulated_distance[np.where(self.accumulated_distance[:,0] == track)[0],1][0])
+                    if self.ch_accumulated_distance.checkState() == 2:
+                        value.append(np.around(directness[np.where(directness[:,0] == track)[0],1][0],3))            
                 writer.writerow(value)
         csvfile.close()
         msg = QMessageBox()
@@ -1551,7 +1612,8 @@ class MMVTracking(QWidget):
                     direction = np.pi
                 else:
                     direction = 0
-            distance = np.around(np.sqrt(np.square(x) + np.square(y)),2)
+            distance = np.around(np.sqrt(np.square(x) + np.square(y)),3)
+            direction = np.around(direction,3)
             try:
                 retval = np.append(retval, [[unique_id,x,y,direction,distance]],0)
             except UnboundLocalError:
@@ -1569,7 +1631,7 @@ class MMVTracking(QWidget):
             track = np.delete(self.tracks,np.where(self.tracks[:,0] != unique_id),0)
             x = track[-1,3] - track[0,3]
             y = track[0,2] - track[-1,2]            
-            euclidean_distance = np.around(np.sqrt(np.square(x) + np.square(y)),2)
+            euclidean_distance = np.around(np.sqrt(np.square(x) + np.square(y)),3)
             try:
                 retval = np.append(retval, [[unique_id,euclidean_distance,0]],0)
             except UnboundLocalError:
