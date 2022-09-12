@@ -85,6 +85,7 @@ class MMVTracking(QWidget):
         btn_export = QPushButton("Export")
         self.btn_adjust_seg_ids = QPushButton("Adjust Segmentation IDs")
         btn_auto_track = QPushButton("Automatic tracking")
+        btn_delete_displayed_tracks = QPushButton("Delete displayed tracks")
         
         # Tooltips for Buttons
         self.btn_adjust_seg_ids.setToolTip(
@@ -144,6 +145,7 @@ class MMVTracking(QWidget):
         btn_export.clicked.connect(self._export)
         self.btn_adjust_seg_ids.clicked.connect(self._adjust_ids)
         btn_auto_track.clicked.connect(self._auto_track)
+        btn_delete_displayed_tracks.clicked.connect(self._remove_displayed_tracks)
        
         # Combo Boxes
         self.c_segmentation = QComboBox()
@@ -252,6 +254,7 @@ class MMVTracking(QWidget):
         q_tracking = QWidget()
         q_tracking.setLayout(QVBoxLayout())
         q_tracking.layout().addWidget(help_trajectory)
+        q_tracking.layout().addWidget(btn_delete_displayed_tracks)
         q_tracking.layout().addWidget(help_remove_correspondence)
         q_tracking.layout().addWidget(help_insert_correspondence)
         q_tracking.layout().addWidget(btn_auto_track)
@@ -338,7 +341,10 @@ class MMVTracking(QWidget):
                     layer.mouse_drag_callbacks.clear()
 
             if mode == State.default:
-                self.viewer.layers.selection.active.help = "(0)"
+                try:
+                    self.viewer.layers.selection.active.help = "(0)"
+                except AttributeError:
+                    pass
             elif mode == State.test: # Unused at the moment
                 self.viewer.layers.selection.active.help = "(-1)"
             elif mode == State.remove: # False Positive -- Delete cell from label layer
@@ -460,7 +466,10 @@ class MMVTracking(QWidget):
                         keyboard.press_and_release("2")
                     self._mouse(State.default)
             elif mode == State.link: # Creates Track -- Creates a new track or extends an existing one 
-                self.viewer.layers.selection.active.help = "(6)"
+                try:
+                    self.viewer.layers.selection.active.help = "(6)"
+                except AttributeError:
+                    pass
                 if isinstance(layer,napari.layers.labels.labels.Labels):
                     layer.mode = "pan_zoom"
                 @layer.mouse_drag_callbacks.append
@@ -480,7 +489,12 @@ class MMVTracking(QWidget):
                         return
                     selected_cell = label_layer.data[int(event.position[0]),int(event.position[1]),int(event.position[2])]
                     if selected_cell == 0: # Make sure a cell has been selected
-                        self.viewer.layers.selection.active.help = "YOU MISSED THE CELL, PRESS THE BUTTON AGAIN AND CONTINUE FROM THE LAST VALID INPUT!"
+                        try:
+                            self.viewer.layers.selection.active.help = "YOU MISSED THE CELL, PRESS THE BUTTON AGAIN AND CONTINUE FROM THE LAST VALID INPUT!"
+                        except AttributeError:
+                            err = QMessageBox()
+                            err.setText("You missed the cell. Press the button again and continue from the last valid input")
+                            err.exec()
                         self._link()
                         return
                     centroid = ndimage.center_of_mass(label_layer.data[int(event.position[0])], labels = label_layer.data[int(event.position[0])], index = selected_cell)
@@ -1018,7 +1032,7 @@ class MMVTracking(QWidget):
                 metrics.append("Average directness")
                 #metrics.append("Standard deviation of directness")
                 individual_metrics.append("Directness")
-                directness = np.asarray([ [self.euclidean_distance[i,0],self.euclidean_distance[i,1]/self.accumulated_distance[i,1]] for i in range(0,len(np.unique(self.tracks[:,0])))])
+                directness = np.asarray([ [self.euclidean_distance[i,0],self.euclidean_distance[i,1]/self.accumulated_distance[i,1] if self.accumulated_distance[i,1] > 0 else 0] for i in range(0,len(np.unique(self.tracks[:,0])))])
                 all_values.append(np.around(np.average(directness[:,1]),3))
                 #all_values.append(np.around(np.std(directness[:,1]),3))
                 valid_values.append(np.around(np.average( [directness[i,1] for i in range(0,len(directness)) if directness[i,0] in combined_mask]),3))
@@ -1318,7 +1332,10 @@ class MMVTracking(QWidget):
                 self._set_state_info()
                 return
         print("never should have come here")
-        self.viewer.layers.selection.active.help = ""
+        try:
+            self.viewer.layers.selection.active.help = ""
+        except AttributeError:
+            pass
         self.to_track = []
         self._mouse(State.link)
         self._set_state("Selected cells to link in slices:")
@@ -1413,7 +1430,11 @@ class MMVTracking(QWidget):
                 tmp = np.delete(tmp,tmp[1] == 1,1)
                 self.tracks = np.delete(self.tracks,np.where(np.isin(self.tracks[:,0],tmp[0,:],invert=True)),0) # Remove tracks of length <2
                 self.viewer.layers.remove('Tracks')
-                self.viewer.add_tracks(tracks, name='Tracks')
+                print(tracks.shape)
+                if tracks.shape[0] > 0:
+                    self.viewer.add_tracks(tracks, name='Tracks')
+                elif self.tracks.shape[0] > 0:
+                    self.viewer.add_tracks(self.tracks, name ='Tracks')
                 self._mouse(State.default)
                 self._switch_button()
                 self._set_state()
@@ -1423,6 +1444,34 @@ class MMVTracking(QWidget):
         self._mouse(State.unlink)
         self._switch_button()
         self._set_state("Selected cells to unlink in slices:")
+        
+    def _remove_displayed_tracks(self):
+        try:
+            tracks_layer = self.viewer.layers[self.viewer.layers.index("Tracks")]
+        except ValueError:
+            err = QMessageBox()
+            err.setText("No tracks layer found!")
+            err.exec()
+            return
+        to_remove = np.unique(tracks_layer.data[:,0])
+        if np.array_equal(to_remove,np.unique(self.tracks[:,0])):
+            err = QMessageBox()
+            err.setText("Can not delete whole tracks layer!")
+            err.exec()
+            return
+        msg = QMessageBox()
+        msg.setText("Are you sure? This will delete the following tracks: " + str(to_remove))
+        msg.addButton("Continue", QMessageBox.AcceptRole)
+        msg.addButton(QMessageBox.Cancel)
+        ret = msg.exec() # ret = 0 means Continue was selected, ret = 4194304 means Cancel was selected
+        if ret == 4194304:
+            return
+        print("<(<) <( )> (>)>")
+        self.tracks = np.delete(self.tracks, np.isin(self.tracks[:,0],to_remove),0)
+        self.viewer.layers.remove('Tracks')
+        self.le_trajectory.setText("")
+        self.viewer.add_tracks(self.tracks, name='Tracks')
+        pass
         
     def _switch_button(self):
         if not self.btn_remove_correspondence.text() == "Unlink":
