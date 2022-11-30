@@ -3,6 +3,7 @@ import napari.layers.labels.labels
 import numpy as np
 import pandas as pd
 import zarr
+import copy
 from qtpy.QtCore import QThread#, pyqtSignal <- DOESN'T WORK FOR SOME REASON, THUS EXPLICITLY IMPORTED FROM PYQT5
 from qtpy.QtWidgets import (QCheckBox, QComboBox, QFileDialog, QGridLayout, QHBoxLayout,
                             QLabel, QLineEdit, QMessageBox, QProgressBar, QPushButton,
@@ -10,6 +11,9 @@ from qtpy.QtWidgets import (QCheckBox, QComboBox, QFileDialog, QGridLayout, QHBo
 from scipy import ndimage
 
 from ._ressources import State, Window, SelectFromCollection, AdjustSegWorker, AdjustTracksWorker, SliceCounter, ThreadSafeCounter, SizeWorker, CPUSegWorker, GPUSegWorker
+from ._functions import *
+from ._reader import load_zarr
+from ._writer import save_zarr
 
         
 class MMVTracking(QWidget):
@@ -42,6 +46,10 @@ class MMVTracking(QWidget):
         self.direction_tracks = []
         self.euclidean_distance_tracks = [] 
         self.accumulated_distance_tracks = []
+        
+        # Variable to hold state of layers before human correction for evaluation
+        self.segmentation_old = []
+        self.tracks_old = []
 
         # Labels
         title = QLabel("<font color='green'>HITL4Trk</font>")
@@ -86,6 +94,9 @@ class MMVTracking(QWidget):
         self.btn_adjust_seg_ids = QPushButton("Adjust Segmentation IDs")
         btn_auto_track = QPushButton("Automatic tracking")
         btn_delete_displayed_tracks = QPushButton("Delete displayed tracks")
+        btn_evaluate_segmentation = QPushButton("Evaluate segmentation")
+        btn_evaluate_tracking = QPushButton("Evaluate tracking")
+        btn_store_eval_data = QPushButton("Store segmentation/tracking")
         
         # Tooltips for Buttons
         self.btn_adjust_seg_ids.setToolTip(
@@ -135,7 +146,7 @@ class MMVTracking(QWidget):
         btn_false_positive.clicked.connect(self._remove_fp)
         btn_segment.clicked.connect(self._run_segmentation)
         btn_preview_segment.clicked.connect(self._run_demo_segmentation)
-        btn_track.clicked.connect(self._temp)
+        btn_track.clicked.connect(self._run_tracking)
         btn_false_merge.clicked.connect(self._false_merge)
         btn_free_label.clicked.connect(self._set_free_id)
         btn_false_cut.clicked.connect(self._false_cut)
@@ -146,6 +157,10 @@ class MMVTracking(QWidget):
         self.btn_adjust_seg_ids.clicked.connect(self._adjust_ids)
         btn_auto_track.clicked.connect(self._auto_track)
         btn_delete_displayed_tracks.clicked.connect(self._remove_displayed_tracks)
+        btn_evaluate_segmentation.clicked.connect(self._evaluate_segmentation)
+        btn_evaluate_tracking.clicked.connect(self._evaluate_tracking)
+        btn_store_eval_data.clicked.connect(self._store_segmentation)
+        btn_store_eval_data.clicked.connect(self._store_tracks)
        
         # Combo Boxes
         self.c_segmentation = QComboBox()
@@ -167,6 +182,7 @@ class MMVTracking(QWidget):
         self.le_trajectory = QLineEdit("")
         self.le_movement = QLineEdit("")
         self.le_track_duration = QLineEdit("")
+        self.le_limit_evaluation = QLineEdit("0")
 
         # Link functions to line edits
         self.le_trajectory.editingFinished.connect(self._select_track)
@@ -284,12 +300,15 @@ class MMVTracking(QWidget):
         q_eval.layout().addWidget(self.ch_euclidean_distance) 
         q_eval.layout().addWidget(self.ch_accumulated_distance) 
         q_eval.layout().addWidget(btn_export)
+        q_eval.layout().addWidget(btn_evaluate_segmentation)
+        q_eval.layout().addWidget(self.le_limit_evaluation)
+        q_eval.layout().addWidget(btn_evaluate_tracking)
 
         # Add zones to self.toolbox
         self.toolbox.addItem(q_seg_track, "Data Processing")
         self.toolbox.addItem(q_segmentation, "Segmentation correction")
         self.toolbox.addItem(q_tracking, "Tracking correction")
-        self.toolbox.addItem(q_eval, "Evaluation")
+        self.toolbox.addItem(q_eval, "Analysis")
         
         # Progress UI
         help_progress = QWidget()
@@ -312,6 +331,7 @@ class MMVTracking(QWidget):
         scroll_area.layout().addWidget(title)
         scroll_area.layout().addWidget(help_mode)
         scroll_area.layout().addWidget(q_load)
+        scroll_area.layout().addWidget(btn_store_eval_data)
         scroll_area.layout().addWidget(self.toolbox)
         scroll_area.layout().addWidget(help_progress)
 
@@ -361,9 +381,7 @@ class MMVTracking(QWidget):
                     try:
                         label_layer = self.viewer.layers[self.viewer.layers.index("Segmentation Data")]
                     except ValueError:
-                        msg = QMessageBox()
-                        msg.setText("Missing label layer")
-                        msg.exec()
+                        message("Missing label layer")
                         self._mouse(State.default)
                         return
                     # Replace the ID with 0 (id of background)
@@ -387,9 +405,7 @@ class MMVTracking(QWidget):
                     try:
                         self.viewer.layers[self.viewer.layers.index("Segmentation Data")]
                     except ValueError:
-                        msg = QMessageBox()
-                        msg.setText("Missing label layer")
-                        msg.exec()
+                        message("Missing label layer")
                         self._mouse(State.default)
                         return
                     # Selected cell gets new label
@@ -409,15 +425,11 @@ class MMVTracking(QWidget):
                     try:
                         label_layer = self.viewer.layers[self.viewer.layers.index("Segmentation Data")]
                     except ValueError:
-                        msg = QMessageBox()
-                        msg.setText("Missing label layer")
-                        msg.exec()
+                        message("Missing label layer")
                         self._mouse(State.default)
                         return
                     if label_layer.data[int(event.position[0]),int(event.position[1]),int(event.position[2])] == 0:
-                        msg = QMessageBox()
-                        msg.setText("Can't merge background!")
-                        msg.exec()
+                        message("Can't merge background!")
                         self._mouse(State.default)
                         return
                     # Select cell, pass ID on
@@ -432,9 +444,7 @@ class MMVTracking(QWidget):
                     :param event: Mouseclick event
                     """
                     if self.viewer.layers[self.viewer.layers.index("Segmentation Data")].data[int(event.position[0]),int(event.position[1]),int(event.position[2])] == 0:
-                        msg = QMessageBox()
-                        msg.setText("Can't merge background!")
-                        msg.exec()
+                        message("Can't merge background!")
                         self._mouse(State.default)
                         return
                     # Label layer can't be missing as this is only called from False Cut 1
@@ -453,9 +463,7 @@ class MMVTracking(QWidget):
                     try:
                         label_layer = self.viewer.layers[self.viewer.layers.index("Segmentation Data")]
                     except ValueError:
-                        msg = QMessageBox()
-                        msg.setText("Missing label layer")
-                        msg.exec()
+                        _message("Missing label layer")
                         self._mouse(State.default)
                         return
                     label_layer.selected_label = label_layer.data[int(event.position[0]),int(event.position[1]),int(event.position[2])]
@@ -482,9 +490,7 @@ class MMVTracking(QWidget):
                     try:
                         label_layer = self.viewer.layers[self.viewer.layers.index("Segmentation Data")]
                     except ValueError:
-                        msg = QMessageBox()
-                        msg.setText("Missing label layer")
-                        msg.exec()
+                        message("Missing label layer")
                         self._mouse(State.default)
                         return
                     selected_cell = label_layer.data[int(event.position[0]),int(event.position[1]),int(event.position[2])]
@@ -492,9 +498,7 @@ class MMVTracking(QWidget):
                         try:
                             self.viewer.layers.selection.active.help = "YOU MISSED THE CELL, PRESS THE BUTTON AGAIN AND CONTINUE FROM THE LAST VALID INPUT!"
                         except AttributeError:
-                            err = QMessageBox()
-                            err.setText("You missed the cell. Press the button again and continue from the last valid input")
-                            err.exec()
+                            message("You missed the cell. Press the button again and continue from the last valid input")
                         self._link()
                         return
                     centroid = ndimage.center_of_mass(label_layer.data[int(event.position[0])], labels = label_layer.data[int(event.position[0])], index = selected_cell)
@@ -523,9 +527,7 @@ class MMVTracking(QWidget):
                     try:
                         label_layer = self.viewer.layers[self.viewer.layers.index("Segmentation Data")]
                     except ValueError:
-                        msg = QMessageBox()
-                        msg.setText("Missing label layer")
-                        msg.exec()
+                        message("Missing label layer")
                         self._mouse(State.default)
                         return
                     selected_cell = label_layer.data[int(event.position[0]),int(event.position[1]),int(event.position[2])]
@@ -558,9 +560,7 @@ class MMVTracking(QWidget):
                     try:
                         label_layer = self.viewer.layers[self.viewer.layers.index("Segmentation Data")]
                     except ValueError:
-                        msg = QMessageBox()
-                        msg.setText("Missing label layer")
-                        msg.exec()
+                        message("Missing label layer")
                         self._mouse(State.default)
                         return
                     selected_cell = label_layer.data[int(event.position[0]),int(event.position[1]),int(event.position[2])]
@@ -628,6 +628,7 @@ class MMVTracking(QWidget):
         Opens a dialog to select a zarr file.
         Loads the zarr file's content as layers into the viewer
         """
+        #load_zarr()
         dialog = QFileDialog()
         dialog.setNameFilter('*.zarr')
         self.file = dialog.getExistingDirectory(self, "Select Zarr-File")
@@ -638,13 +639,8 @@ class MMVTracking(QWidget):
 
         # check if "Raw Image", "Segmentation Data" or "Track" exist in self.viewer.layers
         if "Raw Image" in self.viewer.layers or "Segmentation Data" in self.viewer.layers or "Tracks" in self.viewer.layers:
-            msg = QMessageBox()
-            msg.setWindowTitle("Layer name blocked")
-            msg.setText("Found layer name")
-            msg.setInformativeText("One or more layers with the names \"Raw Image\", \"Segmentation Data\" or \"Tracks\" exists already. Continuing will delete those layers. Are you sure?")
-            msg.addButton("Continue", QMessageBox.AcceptRole)
-            msg.addButton(QMessageBox.Cancel)
-            ret = msg.exec() # ret = 0 means Continue was selected, ret = 4194304 means Cancel was selected
+            ret = message(title="Layer name blocked", text="Found layer name", informative_text="One or more layers with the names \"Raw Image\", \"Segmentation Data\" or \"Tracks\" exists already. Continuing will delete those layers. Are you sure?", buttons=[("Continue", QMessageBox.AcceptRole),QMessageBox.Cancel])
+            # ret = 0 means Continue was selected, ret = 4194304 means Cancel was selected
             if ret == 4194304:
                 return
             try:
@@ -673,6 +669,7 @@ class MMVTracking(QWidget):
             self.viewer.add_tracks(self.tracks, name='Tracks')
         self._mouse(State.default)
         
+        
         """import sys
         print(sys.getsizeof(self.viewer.layers[self.viewer.layers.index("Raw Image")].data)) # <- huge for whatever reason
         print(sys.getsizeof(self.viewer.layers))
@@ -686,40 +683,28 @@ class MMVTracking(QWidget):
         """
         Saves the (changed) layers to a zarr file
         """
-        
+        #save_zarr()
         # Useful if we later want to allow saving to new file
         try:
             raw = self.viewer.layers.index("Raw Image")
         except ValueError:
-            err = QMessageBox()
-            err.setText("No Raw Data layer found!")
-            err.exec()
+            message("No Raw Data layer found!")
             return
         try: # Check if segmentation layer exists
             seg = self.viewer.layers.index("Segmentation Data")
         except ValueError:
-            err = QMessageBox()
-            err.setText("No Segmentation Data layer found!")
-            err.exec()
+            message("No Segmentation Data layer found!")
             return
         try: # Check if tracks layer exists
             track = self.viewer.layers.index("Tracks")
         except ValueError:
-            err = QMessageBox()
-            err.setText("No Tracks layer found!")
-            err.exec()
+            message("No Tracks layer found!")
             return
 
         ret = 1
         if self.le_trajectory.text() != "": # Some tracks are potentially left out
-            msg = QMessageBox()
-            msg.setWindowTitle("Tracks")
-            msg.setText("Limited Tracks layer")
-            msg.setInformativeText("It looks like you have selected only some of the tracks from your tracks layer. Do you want to save only the selected ones or all of them?") # ok clippy
-            msg.addButton("Save Selected",QMessageBox.YesRole)
-            msg.addButton("Save All",QMessageBox.NoRole)
-            msg.addButton(QMessageBox.Cancel)
-            ret = msg.exec() # Save Selected -> ret = 0, Save All -> ret = 1, Cancel -> ret = 4194304
+            ret = message(title="Tracks", text="Limited Tracks layer", informative_text="It looks like you have selected only some of the tracks from your tracks layer. Do you want to save only the selected ones or all of them?", buttons=[("Save Selected",QMessageBox.YesRole),("Save All",QMessageBox.NoRole),QMessageBox.Cancel])
+            # Save Selected -> ret = 0, Save All -> ret = 1, Cancel -> ret = 4194304
             if ret == 4194304:
                 return
         if ret == 0: # save current tracks layer
@@ -754,15 +739,7 @@ class MMVTracking(QWidget):
                 self.z1['tracking_data'].resize(self.tracks.shape[0],self.tracks.shape[1])
                 self.z1['tracking_data'][:] = self.tracks
                 #self.z1.create_dataset('tracking_data', shape = self.tracks.shape, dtype = 'i4', data = self.tracks)
-        msg = QMessageBox()
-        msg.setText("Zarr file has been saved.")
-        msg.exec()
-
-    def _temp(self):
-        print(globals())
-        """import gc
-        gc.collect()"""
-        pass
+        message("Zarr file has been saved.")
 
     def _plot(self): # TODO: test running thread from thread, move to separate thread to allow multithreading for size calculation
         """
@@ -869,13 +846,8 @@ class MMVTracking(QWidget):
         Exports a CSV with selected metrics 
         """
         if not (self.ch_speed.checkState() or self.ch_size.checkState() or self.ch_direction.checkState() or self.ch_euclidean_distance.checkState() or self.ch_accumulated_distance.checkState()):     # example
-            msg = QMessageBox()
-            msg.setWindowTitle("No metric selected")
-            msg.setText("You selected no metrics")
-            msg.setInformativeText("Are you sure you want to export just the amount of cells?")
-            msg.addButton(QMessageBox.Yes)
-            msg.addButton(QMessageBox.Cancel)
-            ret = msg.exec() # Yes -> ret = 16384, Cancel -> ret = 4194304
+            ret = message(title="No metric selected", text="You selected no metrics", informative_text="Are you sure you want to export just the amount of cells?", buttons=[QMessageBox.Yes,QMessageBox.Cancel])
+             # Yes -> ret = 16384, Cancel -> ret = 4194304
             if ret == 4194304:
                 return
         import csv
@@ -901,19 +873,11 @@ class MMVTracking(QWidget):
             try:
                 min_movement = int(self.le_movement.text())
             except ValueError:
-                err = QMessageBox()
-                err.setWindowTitle("Wrong type")
-                err.setText("String detected")
-                err.setInformativeText("Please use integer instead of text")
-                err.exec()
+                message(title="Wrong type", text="String detected", informative_text="Please use integer instead of text")
                 return
             else:
                 if min_movement != float(self.le_movement.text()):
-                    err = QMessageBox()
-                    err.setWindowTitle("Wrong type")
-                    err.setText("Float detected")
-                    err.setInformativeText("Please use integer instead of float")
-                    err.exec()
+                    message(title="Wrong type", text="Float detected", informative_text="Please use integer instead of float")
                     return
                 movement_mask = self.direction[np.where(self.direction[:,4] >= min_movement)[0],0]
              
@@ -924,19 +888,12 @@ class MMVTracking(QWidget):
             try:
                 min_duration = int(self.le_track_duration.text())
             except ValueError:
-                err = QMessageBox()
-                err.setWindowTitle("Wrong type")
-                err.setText("String detected")
-                err.setInformativeText("Please use integer instead of text")
+                message(title="Wrong type", text="String detected", informative_text="Please use integer instead of text")
                 err.exec()
                 return
             else:
                 if min_duration != float(self.le_track_duration.text()):
-                    err = QMessageBox()
-                    err.setWindowTitle("Wrong type")
-                    err.setText("Float detected")
-                    err.setInformativeText("Please use integer instead of float")
-                    err.exec()
+                    message(title="Wrong type", text="Float detected", informative_text="Please use integer instead of float")
                     return
                 duration_mask = np.unique(self.tracks[:,0])[np.where(np.unique(self.tracks[:,0],return_counts=True)[1]>= min_duration)]
             
@@ -1047,8 +1004,7 @@ class MMVTracking(QWidget):
         # Stats for each individual cell
         if not (self.ch_speed.checkState() or self.ch_size.checkState() or self.ch_direction.checkState() or self.ch_euclidean_distance.checkState() or self.ch_accumulated_distance.checkState()):
             csvfile.close()
-            msg = QMessageBox()
-            msg.setText("Export complete")
+            message("Export complete")
             return
         writer.writerow(individual_metrics)
         for track in combined_mask:
@@ -1099,9 +1055,7 @@ class MMVTracking(QWidget):
                         value.append(np.around(directness[np.where(directness[:,0] == track)[0],1][0],3))            
                 writer.writerow(value)
         csvfile.close()
-        msg = QMessageBox()
-        msg.setText("Export complete")
-        msg.exec()
+        message("Export complete")
                 
 
     def _select_track(self, tracks = []):
@@ -1127,9 +1081,7 @@ class MMVTracking(QWidget):
                     for i in range(0,len(txt.split(","))):
                         tracks.append(int((txt.split(",")[i])))
                 except ValueError:
-                    msg = QMessageBox()
-                    msg.setText("Please use a single integer (whole number) or a comma separated list of integers")
-                    msg.exec()
+                    message("Please use a single integer (whole number) or a comma separated list of integers")
                     return
         try:
             self.viewer.layers.remove('Tracks')
@@ -1188,9 +1140,7 @@ class MMVTracking(QWidget):
         try:
             label_layer = self.viewer.layers[self.viewer.layers.index("Segmentation Data")]
         except ValueError:
-            msg = QMessageBox()
-            msg.setText("Missing label layer")
-            msg.exec()
+            message("Missing label layer")
             return
         label_layer.selected_label = self._get_free_id(label_layer)
         napari.viewer.current_viewer().layers.select_all()
@@ -1247,9 +1197,7 @@ class MMVTracking(QWidget):
         try: # Check if segmentation layer exists
             layer = self.viewer.layers[self.viewer.layers.index("Segmentation Data")]
         except ValueError:
-            err = QMessageBox()
-            err.setText("No label layer found!")
-            err.exec()
+            message("No label layer found!")
             return
         try:
             tracks = self.viewer.layers[self.viewer.layers.index("Tracks")].data
@@ -1257,12 +1205,8 @@ class MMVTracking(QWidget):
             pass
         else:
             if not np.array_equal(tracks,self.tracks): # Check if full tracks layer is displayed
-                msg = QMessageBox()
-                msg.setText("Missing Tracks")
-                msg.setInformativeText("You need to have all Tracks displayed to add a new Track. Do you want to display all Tracks now?")
-                msg.addButton("Display all", QMessageBox.AcceptRole)
-                msg.addButton(QMessageBox.Cancel)
-                ret = msg.exec() # ret = 0 -> Display all, ret = 4194304 -> Cancel
+                ret = message(title="No Tracks", text="Missing Tracks", informative_text="You need to have all Tracks displayed to add a new Track. Do you want to display all Tracks now?", buttons=[("Display all", QMessageBox.AcceptRole),QMessageBox.Cancel])
+                # ret = 0 -> Display all, ret = 4194304 -> Cancel
                 if ret == 4194304:
                     return
                 self.le_trajectory.setText("")
@@ -1278,11 +1222,7 @@ class MMVTracking(QWidget):
                     self._set_state_info()
                     return
                 if len(np.asarray(self.to_track)[:,0]) != len(set(np.asarray(self.to_track)[:,0])): # Check for duplicates
-                    msg = QMessageBox()
-                    msg.setText("Duplicate cells per slice")
-                    msg.setInformativeText("Looks like you selected more than one cell per slice. This does not work.")
-                    msg.addButton(QMessageBox.Ok)
-                    msg.exec()
+                    message(title="Duplicate Cells", text="Duplicate cells per slice", informative_text="Looks like you selected more than one cell per slice. This does not work.", buttons=[QMessageBox.Ok])
                     self.to_track = []
                     self._mouse(State.default)
                     self._set_state()
@@ -1353,25 +1293,19 @@ class MMVTracking(QWidget):
         try:
             label_layer = self.viewer.layers[self.viewer.layers.index("Segmentation Data")]
         except ValueError:
-            err = QMessageBox()
-            err.setText("No label layer found!")
-            err.exec()
+            message("No label layer found!")
             return
         try:
             tracks_layer = self.viewer.layers[self.viewer.layers.index("Tracks")]
         except ValueError:
-            err = QMessageBox()
-            err.setText("No tracks layer found!")
-            err.exec()
+            message("No tracks layer found!")
             return
         track_id = max(np.amax(tracks_layer.data[:,0]),np.amax(self.tracks[:,0])) + 1
         tracks = tracks_layer.data
         for i in range(len(label_layer.mouse_drag_callbacks)):
             if label_layer.mouse_drag_callbacks[i].__name__ == "_cut":
                 if len(self.to_cut) < 2:
-                    msg = QMessageBox()
-                    msg.setText("Please select more than one cell!")
-                    msg.exec()
+                    message("Please select more than one cell!")
                     self.to_cut = []
                     self._mouse(State.default)
                     self._switch_button()
@@ -1387,9 +1321,7 @@ class MMVTracking(QWidget):
                 for j in range(len(tracks_layer.data)):  # Confirm track ID matches other entries
                     if tracks[j,1] == self.to_cut[-1][0] and tracks[j,2] == self.to_cut[-1][1] and tracks[j,3] == self.to_cut[-1][2]:
                         if track != tracks[j,0]:
-                            msg = QMessageBox()
-                            msg.setText("Please select cells that belong to the same Track!")
-                            msg.exec()
+                            message("Please select cells that belong to the same Track!")
                             self.to_cut = []
                             self._mouse(State.default)
                             return
@@ -1449,21 +1381,14 @@ class MMVTracking(QWidget):
         try:
             tracks_layer = self.viewer.layers[self.viewer.layers.index("Tracks")]
         except ValueError:
-            err = QMessageBox()
-            err.setText("No tracks layer found!")
-            err.exec()
+            message("No tracks layer found!")
             return
         to_remove = np.unique(tracks_layer.data[:,0])
         if np.array_equal(to_remove,np.unique(self.tracks[:,0])):
-            err = QMessageBox()
-            err.setText("Can not delete whole tracks layer!")
-            err.exec()
+            message("Can not delete whole tracks layer!")
             return
-        msg = QMessageBox()
-        msg.setText("Are you sure? This will delete the following tracks: " + str(to_remove))
-        msg.addButton("Continue", QMessageBox.AcceptRole)
-        msg.addButton(QMessageBox.Cancel)
-        ret = msg.exec() # ret = 0 means Continue was selected, ret = 4194304 means Cancel was selected
+        ret = message(text="Are you sure? This will delete the following tracks: " + str(to_remove), buttons=[("Continue", QMessageBox.AcceptRole),QMessageBox.Cancel])
+        # ret = 0 means Continue was selected, ret = 4194304 means Cancel was selected
         if ret == 4194304:
             return
         print("<(<) <( )> (>)>")
@@ -1499,9 +1424,7 @@ class MMVTracking(QWidget):
         try:
             self.viewer.layers[self.viewer.layers.index("Segmentation Data")].mode = "pan_zoom"
         except ValueError:
-            msg = QMessageBox()
-            msg.setText("Missing label layer")
-            msg.exec()
+            message("Missing label layer")
             return
         self._mouse(State.select, paint = paint)
 
@@ -1561,9 +1484,7 @@ class MMVTracking(QWidget):
         try:
             label_layer = self.viewer.layers[self.viewer.layers.index("Segmentation Data")]
         except ValueError:
-            err = QMessageBox()
-            err.setText("No label layer found!")
-            err.exec()
+            message("No label layer found!")
             return
         """#def __init__(self,parent,label_layer,tracks,counter,completed):
         import multiprocessing
@@ -1693,7 +1614,7 @@ class MMVTracking(QWidget):
         """
         for unique_id in np.unique(self.tracks[:,0]):
             track = np.delete(self.tracks,np.where(self.tracks[:,0] != unique_id),0)
-            distance = []
+            distance = [] # TODO: clarify/rename
             for i in range(0,len(track)-1):
                 distance.append(np.hypot(track[i,2] - track[i+1,2],track[i,3] - track[i+1,3]))
             accumulated_distance = np.around(np.sum(distance),3)
@@ -1717,9 +1638,7 @@ class MMVTracking(QWidget):
         try:
             label_layer = self.viewer.layers[self.viewer.layers.index("Segmentation Data")]
         except ValueError:
-            err = QMessageBox()
-            err.setText("No label layer found!")
-            err.exec()
+            message("No label layer found!")
             return
         self.btn_adjust_seg_ids.setEnabled(False)
         self.rb_eco.setEnabled(False)
@@ -1799,9 +1718,7 @@ class MMVTracking(QWidget):
         try:
             data = self.viewer.layers[self.viewer.layers.index("Raw Image")].data
         except ValueError:
-            err = QMessageBox()
-            err.setText("No image layer found!")
-            err.exec()
+            message("No image layer found!")
             return
         if demo:
             data = data[0:5]
@@ -1887,10 +1804,192 @@ class MMVTracking(QWidget):
     def _add_labels_help(self, param):
         self._add_labels(param[0],param[1])
         
-    def _run_tracking(self):
-        msg = QMessageBox()
-        msg.setText("Not implemented yet")
-        msg.exec()
+    def _run_tracking(self): # TODO: remove unnecessary steps
+
+        
+        if "Tracks" in self.viewer.layers:
+            ret = message(title="Tracks exists", text="Tracks layer found", informative_text="A tracks layer currently exists. Running this step will replace that layer. are you sure?", buttons=[("Continue", QMessageBox.AcceptRole),QMessageBox.Cancel])
+            # ret = 0 means Continue was selected, ret = 4194304 means Cancel was selected
+            if ret == 4194304:
+                return
+        self.viewer.layers.remove("Tracks")
+        
+        from scipy import spatial, optimize
+        
+        APPROX_INF = 65535
+        MAX_MATCHING_DIST = 45
+        TRACK_DISPLAY_LENGTH = 20
+        
+        img = self.viewer.layers[self.viewer.layers.index("Segmentation Data")].data
+        total_time = img.shape[0]
+        traj = dict()
+        lineage = dict()
+        
+        for tt in range(total_time): # important
+            seg = img[tt,:,:]
+            if sum(sum(seg))==0:
+                print("Empty label layer, no tracking possible")
+                return
+
+            # get label image
+            _, num_cells = ndimage.label(seg)
+
+            seg_label = seg
+
+            # calculate center of mass
+            centroid = ndimage.center_of_mass(seg, labels=seg_label, index=np.unique(seg)[1:])     # sometimes returns nans, TBD why ??
+            
+            # generate cell information of this frame
+            traj.update({
+                tt : {"centroid": centroid, "parent": [], "child": [], "ID": []}
+            })
+
+
+        # initialize trajectory ID, parent node, track pts for the first frame
+        max_cell_id =  len(traj[0].get("centroid"))
+        traj[0].update(
+            {"ID": np.arange(0, max_cell_id, 1)}
+        )
+        traj[0].update(
+            {"parent": -1 * np.ones(max_cell_id, dtype=int)}
+        )
+        centers = traj[0].get("centroid")
+        pts = []
+        for ii in range(max_cell_id):
+            pts.append([centers[ii]])
+            lineage.update({ii: [centers[ii]]})
+        traj[0].update({"track_pts": pts})
+
+
+
+        for tt in np.arange(1, total_time):
+            p_prev = traj[tt-1].get("centroid")
+            p_next = traj[tt].get("centroid")
+
+            ###########################################################
+            # simple LAP tracking
+            ###########################################################
+            num_cell_prev = len(p_prev)
+            num_cell_next = len(p_next)
+
+            # calculate distance between each pair of cells
+
+            # if condition == '3':
+            #     print(tt)
+            #import pdb; pdb.set_trace()
+
+            cost_mat = spatial.distance.cdist(p_prev, p_next)
+
+            # if the distance is too far, change to approx. Inf.
+
+            # if tt >= 406:
+            #     import pdb; pdb.set_trace()
+            cost_mat[cost_mat > MAX_MATCHING_DIST] = APPROX_INF
+
+            # add edges from cells in previous frame to auxillary vertices
+            # in order to accomendate segmentation errors and leaving cells
+            cost_mat_aug = MAX_MATCHING_DIST * 1.2 * np.ones(
+                (num_cell_prev, num_cell_next + num_cell_prev), dtype=float
+            )
+            cost_mat_aug[:num_cell_prev, :num_cell_next] = cost_mat[:, :]
+
+            # solve the optimization problem
+
+            if sum(sum(1*np.isnan(cost_mat))) > 0:  # check if there is at least one np.nan in cost_mat
+                #print(well_name + ' terminated at frame ' + str(tt))
+                print("??Justin hatte einen Denkfehler")
+                break   
+            row_ind, col_ind = optimize.linear_sum_assignment(cost_mat_aug)
+
+            #########################################################
+            # parse the matching result
+            #########################################################
+            prev_child = np.ones(num_cell_prev, dtype=int)
+            next_parent = np.ones(num_cell_next, dtype=int)
+            next_ID = np.zeros(num_cell_next, dtype=int)
+            next_track_pts = []
+
+            # assign child for cells in previous frame
+            for ii in range(num_cell_prev):
+                if col_ind[ii] >= num_cell_next:
+                    prev_child[ii] = -1
+                else:
+                    prev_child[ii] = col_ind[ii]
+
+            # assign parent for cells in next frame, update ID and track pts
+            prev_pt = traj[tt-1].get("track_pts")
+            prev_id = traj[tt-1].get("ID")
+            for ii in range(num_cell_next):
+                if ii in col_ind:
+                    # a matched cell is found
+                    next_parent[ii] = np.where(col_ind == ii)[0][0]
+                    next_ID[ii] = prev_id[next_parent[ii]]
+
+                    current_pts = prev_pt[next_parent[ii]].copy()
+                    current_pts.append(p_next[ii])
+                    if len(current_pts) > TRACK_DISPLAY_LENGTH:
+                        current_pts.pop(0)
+                    next_track_pts.append(current_pts)
+                    # attach this point to the lineage
+                    single_lineage = lineage.get(next_ID[ii])
+                    try:
+                        single_lineage.append(p_next[ii])
+                    except Exception:
+                        pdb.set_trace()
+                    lineage.update({next_ID[ii]: single_lineage})
+                else:
+                    # a new cell
+                    next_parent[ii] = -1
+                    next_ID[ii] = max_cell_id
+                    next_track_pts.append([p_next[ii]])
+                    lineage.update({max_cell_id: [p_next[ii]]})
+                    max_cell_id += 1
+
+            # update record
+            traj[tt-1].update({"child": prev_child})
+            traj[tt].update({"parent": next_parent})
+            traj[tt].update({"ID": next_ID})
+            traj[tt].update({"track_pts": next_track_pts})
+            
+        tracks_layer = np.round(np.asarray(traj[0]['centroid'][0])) 
+        tracks_layer = np.append(tracks_layer, [0])
+        tracks_layer = np.append(tracks_layer, [traj[0]['ID'][0]])
+        tracks_layer=tracks_layer[[3,2,0,1]]
+    
+    
+        tracks_layer = np.expand_dims(tracks_layer, axis=1)
+        tracks_layer = tracks_layer.T
+        
+    
+        for i in range(len(traj[0]['ID'])-1):
+            track = np.round(np.asarray(traj[0]['centroid'][i+1]))
+            track = np.append(track, [0])
+            track = np.append(track, [traj[0]['ID'][i+1]])
+            track = track[[3,2,0,1]]
+            track = np.expand_dims(track, axis=1)
+            track = track.T
+            tracks_layer = np.concatenate((tracks_layer, track), axis=0)
+    
+    
+        #for i in range(9):                                                             # 10 images
+        for i in range(len(traj)-1):                                                   # all images    
+            for cell_ID in range(len(traj[i+1]['ID'])):
+                track = np.round(np.asarray(traj[i+1]['centroid'][cell_ID]))      # centroid
+                track = np.append(track, [i+1])                          # frame
+                track = np.append(track, [traj[i+1]['ID'][cell_ID]])       # ID
+                track = track[[3,2,0,1]]
+                track = np.expand_dims(track, axis=1)
+                track = track.T
+                tracks_layer = np.concatenate((tracks_layer, track), axis=0)   
+        
+        
+        
+        df = pd.DataFrame(tracks_layer, columns=['ID', 'Z', 'Y', 'X'])
+        df.sort_values(['ID', 'Z'], ascending=True, inplace=True)
+        tracks_formatted = df.values # this is tracks layer
+        
+        self.viewer.add_tracks(tracks_formatted, name = 'Tracks')
+        print("      •.,¸,.•*`•.,¸¸,.•*¯ ╭━━━━╮\n •.,¸,.•*¯`•.,¸,.•*¯.|:::::::::: /___/\n•.,¸,.•*¯`•.,¸,.•* <|:::::::::(｡ ●ω●｡)\n  •.,¸,.•¯•.,¸,.•╰ * >し------し---Ｊ")
         
     def _set_state(self,state=""):
         self.progress_state.setText(state)
@@ -1914,5 +2013,314 @@ class MMVTracking(QWidget):
     def _set_description(self,description=""):
         self.progress_description.setText(description)
         
+    def _store_segmentation(self):
+        self.segmentation_old = copy.deepcopy(self.viewer.layers[self.viewer.layers.index("Segmentation Data")].data)
+        print("segmentation stored")
+    
+    def _store_tracks(self):
+        tracks = copy.deepcopy(self.viewer.layers[self.viewer.layers.index("Tracks")].data)
+        self.tracks_old = []
+        for line in tracks:
+            #print(line)
+            self.tracks_old.append([line,self.viewer.layers[self.viewer.layers.index("Segmentation Data")].data[line[1],line[2],line[3]]])
+            pass
+        #self.tracks_old = self.viewer.layers[self.viewer.layers.index("Tracks")].data
+        print("tracks stored")
+        
+    def _evaluate_segmentation(self):
+        auto_segmentation = self.segmentation_old
+        human_segmentation = self.viewer.layers[self.viewer.layers.index("Segmentation Data")].data
+        
+        #### FOR CURRENT FRAME
+        
+        frame = int(self.viewer.dims.point[0])
+        
+        # Intersection/Union calculation
+        intersection = np.sum( np.sum( np.logical_and(auto_segmentation[frame], human_segmentation[frame])))
+        union = np.sum( np.sum( np.logical_or(auto_segmentation[frame], human_segmentation[frame])))
+        
+        # IoU calculation
+        iou_score = intersection / union
+        print("IoU score for frame %d: %s" % (frame, iou_score))
+        
+        # DICE score calculation
+        dice_score = (2 * intersection) / (np.count_nonzero(auto_segmentation[frame]) + np.count_nonzero(human_segmentation[frame]))
+        print("DICE score for frame %d: %s" % (frame, dice_score))
+        
+        # F1 score calculation
+        # Intersection = True Positive
+        # Union = True Positive + False Positive + False Negative
+        f1_score = (2 * intersection) / (intersection + union)
+        print("F1 score for frame %d: %s" % (frame, f1_score))
+        
+        #### FOR WHOLE MOVIE
+        
+        # Intersection/Union calculation
+        intersection = np.sum( np.sum( np.sum( np.logical_and(auto_segmentation, human_segmentation))))
+        union = np.sum( np.sum( np.sum( np.logical_or(auto_segmentation, human_segmentation))))
+        
+        # IoU calculation
+        iou_score = intersection / union
+        print("IoU score for whole movie: %s" % iou_score)
+        
+        # DICE score calculation
+        dice_score = (2 * intersection) / (np.count_nonzero(auto_segmentation) + np.count_nonzero(human_segmentation))
+        print("DICE score for whole movie: %s" % dice_score)
+        
+        # F1 score calculation
+        # Intersection = True Positive
+        # Union = True Positive + False Positive + False Negative
+        f1_score = (2 * intersection) / (intersection + union)
+        print("F1 score for whole movie: %s" % f1_score)
+            
+    def _evaluate_tracking(self):
+        
+        IOU_THRESHOLD = 0.2 # TODO: reevaluate
+        
+        false_positive = 0 # 1 weight (vertex deleting)
+        #false_negative = 0 # 10 weight (vertex adding)
+        delete_edge = 0 # 1 weight (edge deleting)
+        add_edge = 0 # 1.5 weight (edge adding)
+        split_cell = 0 # 5 weight (vertex splitting)
+        
+        current_frame = int(self.viewer.dims.point[0])
+        try:
+            selected_limit = int(self.le_limit_evaluation.text())
+        except ValueError:
+            message(title="Wrong type", text="String detected", informative_text="Please use integer instead of text")
+            return
+        
+        if current_frame == selected_limit:
+            message("Must select at least 2 frames to evaluate tracking!")
+            return
+        elif current_frame < selected_limit:
+            frame_ids = list(range(current_frame, selected_limit + 1))
+        else:
+            frame_ids = list(range(selected_limit, current_frame + 1))
+        
+        tracks = self.viewer.layers[self.viewer.layers.index("Tracks")].data
+        tracks_auto = self.tracks_old
+        tracks_human = []
+        segmentation = self.viewer.layers[self.viewer.layers.index("Segmentation Data")].data
+        for line in tracks:
+            tracks_human.append(np.append(line, segmentation[line[1], line[2], line[3]]))
+            
+        tracks_human = np.asarray(tracks_human)
+        
+        false_positive, false_negative, split_cell = self._evaluate_slices(frame_ids, IOU_THRESHOLD)
+        
+        """relevant_human_tracks = tracks_human[np.where((tracks_human[:,1] >= frame_ids[0]) & (tracks_human[:,1] <= frame_ids[-1]))]
+        relevant_auto_tracks = tracks_autp[np.where((tracks_auto[:,1] >= frame_ids[0]) & (tracks_auto[:,1] <= frame_ids[-1]))]
+
+        print(relevant_human_tracks)
+        
+        for frame in frame_id[0,-2]:
+            for segmentation_id in relevant_
+            pass"""
         
         
+        
+        
+        
+        
+        print("False negatives: %s" % false_negative)
+        print("False positives: %s" % false_positive)
+        print("Deleted edges: %s" % delete_edge)
+        print("Added edges: %s" % add_edge)
+        print("Split cells: %s" % split_cell)
+        
+        fault_value = false_positive + false_negative * 10 + delete_edge + add_edge * 1.5 + split_cell * 5
+        
+        print("Fault value: %s" % fault_value)
+        
+    def _evaluate_slices(self, frame_ids, iou_threshold):
+        
+        false_positive = 0
+        split_cell = 0
+        
+        segmentation_auto = self.segmentation_old
+        segmentation_human = self.viewer.layers[self.viewer.layers.index("Segmentation Data")].data
+        
+        for frame in frame_ids:
+            # Relevant z-frames
+            frame_auto = segmentation_auto[frame]
+            frame_human = segmentation_human[frame]
+            
+            segmentation_ids = np.unique(frame_auto)
+            segmentation_ids = segmentation_ids[segmentation_ids > 0]
+            
+            for id in segmentation_ids:
+                print("ID:", id)
+                # This is the ID of the cell from the generated segmentation we are checking on
+                
+                ids_human = np.unique(frame_human[np.where(frame_auto == id)], return_counts = True)
+                ids_human = np.asarray(ids_human)
+                print("Human ids:", ids_human)
+                # These are the IDs of all cells (including background) in the corrected segmentation that are overlapping the original cell 
+                
+                # If there is no cell in the corrected segmentation our find was a false positive
+                if len(ids_human[0,ids_human[0] > 0]) == 0:
+                    # FALSE POSITIVE
+                    false_positive += 1
+                    continue
+                
+                # At least one cell is overlapping the original cell
+                
+                if len(ids_human[0,ids_human[0] > 0]) == 1:
+                    # Exactly one cell is overlapping the original cell
+                    
+                    if ids_human.shape[0] == 2:
+                        ids_human = ids_human[:,ids_human[0] > 0].T[0]
+                    print("Adjusted Human IDs:", ids_human)
+                    
+                    intersection = ids_human[1]
+                    union = len(frame_auto[frame_auto == id]) + len(frame_human[frame_human == ids_human[0]]) - intersection
+                    iou = [(ids_human[0], intersection / union)]
+                    print("IoU:",iou)
+                    
+                    if not self._is_match(id, iou, frame_auto, frame_human):
+                        false_positive += 1
+                        print("False Positive for ID", id)
+                    else:
+                        print("Match for ID", id)
+                        
+                
+                if len(ids_human[0,ids_human[0] > 0]) > 1:
+                    # Two or more cells are overlapping the original cell
+                    
+                    ids_human = ids_human[:,ids_human[0] > 0]
+                    ids_human = np.asarray(ids_human)
+                    print("Human IDs:", ids_human, ", shape:", ids_human.shape)
+                    
+                    if len(ids_human[0]) == 1:
+                        # SPLIT CELL (POTENTIALLY MULTIPLE)
+                        split_cell += len(ids_human[0,ids_human[0] > 0]) - 1
+                        print("Split Cell times", len(ids_human[0,ids_human[0] > 0]) - 1 , "for ID", id)
+                        continue
+                    
+                    if len(ids_human[0]) > 1:
+                        # At least two IDs found at old cells location
+                        ious = []
+                        
+                        ids_human = ids_human.T
+                        
+                        if ids_human.shape[1] == 1:
+                            intersection == ids_human[1]
+                            union = len(frame_auto[frame_auto == id]) + len(frame_human[frame_human == ids_human[0]]) - intersection
+                            ious.append((ids_human[0], intersection / union))
+                        else:
+                            for id_human in ids_human:
+                                if id_human[0] == 0:
+                                    continue
+                                intersection = id_human[1] 
+                                union = len(frame_auto[frame_auto == id]) + len(frame_human[frame_human == id_human[0]]) - intersection
+                                ious.append((id_human[0], intersection / union))
+                        
+                    
+                        split = True
+                        for iou in ious:
+                            if iou[1] < iou_threshold:
+                                split = False
+                            
+                        if split:
+                            # SPLIT CELL (POTENTIALLY MULTIPLE)
+                            split_cell += len(ious) - 1
+                            print("Split Cell times", len(ious) - 1 , "for ID", id)
+                        else:
+                            
+                            if len(ids_human[0,ids_human[0] > 0]) == 1:
+                                # It's a match :)
+                                print("Match for ID", id)
+                                continue
+    
+                            df = pd.DataFrame(ious, columns=['ID', 'IOU'])
+                            df.sort_values(['IOU'], ascending=False, inplace=True)
+                            ious = df.values
+                            
+                            if not self._is_match(id, ious, frame_auto, frame_human):
+                                false_positive += 1
+                                print("False Positive for ID", id)
+                            else:
+                                print("Match for ID", id)
+            
+            
+            new_segmentation_ids = np.unique(segmentation_human[frame])
+            false_negative = len(new_segmentation_ids[new_segmentation_ids > 0]) - len(segmentation_ids) + false_positive - split_cell
+        
+        return (false_positive, false_negative, split_cell)
+            
+            
+    def _is_match(self, original_id, ious, frame_auto, frame_human):
+        
+        ious_array = np.asarray(ious)
+        while ious_array.ndim > 1:
+            print("IoUs:", ious_array, ", shape:", ious_array.shape)
+            print(ious_array)
+            if ious_array.shape[1] == 1:
+                return ious_array[0] == original_id
+            
+            auto_ids = np.unique(frame_auto[np.where(frame_human == ious_array[0,0])], return_counts = True)
+            
+            auto_ids = np.asarray(auto_ids).T
+            auto_ious = []
+            
+            print("Auto-IDs:", auto_ids, ", shape:", auto_ids.shape)
+            
+            for auto_id in auto_ids:
+                intersection = auto_id[1]
+                union = len(frame_auto[frame_auto == auto_id[0]]) + len(frame_human[frame_human == ious_array[0,0]]) - intersection
+                auto_ious.append((auto_id[0], intersection / union))
+            
+            df = pd.DataFrame(auto_ious, columns=['ID', 'IOU'])
+            df.sort_values(['IOU'], ascending=False, inplace=True)
+            auto_ious = df.values
+            
+            while True:
+                print("Auto-IoUs:", auto_ious, ", shape:", auto_ious.shape)
+                
+                if auto_ious[0,0] == original_id:
+                    return True
+                
+                human_ids = np.unique(frame_human[np.where(frame_auto == ious_array[0,0])], return_counts = True)
+                human_ids = np.asarray(human_ids).T
+                print("New human IDs:", human_ids, ", shape:", human_ids.shape)
+                if human_ids.shape[0] == 0:
+                    return False
+                human_ious = []
+                for id_human in human_ids:
+                    intersection = id_human[1]
+                    union = len(frame_auto[frame_auto == id]) + len(frame_human[frame_human == id_human]) - intersection
+                    human_ious.append((id_human[0], intersection / union))
+                
+                df = pd.DataFrame(human_ious, columns=['ID', 'IOU'])
+                df.sort_values(['IOU'], ascending=False, inplace=True)
+                human_ious = df.values
+                
+                if human_ious[0,0] == ious_array[0,0]:
+                    ious_array = np.delete(ious_array, 0)
+                    break
+                
+                auto_ious = np.delete(auto_ious, 0)
+        
+        return False
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            

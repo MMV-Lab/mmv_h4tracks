@@ -3,7 +3,7 @@ import enum
 
 import numpy as np
 import pandas as pd
-from PyQt5.QtCore import pyqtSignal
+from PyQt5.QtCore import pyqtSignal # TODO: replace with "Signal"
 from qtpy.QtCore import QObject#, pyqtSignal <- DOESN'T WORK FOR SOME REASON, THUS EXPLICITLY IMPORTED FROM PYQT5
 from qtpy.QtWidgets import QWidget
 
@@ -195,6 +195,7 @@ class AdjustSegWorker(QObject):
                 for entry in tracks_in_layer:
                     centroid = entry[2:4]
                     if self.label_layer.data[slice_id,centroid[0],centroid[1]] == 0:
+                        # TODO: replace centroid with medoid
                         pass
                     self.label_layer.fill([slice_id,centroid[0],centroid[1]],entry[0])
             self.completed.increment()
