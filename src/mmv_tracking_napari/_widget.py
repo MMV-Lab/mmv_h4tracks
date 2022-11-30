@@ -2053,6 +2053,39 @@ class MMVTracking(QWidget):
         f1_score = (2 * intersection) / (intersection + union)
         print("F1 score for frame %d: %s" % (frame, f1_score))
         
+        #### FOR SELECTED FRAMES
+        
+        try:
+            selected_limit = int(self.le_limit_evaluation.text())
+        except ValueError:
+            message(title="Wrong type", text="String detected", informative_text="Please use integer instead of text")
+            return
+        
+        
+        if frame <= selected_limit:
+            frame_ids = list(range(frame, selected_limit + 1))
+        else:
+            frame_ids = list(range(selected_limit, frame + 1))
+        
+        
+        # Intersection/Union calculation
+        intersection = np.sum( np.sum( np.sum( np.logical_and(auto_segmentation[frame_ids], human_segmentation[frame_ids]))))
+        union = np.sum( np.sum( np.sum( np.logical_or(auto_segmentation[frame_ids], human_segmentation[frame_ids]))))
+        
+        # IoU calculation
+        iou_score = intersection / union
+        print("IoU score for slices", frame_ids[0], "to", frame_ids[-1],":", iou_score)
+        
+        # DICE score calculation
+        dice_score = (2 * intersection) / (np.count_nonzero(auto_segmentation) + np.count_nonzero(human_segmentation))
+        print("DICE score for slices", frame_ids[0], "to", frame_ids[-1],":", dice_score)
+        
+        # F1 score calculation
+        # Intersection = True Positive
+        # Union = True Positive + False Positive + False Negative
+        f1_score = (2 * intersection) / (intersection + union)
+        print("F1 score for slices", frame_ids[0], "to", frame_ids[-1],":", f1_score)
+        
         #### FOR WHOLE MOVIE
         
         # Intersection/Union calculation
