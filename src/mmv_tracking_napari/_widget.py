@@ -97,6 +97,7 @@ class MMVTracking(QWidget):
         btn_evaluate_segmentation = QPushButton("Evaluate segmentation")
         btn_evaluate_tracking = QPushButton("Evaluate tracking")
         btn_store_eval_data = QPushButton("Store segmentation/tracking")
+        btn_auto_track_all = QPushButton("Automatic-er Tracking")
         
         # Tooltips for Buttons
         self.btn_adjust_seg_ids.setToolTip(
@@ -161,6 +162,7 @@ class MMVTracking(QWidget):
         btn_evaluate_tracking.clicked.connect(self._evaluate_tracking)
         btn_store_eval_data.clicked.connect(self._store_segmentation)
         btn_store_eval_data.clicked.connect(self._store_tracks)
+        btn_auto_track_all.clicked.connect(self._auto_track_all)
        
         # Combo Boxes
         self.c_segmentation = QComboBox()
@@ -274,6 +276,7 @@ class MMVTracking(QWidget):
         q_tracking.layout().addWidget(help_remove_correspondence)
         q_tracking.layout().addWidget(help_insert_correspondence)
         q_tracking.layout().addWidget(btn_auto_track)
+        q_tracking.layout().addWidget(btn_auto_track_all)
 
         # Evaluation UI
         help_movement = QWidget()
@@ -549,7 +552,7 @@ class MMVTracking(QWidget):
                 @layer.mouse_drag_callbacks.append
                 def _track(layer,event):
                     """
-                    Tracks selected cell auomatically until overlap is not sufficiently large anymore
+                    Tracks selected cell automatically until overlap is not sufficiently large anymore
                     
                     :param event: Mouseclick event
                     """
@@ -574,7 +577,7 @@ class MMVTracking(QWidget):
                         matching = label_layer.data[my_slice + 1][cell]
                         matches = np.unique(matching,return_counts = True)
                         maximum = np.argmax(matches[1])
-                        if matches[1][maximum] <= 0.7 * len(cell):
+                        if matches[1][maximum] <= 0.7 * np.sum(matches[1]):
                             print("ABORTING1")
                             self._mouse(State.default)
                             if len(self.to_track) < 5:
@@ -1709,6 +1712,61 @@ class MMVTracking(QWidget):
     def _auto_track(self):
         self._mouse(State.auto_track)
         
+    def _auto_track_all(self):
+        # Expects tracks layer to not exist
+        self.tracks = np.empty((1,4),dtype=np.int8)
+        try:
+            label_layer = self.viewer.layers[self.viewer.layers.index("Segmentation Data")]
+        except ValueError:
+            print("Missing label layer")
+            return
+        for start_slice in range(0,len(label_layer.data) - 5):
+            print(start_slice)
+            for current_cell in np.unique(label_layer.data[start_slice]):
+                if current_cell == 0:
+                    continue
+                cell = np.where(label_layer.data[start_slice]== current_cell)
+                current_slice = start_slice
+                while current_slice + 1 < len(label_layer.data):
+                    #print('Current cell: ',current_cell,'. Current slice: ', current_slice + 1, sep='')
+                    matching = label_layer.data[current_slice + 1][cell]
+                    matches = np.unique(matching,return_counts = True)
+                    maximum = np.argmax(matches[1])
+                    
+                    if matches[1][maximum] <= 0.7 * np.sum(matches[1]):
+                        print("ABORTING1")
+                        break
+                    if matches[0][maximum] == 0:
+                        print("ABORTING2")
+                        break
+                    
+                    if current_slice == start_slice:
+                        centroid = ndimage.center_of_mass(label_layer.data[start_slice], labels = label_layer.data[start_slice], index = current_cell)
+                        self.to_track.append([start_slice,int(np.rint(centroid[0])),int(np.rint(centroid[1]))])
+                    centroid = ndimage.center_of_mass(label_layer.data[current_slice + 1], labels = label_layer.data[current_slice + 1], index = matches[0][maximum])
+                    
+                    if [current_slice+1,int(np.rint(centroid[0])),int(np.rint(centroid[1]))] in self.tracks[:,1:4].tolist():
+                        print("Found tracked cell, aborting")
+                        if (len(self.to_track)) < 5:
+                            self.to_track = []
+                            break
+                        else:
+                            self._mouse(State.link)
+                            self._link(auto = True)
+                            break
+                        
+                    self.to_track.append([current_slice+1,int(np.rint(centroid[0])),int(np.rint(centroid[1]))])
+                    
+                    current_cell = matches[0][maximum]
+                    current_slice = current_slice + 1
+                    cell = np.where(label_layer.data[current_slice] == current_cell)
+                
+                if len(self.to_track) >= 5:
+                    self._mouse(State.link)
+                    self._link(auto = True)
+                self.to_track = []
+        self._mouse(State.default)
+                
     def _run_demo_segmentation(self):
         self._run_segmentation(True)
         pass
@@ -2077,7 +2135,7 @@ class MMVTracking(QWidget):
         print("IoU score for slices", frame_ids[0], "to", frame_ids[-1],":", iou_score)
         
         # DICE score calculation
-        dice_score = (2 * intersection) / (np.count_nonzero(auto_segmentation) + np.count_nonzero(human_segmentation))
+        dice_score = (2 * intersection) / (np.count_nonzero(auto_segmentation[frame_ids]) + np.count_nonzero(human_segmentation[frame_ids]))
         print("DICE score for slices", frame_ids[0], "to", frame_ids[-1],":", dice_score)
         
         # F1 score calculation
