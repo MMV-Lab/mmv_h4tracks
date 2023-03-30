@@ -1,48 +1,80 @@
-from ._functions import message
 
-def load_zarr():
+import zarr
+
+from qtpy.QtWidgets import QFileDialog
+
+def open_dialog(parent, filetype = "*.zarr", directory = ""):
     """
-    Opens a dialog to select a zarr file.
-    Loads the zarr file's content as layers into the viewer
+    Opens a dialog to select a file to open
+    
+    Parameters
+    ----------
+    parent : QWidget
+        Parent widget for the dialog
+    filetype : str
+        Only files of this filetype will be displayed
+    directory : str
+        Opens view at the specified directory
+        
+    Returns
+    -------
+    str
+        Path of the selected file
     """
     dialog = QFileDialog()
-    dialog.setNameFilter('*.zarr')
-    self.file = dialog.getExistingDirectory(self, "Select Zarr-File")
-    if(self.file == ""):
-        print("No file selected")
-        return
-    self.z1 = zarr.open(self.file,mode='a')
-
-    # check if "Raw Image", "Segmentation Data" or "Track" exist in self.viewer.layers
-    if "Raw Image" in self.viewer.layers or "Segmentation Data" in self.viewer.layers or "Tracks" in self.viewer.layers:
-        ret = message(title="Layer name blocked", text="Found layer name", informative_text="One or more layers with the names \"Raw Image\", \"Segmentation Data\" or \"Tracks\" exists already. Continuing will delete those layers. Are you sure?", buttons=[("Continue", QMessageBox.AcceptRole),QMessageBox.Cancel])
-        # ret = 0 means Continue was selected, ret = 4194304 means Cancel was selected
-        if ret == 4194304:
-            return
-        try:
-            self.viewer.layers.remove("Raw Image")
-        except ValueError: # only one or two layers may exist, so not all can be deleted
-            pass
-        try:
-            self.viewer.layers.remove("Segmentation Data")
-        except ValueError: # see above
-            pass
-        try:
-            self.viewer.layers.remove("Tracks")
-        except ValueError: # see above
-            pass
-    try:
-        self.viewer.add_image(self.z1['raw_data'][:], name = 'Raw Image')
-        self.viewer.add_labels(self.z1['segmentation_data'][:], name = 'Segmentation Data')
-        #self.viewer.add_tracks(self.z1['tracking_data'][:], name = 'Tracks') # Use graph argument for inheritance (https://napari.org/howtos/layers/tracks.html)
-        self.tracks = self.z1['tracking_data'][:] # Cache data of tracks layer
-    except:
-        print("File is either no Zarr file or does not adhere to required structure")
-    else:
-        tmp = np.unique(self.tracks[:,0],return_counts = True) # Count occurrences of each id
-        tmp = np.delete(tmp,tmp[1] == 1,1)
-        self.tracks = np.delete(self.tracks,np.where(np.isin(self.tracks[:,0],tmp[0,:],invert=True)),0) # Remove tracks of length <2
-        self.viewer.add_tracks(self.tracks, name='Tracks')
-    self._mouse(State.default)
+    dialog.setNameFilter(filetype)
+    filetype_name = filetype[2:].capitalize()
+    print("showing dialog")
+    filepath = dialog.getExistingDirectory(parent, "Select {}-File".format(filetype_name), directory = directory)
+    print("dialog has been closed")
+    print("selected {} as path".format(filepath))
+    return filepath
     
-    self._store_segmentation()
+
+def napari_get_reader(path):
+    """
+    Determines reader type for file(s) at [path]
+    
+    Parameters
+    ----------
+    path : str or list of str
+        Path to file, or list of paths.
+        
+    Returns
+    -------
+    function or None
+        If the path is a recognized format, return a function that accepts the
+        same path list or list of paths, and returns a list of layer data tuples.
+    """
+    print("got {} as path".format(path))
+    if isinstance(path, list):
+        # reader plugins may be handed single path, or a list of paths.
+        # if it is a list, it is assumed to be an image stack...
+        # so we are only going to look at the first file.
+        path = path[0]
+        print("selected {} as path from list".format(path))
+        
+    # if we know we cannot read the file, we immediately return None.
+    if not path.endswith(".zarr"):
+        return None
+    
+    # otherwise we return the *function* that can read ``path``.
+    return zarr_reader
+
+
+def zarr_reader(filename):
+    """
+    Take a file name and read the file in.
+    
+    Parameters
+    ----------
+    filename : str
+        Path to a .zarr file
+        
+    Returns
+    -------
+        Array or Group
+    """
+    return zarr.open(filename, mode = 'a')
+
+

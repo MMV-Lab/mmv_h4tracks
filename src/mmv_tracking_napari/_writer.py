@@ -61,3 +61,6 @@ def save_zarr():
             self.z1['tracking_data'][:] = self.tracks
             #self.z1.create_dataset('tracking_data', shape = self.tracks.shape, dtype = 'i4', data = self.tracks)
     message("Zarr file has been saved.")"""
+
+def log(text, file):
+    pass
