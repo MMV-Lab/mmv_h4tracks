@@ -5,7 +5,12 @@ from qtpy.QtWidgets import (QWidget, QLabel, QPushButton, QRadioButton, QVBoxLay
 import numpy as np
 
 from ._reader import open_dialog, napari_get_reader
-from ._logger import setup_logging
+from ._writer import save_zarr
+from ._logger import setup_logging, notify
+from ._processing import ProcessingWindow
+from ._segmentation import SegmentationWindow
+from ._tracking import TrackingWindow
+from ._analysis import AnalysisWindow
 
 class MMVTracking(QWidget):
     """
@@ -15,6 +20,8 @@ class MMVTracking(QWidget):
     ----------
     viewer : Viewer
         The Napari viewer instance
+    zarr : file
+        The zarr file the data was loaded from / will be saved to
         
     Methods
     -------
@@ -44,9 +51,9 @@ class MMVTracking(QWidget):
         # Buttons
         btn_load = QPushButton("Load")
         btn_save = QPushButton("Save")
-        btn_processing = QPushButton("Data processing")
-        btn_segmentation = QPushButton("Correct segmentation")
-        btn_tracking = QPushButton("Correct tracking")
+        btn_processing = QPushButton("Data Processing")
+        btn_segmentation = QPushButton("Correct Segmentation")
+        btn_tracking = QPushButton("Correct Tracking")
         btn_analysis = QPushButton("Analysis")
         
         btn_load.clicked.connect(self._load)
@@ -108,7 +115,7 @@ class MMVTracking(QWidget):
         filepath = open_dialog(self)
         print("dialog is closed, retrieving reader")
         file_reader = napari_get_reader(filepath)
-        print("got {} as file reader".format(file_reader))
+        print("got '{}' as file reader".format(file_reader))
         import warnings
         try:
             with warnings.catch_warnings():
@@ -117,11 +124,13 @@ class MMVTracking(QWidget):
                 zarr_file = file_reader(filepath)
                 print("file has been read")
         except TypeError:
+            print("could not read file")
             return
         
         # check all layer names
         for layername in zarr_file.__iter__():
             if layername in self.viewer.layers:
+                print("detected layer with name {}".format(layername))
                 msg = QMessageBox()
                 msg.setWindowTitle("Layer already exists")
                 msg.setText("Found layer with name " + layername)
@@ -134,10 +143,12 @@ class MMVTracking(QWidget):
                 
                 # Cancel
                 if ret == 4194304:
+                    print("loading cancelled")
                     return
                 
                 # YesToAll -> Remove all layers with names in the file
                 if ret == 32768:
+                    print("removing all layers with names in zarr from viewer")
                     for name in zarr_file.__iter__():
                         try:
                             self.viewer.layers.remove(name)
@@ -146,13 +157,14 @@ class MMVTracking(QWidget):
                     break
                 
                 # Yes -> Remove this layer
+                print("removing layer {}".format(layername))
                 self.viewer.layers.remove(layername)
             
         print("adding layers")
         # add layers to viewer
         try:
             self.viewer.add_image(zarr_file['raw_data'][:], name = 'Raw Image')
-            self.viewer.add_labels(zarr_file['segmentation_data'][:], name = 'Segmentation Data')
+            segmentation = zarr_file['segmentation_data'][:]
             # save tracks so we can delete one slice tracks first
             tracks = zarr_file['tracking_data'][:]
         except:
@@ -165,40 +177,71 @@ class MMVTracking(QWidget):
             # Remove tracks that only exist in one slice
             filtered_tracks = np.delete(tracks, np.where(np.isin(tracks[:,0], filtered_track_ids[0,:], invert = True)), 0)
             self.viewer.add_tracks(filtered_tracks, name = 'Tracks')
+            
+            self.viewer.add_labels(segmentation, name = 'Segmentation Data')
         
         print("layers have been added")
-        # TODO: cache of segmentation and tracks
+        
+        self.zarr = zarr_file
+        self.tracks = filtered_tracks
+        self.initial_layers = [segmentation, filtered_tracks]
     
     def _save(self):
         """
         Writes the changes made to the opened zarr file to disk.
-        Fails if no zarr file was opened
+        Fails if no zarr file was opened or not all layers exist
         """
-        pass
+        if not hasattr(self, 'zarr'):
+            notify("open a zarr file before you save it")
+            return
+        try:
+            save_zarr(self, self.zarr, self.viewer.layers, self.tracks)
+        except ValueError as err:
+            print("caught ValueError: {}".format(err))
+            if str(err) == "Raw Image layer missing!":
+                notify("No layer named 'Raw Image' found!")
+            if str(err) == "Segmentation layer missing!":
+                notify("No layer named 'Segmentation Data' found!")
+            if str(err) == "Tracks layer missing!":
+                notify("No layer named 'Tracks' found!")
+                
     
     def _processing(self):
         """
         Opens a [ProcessingWindow]
         """
-        pass
+        self.processing_window = ProcessingWindow()
+        print("opening processing window")
+        self.processing_window.show()
+        
     
     def _segmentation(self):
         """
         Opens a [SegmentationWindow]
         """
-        pass
+        self.segmentation_window = SegmentationWindow()
+        print("opening segmentaiton window")
+        self.segmentation_window.show()
+        
     
     def _tracking(self):
         """
         Opens a [TrackingWindow]
         """
-        pass
+        self.tracking_window = TrackingWindow()
+        print("opening tracking window")
+        self.tracking_window.show()
+        
     
     def _analysis(self):
         """
         Opens an [AnalysisWindow]
         """
-        pass
+        self.analysis_window = AnalysisWindow()
+        print("opening analysis window")
+        self.analysis_window.show()
+        
+        
     
     
     

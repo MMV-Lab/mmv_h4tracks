@@ -12,7 +12,7 @@ def open_dialog(parent, filetype = "*.zarr", directory = ""):
     parent : QWidget
         Parent widget for the dialog
     filetype : str
-        Only files of this filetype will be displayed
+        Only files of this file type will be displayed
     directory : str
         Opens view at the specified directory
         
@@ -21,13 +21,14 @@ def open_dialog(parent, filetype = "*.zarr", directory = ""):
     str
         Path of the selected file
     """
+    print("Loading from zarr")
     dialog = QFileDialog()
     dialog.setNameFilter(filetype)
     filetype_name = filetype[2:].capitalize()
-    print("showing dialog")
+    print("Showing dialog")
     filepath = dialog.getExistingDirectory(parent, "Select {}-File".format(filetype_name), directory = directory)
-    print("dialog has been closed")
-    print("selected {} as path".format(filepath))
+    print("Dialog has been closed")
+    print("Selected {} as path".format(filepath))
     return filepath
     
 
@@ -46,13 +47,13 @@ def napari_get_reader(path):
         If the path is a recognized format, return a function that accepts the
         same path list or list of paths, and returns a list of layer data tuples.
     """
-    print("got {} as path".format(path))
+    print("Got {} as path".format(path))
     if isinstance(path, list):
         # reader plugins may be handed single path, or a list of paths.
         # if it is a list, it is assumed to be an image stack...
         # so we are only going to look at the first file.
         path = path[0]
-        print("selected {} as path from list".format(path))
+        print("Selected {} as path from list".format(path))
         
     # if we know we cannot read the file, we immediately return None.
     if not path.endswith(".zarr"):
