@@ -35,24 +35,20 @@ class AnalysisWindow(QWidget):
         btn_evaluate_tracking = QPushButton("Evaluate Tracking")
         
         # Comboboxes
-        c_plots = QComboBox()
-        c_plots.addItem("speed")
-        c_plots.addItem("size")
-        c_plots.addItem("direction")
-        c_plots.addItem("euclidean distance")
-        c_plots.addItem("accumulated distance")
+        combobox_plots = QComboBox()
+        combobox_plots.addItems(["speed", "size", "direction", "euclidean distance", "accumulated distance"])
         
         # Checkboxes
-        ch_speed = QCheckBox("Speed")
-        ch_size = QCheckBox("Size")
-        ch_direction = QCheckBox("Direction")
-        ch_euclidean_distance = QCheckBox("Euclidean distance")
-        ch_accumulated_distance = QCheckBox("Accumulated distance")
+        checkbox_speed = QCheckBox("Speed")
+        checkbox_size = QCheckBox("Size")
+        checkbox_direction = QCheckBox("Direction")
+        checkbox_euclidean_distance = QCheckBox("Euclidean distance")
+        checkbox_accumulated_distance = QCheckBox("Accumulated distance")
         
         # Line Edits
-        le_movement = QLineEdit("")
-        le_track_duration = QLineEdit("")
-        le_limit_evaluation = QLineEdit("0")
+        lineedit_movement = QLineEdit("")
+        lineedit_track_duration = QLineEdit("")
+        lineedit_limit_evaluation = QLineEdit("0")
         
         ### Organize objects via widgets
         content = QWidget()
@@ -61,26 +57,26 @@ class AnalysisWindow(QWidget):
         threshhold_grid = QWidget()
         threshhold_grid.setLayout(QGridLayout())
         threshhold_grid.layout().addWidget(label_min_movement, 0, 0)
-        threshhold_grid.layout().addWidget(le_movement, 0, 1)
+        threshhold_grid.layout().addWidget(lineedit_movement, 0, 1)
         threshhold_grid.layout().addWidget(label_min_duration, 1, 0)
-        threshhold_grid.layout().addWidget(le_track_duration, 1, 1)
+        threshhold_grid.layout().addWidget(lineedit_track_duration, 1, 1)
         
         content.layout().addWidget(threshhold_grid)
         
         extract_grid = QWidget()
         extract_grid.setLayout(QGridLayout())
         extract_grid.layout().addWidget(label_metric, 0, 0)
-        extract_grid.layout().addWidget(c_plots, 0, 1)
+        extract_grid.layout().addWidget(combobox_plots, 0, 1)
         extract_grid.layout().addWidget(btn_plot, 0, 2)
-        extract_grid.layout().addWidget(ch_speed, 1, 0)
-        extract_grid.layout().addWidget(ch_size, 1, 1)
-        extract_grid.layout().addWidget(ch_direction, 1, 2)
-        extract_grid.layout().addWidget(ch_euclidean_distance, 2, 0)
-        extract_grid.layout().addWidget(ch_accumulated_distance, 2, 1)
+        extract_grid.layout().addWidget(checkbox_speed, 1, 0)
+        extract_grid.layout().addWidget(checkbox_size, 1, 1)
+        extract_grid.layout().addWidget(checkbox_direction, 1, 2)
+        extract_grid.layout().addWidget(checkbox_euclidean_distance, 2, 0)
+        extract_grid.layout().addWidget(checkbox_accumulated_distance, 2, 1)
         extract_grid.layout().addWidget(btn_export, 2, 2)
         
         content.layout().addWidget(extract_grid)
-        content.layout().addWidget(le_limit_evaluation)
+        content.layout().addWidget(lineedit_limit_evaluation)
         
         evaluation = QWidget()
         evaluation.setLayout(QHBoxLayout())

@@ -29,6 +29,14 @@ class MMVTracking(QWidget):
         Opens a dialog for the user to choose a zarr file (directory)
     save()
         Writes the changes made to the opened zarr file
+    processing()
+        Opens a window to run processing on the data 
+    segmentation()
+        Opens a window to correct the segmentation
+    tracking()
+        Opens a window to correct the tracking
+    analysis()
+        Opens a window to do analysis
     """
     
     def __init__(self, napari_viewer):

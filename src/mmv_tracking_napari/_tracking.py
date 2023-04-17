@@ -43,13 +43,13 @@ class TrackingWindow(QWidget):
         btn_auto_track_all = QPushButton("Automatic tracking for all cells")
         
         # Line Edits
-        le_trajectory = QLineEdit("")
+        lineedit_trajectory = QLineEdit("")
         
         ### Organize objects via widgets
         content = QWidget()
         content.setLayout(QGridLayout())
         content.layout().addWidget(label_trajectory, 0, 0)
-        content.layout().addWidget(le_trajectory, 0, 1)
+        content.layout().addWidget(lineedit_trajectory, 0, 1)
         content.layout().addWidget(btn_delete_displayed_tracks, 0, 2)
         content.layout().addWidget(label_remove_correspondence, 1, 0)
         content.layout().addWidget(btn_remove_correspondence, 1, 1)
