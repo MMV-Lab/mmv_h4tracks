@@ -20,6 +20,7 @@ class AnalysisWindow(QWidget):
         """
         super().__init__()
         self.setLayout(QVBoxLayout())
+        self.setWindowTitle("Analysis")
         
         ### QObjects
         

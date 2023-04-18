@@ -1,6 +1,7 @@
 
 from qtpy.QtWidgets import (QWidget, QLabel, QPushButton, QRadioButton, QVBoxLayout, QHBoxLayout,
-                            QScrollArea, QMessageBox)
+                            QScrollArea, QMessageBox, QApplication)
+from qtpy.QtCore import Qt
 
 import numpy as np
 
@@ -11,6 +12,7 @@ from ._processing import ProcessingWindow
 from ._segmentation import SegmentationWindow
 from ._tracking import TrackingWindow
 from ._analysis import AnalysisWindow
+
 
 class MMVTracking(QWidget):
     """
@@ -60,8 +62,8 @@ class MMVTracking(QWidget):
         btn_load = QPushButton("Load")
         btn_save = QPushButton("Save")
         btn_processing = QPushButton("Data Processing")
-        btn_segmentation = QPushButton("Correct Segmentation")
-        btn_tracking = QPushButton("Correct Tracking")
+        btn_segmentation = QPushButton("Segmentation correction")
+        btn_tracking = QPushButton("Tracking correction")
         btn_analysis = QPushButton("Analysis")
         
         btn_load.clicked.connect(self._load)
@@ -119,6 +121,7 @@ class MMVTracking(QWidget):
         """
         Opens a dialog for the user to choose a zarr file to open. Checks if any layernames are blocked
         """
+        QApplication.setOverrideCursor(Qt.WaitCursor)
         print("opening dialog")
         filepath = open_dialog(self)
         print("dialog is closed, retrieving reader")
@@ -193,6 +196,7 @@ class MMVTracking(QWidget):
         self.zarr = zarr_file
         self.tracks = filtered_tracks
         self.initial_layers = [segmentation, filtered_tracks]
+        QApplication.restoreOverrideCursor()
     
     def _save(self):
         """
@@ -218,7 +222,7 @@ class MMVTracking(QWidget):
         """
         Opens a [ProcessingWindow]
         """
-        self.processing_window = ProcessingWindow()
+        self.processing_window = ProcessingWindow(self.viewer)
         print("opening processing window")
         self.processing_window.show()
         
@@ -228,7 +232,7 @@ class MMVTracking(QWidget):
         Opens a [SegmentationWindow]
         """
         self.segmentation_window = SegmentationWindow()
-        print("opening segmentaiton window")
+        print("opening segmentation window")
         self.segmentation_window.show()
         
     

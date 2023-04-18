@@ -19,6 +19,7 @@ class SegmentationWindow(QWidget):
         """
         super().__init__()
         self.setLayout(QVBoxLayout())
+        self.setWindowTitle("Segmentation correction")
         
         ### QObjects
         

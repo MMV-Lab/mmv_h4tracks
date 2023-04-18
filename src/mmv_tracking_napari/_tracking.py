@@ -19,6 +19,7 @@ class TrackingWindow(QWidget):
         """
         super().__init__()
         self.setLayout(QVBoxLayout())
+        self.setWindowTitle("Tracking correction")
         
         ### QObjects
         
