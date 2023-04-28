@@ -1,6 +1,8 @@
 
-from qtpy.QtWidgets import QWidget, QVBoxLayout, QPushButton, QComboBox, QGridLayout
+from qtpy.QtWidgets import QWidget, QVBoxLayout, QPushButton, QComboBox, QGridLayout, QApplication
+from qtpy.QtCore import Qt
 from ._logger import notify
+from ._grabber import grab_layer
 
 class ProcessingWindow(QWidget):
     """
@@ -33,6 +35,7 @@ class ProcessingWindow(QWidget):
         super().__init__()
         self.setLayout(QVBoxLayout())
         self.setWindowTitle("Data Processing")
+        self.viewer = viewer
         
         ### QObjects
         # Labels
@@ -84,16 +87,26 @@ class ProcessingWindow(QWidget):
         demo : Boolean
             whether or not to do a demo of the segmentation
         """
+        print("Running segmentation")
+        QApplication.setOverrideCursor(Qt.WaitCursor)
         from cellpose import models
         try:
-            data = viewer.layers[viewer.layers.index("Raw Image")].data
+            data = grab_layer(self.viewer, "Raw Image").data
         except ValueError:
+            print("Image layer not found in viewer")
+            QApplication.restoreOverrideCursor()
             notify("No image layer found!")
             return
         
         selected_model = self.combobox_segmentation.currentText()
         
-        parameters = self._get_parameters(selected_model)
+        try:
+            parameters = self._get_parameters(selected_model)
+        except UnboundLocalError:
+            QApplication.restoreOverrideCursor()
+            notify("Please select a different model")
+        
+        QApplication.restoreOverrideCursor()
         
     def _get_parameters(self, model):
         """
@@ -109,7 +122,9 @@ class ProcessingWindow(QWidget):
         dict
             a dictionary of all the parameters based on selected model
         """
+        print("Getting parameters")
         if model == "model 1":
+            print("Selected model 1")
             params = {
                 "model_path": 'models/cellpose_neutrophils',
                 "diameter": 15,
@@ -125,20 +140,28 @@ class ProcessingWindow(QWidget):
         """
         Calls segmentation with the demo flag set
         """
+        print("Running demo segmentation")
         self._run_segmentation(True)
     
     def _run_tracking(self):
         """
         Run tracking on the segmented data
         """
+        print("Running tracking")
+        QApplication.setOverrideCursor(Qt.WaitCursor)
         
-        pass
+        
+        QApplication.restoreOverrideCursor()
     
     def _adjust_ids(self):
         """
         Replaces track ID 0. Also adjusts segmentation IDs to match track IDs
         """
-        pass
+        print("Adjusting segmentation IDs")
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        
+        
+        QApplication.restoreOverrideCursor()
         
         
         

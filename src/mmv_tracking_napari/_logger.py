@@ -11,7 +11,7 @@ def setup_logging():
     file = open(path, 'w')
     sys.stdout = file
     sys.stderr = file
-    print("logging initialized")
+    print("Logging initialized")
     
 def notify(text):
     """

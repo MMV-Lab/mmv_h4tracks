@@ -1,17 +1,19 @@
 
+import napari
+
 from qtpy.QtWidgets import (QWidget, QLabel, QPushButton, QRadioButton, QVBoxLayout, QHBoxLayout,
                             QScrollArea, QMessageBox, QApplication)
 from qtpy.QtCore import Qt
 
 import numpy as np
 
-from ._reader import open_dialog, napari_get_reader
-from ._writer import save_zarr
-from ._logger import setup_logging, notify
-from ._processing import ProcessingWindow
-from ._segmentation import SegmentationWindow
-from ._tracking import TrackingWindow
-from ._analysis import AnalysisWindow
+from mmv_tracking_napari._analysis import AnalysisWindow
+from mmv_tracking_napari._logger import setup_logging, notify
+from mmv_tracking_napari._processing import ProcessingWindow
+from mmv_tracking_napari._reader import open_dialog, napari_get_reader
+from mmv_tracking_napari._segmentation import SegmentationWindow
+from mmv_tracking_napari._tracking import TrackingWindow
+from mmv_tracking_napari._writer import save_zarr
 
 
 class MMVTracking(QWidget):
@@ -41,15 +43,16 @@ class MMVTracking(QWidget):
         Opens a window to do analysis
     """
     
-    def __init__(self, napari_viewer):
+    def __init__(self, viewer : napari.Viewer = None, parent = None):
         """
         Parameters
         ----------
         viewer : Viewer
             The Napari viewer instance
         """
-        super().__init__()
-        self.viewer = napari_viewer
+        super().__init__(parent = parent)
+        viewer = napari.current_viewer() if viewer is None else viewer
+        self.viewer = viewer
         
         setup_logging()
         
@@ -122,26 +125,26 @@ class MMVTracking(QWidget):
         Opens a dialog for the user to choose a zarr file to open. Checks if any layernames are blocked
         """
         QApplication.setOverrideCursor(Qt.WaitCursor)
-        print("opening dialog")
+        print("Opening dialog")
         filepath = open_dialog(self)
-        print("dialog is closed, retrieving reader")
+        print("Dialog is closed, retrieving reader")
         file_reader = napari_get_reader(filepath)
-        print("got '{}' as file reader".format(file_reader))
+        print("Got '{}' as file reader".format(file_reader))
         import warnings
         try:
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
-                print("reading file")
+                print("Reading file")
                 zarr_file = file_reader(filepath)
-                print("file has been read")
+                print("File has been read")
         except TypeError:
-            print("could not read file")
+            print("Could not read file")
             return
         
         # check all layer names
         for layername in zarr_file.__iter__():
             if layername in self.viewer.layers:
-                print("detected layer with name {}".format(layername))
+                print("Detected layer with name {}".format(layername))
                 msg = QMessageBox()
                 msg.setWindowTitle("Layer already exists")
                 msg.setText("Found layer with name " + layername)
@@ -154,12 +157,12 @@ class MMVTracking(QWidget):
                 
                 # Cancel
                 if ret == 4194304:
-                    print("loading cancelled")
+                    print("Loading cancelled")
                     return
                 
                 # YesToAll -> Remove all layers with names in the file
                 if ret == 32768:
-                    print("removing all layers with names in zarr from viewer")
+                    print("Removing all layers with names in zarr from viewer")
                     for name in zarr_file.__iter__():
                         try:
                             self.viewer.layers.remove(name)
@@ -171,7 +174,7 @@ class MMVTracking(QWidget):
                 print("removing layer {}".format(layername))
                 self.viewer.layers.remove(layername)
             
-        print("adding layers")
+        print("Adding layers")
         # add layers to viewer
         try:
             self.viewer.add_image(zarr_file['raw_data'][:], name = 'Raw Image')
@@ -191,7 +194,7 @@ class MMVTracking(QWidget):
             
             self.viewer.add_labels(segmentation, name = 'Segmentation Data')
         
-        print("layers have been added")
+        print("Layers have been added")
         
         self.zarr = zarr_file
         self.tracks = filtered_tracks
@@ -204,12 +207,12 @@ class MMVTracking(QWidget):
         Fails if no zarr file was opened or not all layers exist
         """
         if not hasattr(self, 'zarr'):
-            notify("open a zarr file before you save it")
+            notify("Open a zarr file before you save it")
             return
         try:
             save_zarr(self, self.zarr, self.viewer.layers, self.tracks)
         except ValueError as err:
-            print("caught ValueError: {}".format(err))
+            print("Caught ValueError: {}".format(err))
             if str(err) == "Raw Image layer missing!":
                 notify("No layer named 'Raw Image' found!")
             if str(err) == "Segmentation layer missing!":
@@ -223,7 +226,7 @@ class MMVTracking(QWidget):
         Opens a [ProcessingWindow]
         """
         self.processing_window = ProcessingWindow(self.viewer)
-        print("opening processing window")
+        print("Opening processing window")
         self.processing_window.show()
         
     
@@ -231,8 +234,8 @@ class MMVTracking(QWidget):
         """
         Opens a [SegmentationWindow]
         """
-        self.segmentation_window = SegmentationWindow()
-        print("opening segmentation window")
+        self.segmentation_window = SegmentationWindow(self.viewer)
+        print("Opening segmentation window")
         self.segmentation_window.show()
         
     
@@ -241,7 +244,7 @@ class MMVTracking(QWidget):
         Opens a [TrackingWindow]
         """
         self.tracking_window = TrackingWindow()
-        print("opening tracking window")
+        print("Opening tracking window")
         self.tracking_window.show()
         
     
@@ -250,7 +253,7 @@ class MMVTracking(QWidget):
         Opens an [AnalysisWindow]
         """
         self.analysis_window = AnalysisWindow()
-        print("opening analysis window")
+        print("Opening analysis window")
         self.analysis_window.show()
         
         
