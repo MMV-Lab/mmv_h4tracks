@@ -187,7 +187,7 @@ class MMVTracking(QWidget):
         self.le_movement = QLineEdit("")
         self.le_track_duration = QLineEdit("")
         self.le_limit_evaluation = QLineEdit("0")
-        self.le_zarr_name = QlineEdit("")
+        self.le_zarr_name = QLineEdit("")
 
         # Link functions to line edits
         self.le_trajectory.editingFinished.connect(self._select_track)
