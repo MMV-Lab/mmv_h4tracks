@@ -354,25 +354,25 @@ class MMVTracking(QWidget):
     
     def _create_new_zarr(self):
         try:
-            raw = self.viewer.layers.index("Raw Image")
+            raw = self.viewer.layers[self.viewer.layers.index("Raw Image")].data
         except ValueError:
             message("No Raw Data layer found!")
             return
         try: # Check if segmentation layer exists
-            seg = self.viewer.layers.index("Segmentation Data")
+            seg = self.viewer.layers[self.viewer.layers.index("Segmentation Data")].data
         except ValueError:
             message("No Segmentation Data layer found!")
             return
         try: # Check if tracks layer exists
-            track = self.viewer.layers.index("Tracks")
+            track = self.viewer.layers[self.viewer.layers.index("Tracks")].data
         except ValueError:
             message("No Tracks layer found!")
             return
         
-        zarrfile = zarr.open(self.zarr_name.text(), mode = 'w')
+        zarrfile = zarr.open(self.le_zarr_name.text(), mode = 'w')
         zarrfile.create_dataset('raw_data', shape = raw.shape, dtype = 'f8', data = raw)
-        root.create_dataset('segmentation_data', shape = seg.shape, dtype = 'i4', data=seg)
-        root.create_dataset('tracking_data', shape = track.shape, dtype = 'i4', data=track)
+        zarrfile.create_dataset('segmentation_data', shape = seg.shape, dtype = 'i4', data=seg)
+        zarrfile.create_dataset('tracking_data', shape = track.shape, dtype = 'i4', data=track)
         self.z1 = zarrfile
 
     def _mouse(self,mode,seg_id = 0, paint = False):
@@ -1898,7 +1898,10 @@ class MMVTracking(QWidget):
             # ret = 0 means Continue was selected, ret = 4194304 means Cancel was selected
             if ret == 4194304:
                 return
-        self.viewer.layers.remove("Tracks")
+        try:    
+            self.viewer.layers.remove("Tracks")
+        except:
+            pass    
         
         from scipy import spatial, optimize
         
