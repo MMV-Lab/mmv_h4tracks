@@ -84,6 +84,7 @@ class MMVTracking(QWidget):
         self.btn_remove_correspondence = QPushButton("Unlink")
         btn_insert_correspondence = QPushButton("Link")
         btn_save = QPushButton("Save")
+        btn_save_new = QPushButton("Save new")
         btn_plot = QPushButton("Plot")
         btn_segment = QPushButton("Run instance segmentation")
         btn_preview_segment = QPushButton("Preview Segmentation")
@@ -144,6 +145,7 @@ class MMVTracking(QWidget):
         btn_load.clicked.connect(self._load_zarr)
         btn_plot.clicked.connect(self._plot)
         btn_save.clicked.connect(self._save_zarr)
+        btn_save_new.clicked.connect(self._create_new_zarr)
         btn_false_positive.clicked.connect(self._remove_fp)
         btn_segment.clicked.connect(self._run_segmentation)
         btn_preview_segment.clicked.connect(self._run_demo_segmentation)
@@ -185,6 +187,7 @@ class MMVTracking(QWidget):
         self.le_movement = QLineEdit("")
         self.le_track_duration = QLineEdit("")
         self.le_limit_evaluation = QLineEdit("0")
+        self.le_zarr_name = QlineEdit("")
 
         # Link functions to line edits
         self.le_trajectory.editingFinished.connect(self._select_track)
@@ -226,6 +229,8 @@ class MMVTracking(QWidget):
         q_load.layout().addWidget(load_save)
         q_load.layout().addWidget(btn_load)
         q_load.layout().addWidget(btn_save)
+        q_load.layout().addWidget(btn_save_new)
+        q_load.layout().addWidget(self.le_zarr_name)
 
         # Correcting segmentation UI
         help_false_positive = QWidget()
@@ -346,6 +351,29 @@ class MMVTracking(QWidget):
         self._mouse(State.default)
 
     # Functions
+    
+    def _create_new_zarr(self):
+        try:
+            raw = self.viewer.layers.index("Raw Image")
+        except ValueError:
+            message("No Raw Data layer found!")
+            return
+        try: # Check if segmentation layer exists
+            seg = self.viewer.layers.index("Segmentation Data")
+        except ValueError:
+            message("No Segmentation Data layer found!")
+            return
+        try: # Check if tracks layer exists
+            track = self.viewer.layers.index("Tracks")
+        except ValueError:
+            message("No Tracks layer found!")
+            return
+        
+        zarrfile = zarr.open(self.zarr_name.text(), mode = 'w')
+        zarrfile.create_dataset('raw_data', shape = raw.shape, dtype = 'f8', data = raw)
+        root.create_dataset('segmentation_data', shape = seg.shape, dtype = 'i4', data=seg)
+        root.create_dataset('tracking_data', shape = track.shape, dtype = 'i4', data=track)
+        self.z1 = zarrfile
 
     def _mouse(self,mode,seg_id = 0, paint = False):
         """
