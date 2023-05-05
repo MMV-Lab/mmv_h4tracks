@@ -54,7 +54,7 @@ class MMVTracking(QWidget):
         viewer = napari.current_viewer() if viewer is None else viewer
         self.viewer = viewer
         
-        setup_logging()
+        #setup_logging() TODO: re-enable
         
         ### QObjects
         
@@ -77,8 +77,8 @@ class MMVTracking(QWidget):
         btn_analysis.clicked.connect(self._analysis)
         
         # Radio Buttons
-        rb_eco = QRadioButton("Eco")
-        rb_eco.toggle()
+        self.rb_eco = QRadioButton("Eco")
+        self.rb_eco.toggle()
         rb_heavy = QRadioButton("Heavy")
         
         ### Organize objects via widgets
@@ -89,7 +89,7 @@ class MMVTracking(QWidget):
         
         computation_mode_rbs = QWidget()
         computation_mode_rbs.setLayout(QHBoxLayout())
-        computation_mode_rbs.layout().addWidget(rb_eco)
+        computation_mode_rbs.layout().addWidget(self.rb_eco)
         computation_mode_rbs.layout().addWidget(rb_heavy)
         
         widget.layout().addWidget(computation_mode_rbs)
@@ -139,6 +139,7 @@ class MMVTracking(QWidget):
                 print("File has been read")
         except TypeError:
             print("Could not read file")
+            QApplication.restoreOverrideCursor()
             return
         
         # check all layer names
@@ -158,6 +159,7 @@ class MMVTracking(QWidget):
                 # Cancel
                 if ret == 4194304:
                     print("Loading cancelled")
+                    QApplication.restoreOverrideCursor()
                     return
                 
                 # YesToAll -> Remove all layers with names in the file
@@ -179,6 +181,8 @@ class MMVTracking(QWidget):
         try:
             self.viewer.add_image(zarr_file['raw_data'][:], name = 'Raw Image')
             segmentation = zarr_file['segmentation_data'][:]
+            
+            self.viewer.add_labels(segmentation, name = 'Segmentation Data')
             # save tracks so we can delete one slice tracks first
             tracks = zarr_file['tracking_data'][:]
         except:
@@ -191,8 +195,6 @@ class MMVTracking(QWidget):
             # Remove tracks that only exist in one slice
             filtered_tracks = np.delete(tracks, np.where(np.isin(tracks[:,0], filtered_track_ids[0,:], invert = True)), 0)
             self.viewer.add_tracks(filtered_tracks, name = 'Tracks')
-            
-            self.viewer.add_labels(segmentation, name = 'Segmentation Data')
         
         print("Layers have been added")
         
@@ -225,7 +227,7 @@ class MMVTracking(QWidget):
         """
         Opens a [ProcessingWindow]
         """
-        self.processing_window = ProcessingWindow(self.viewer)
+        self.processing_window = ProcessingWindow(self.viewer, self)
         print("Opening processing window")
         self.processing_window.show()
         

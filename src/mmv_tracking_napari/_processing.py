@@ -1,6 +1,11 @@
+import os
+import numpy as np
+import multiprocessing
+from multiprocessing import Pool
 
 from qtpy.QtWidgets import QWidget, QVBoxLayout, QPushButton, QComboBox, QGridLayout, QApplication
 from qtpy.QtCore import Qt
+
 from ._logger import notify
 from ._grabber import grab_layer
 
@@ -25,17 +30,20 @@ class ProcessingWindow(QWidget):
         Replaces track ID 0 & adjusts segmentation IDs to match track IDs
     """
     
-    def __init__(self, viewer):
+    def __init__(self, viewer, parent):
         """
         Parameters
         ----------
         viewer : Viewer
             The Napari viewer instance
+        parent : QWidget
+            The parent widget
         """
         super().__init__()
         self.setLayout(QVBoxLayout())
         self.setWindowTitle("Data Processing")
         self.viewer = viewer
+        self.parent = parent
         
         ### QObjects
         # Labels
@@ -105,6 +113,37 @@ class ProcessingWindow(QWidget):
         except UnboundLocalError:
             QApplication.restoreOverrideCursor()
             notify("Please select a different model")
+            return
+        
+        # set process limit
+        if self.parent.rb_eco.isChecked():
+            AMOUNT_OF_PROCESSES = np.maximum(1,int(multiprocessing.cpu_count() * 0.4))
+        else:
+            AMOUNT_OF_PROCESSES = np.maximum(1,int(multiprocessing.cpu_count() * 0.8))
+        print("Running on {} processes max".format(AMOUNT_OF_PROCESSES))
+        
+        global segment_slice
+        
+        def segment_slice(slice, parameters):
+            model = models.CellposeModel(gpu = False, pretrained_model = parameters["model_path"])
+            mask = model.eval(
+                slice,
+                channels = [parameters["chan"], parameters["chan2"]],
+                diameter = parameters["diameter"],
+                flow_threshold = parameters["flow_threshold"],
+                cellprob_threshold = parameters["cellprob_threshold"]
+                )[0]
+            return mask
+        
+        data_with_parameters = []
+        for slice in data:
+            data_with_parameters.append((slice, parameters))
+            
+        with Pool(AMOUNT_OF_PROCESSES) as p:
+            mask = p.starmap(segment_slice, data_with_parameters)
+            mask = np.asarray(mask)
+            print("Adding calculated segmentation")
+            self.viewer.add_labels(mask, name = 'calculated segmentation')
         
         QApplication.restoreOverrideCursor()
         
@@ -126,13 +165,14 @@ class ProcessingWindow(QWidget):
         if model == "model 1":
             print("Selected model 1")
             params = {
-                "model_path": 'models/cellpose_neutrophils',
+                "model_path": '/models/cellpose_neutrophils',
                 "diameter": 15,
                 "chan": 0,
                 "chan2": 0,
                 "flow_threshold": 0.4,
                 "cellprob_threshold": 0
             }
+        params["model_path"] = os.path.dirname(__file__) + params["model_path"]
         
         return params
     
@@ -162,6 +202,7 @@ class ProcessingWindow(QWidget):
         
         
         QApplication.restoreOverrideCursor()
+        
         
         
         
