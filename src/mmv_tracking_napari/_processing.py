@@ -5,6 +5,7 @@ from multiprocessing import Pool
 
 from qtpy.QtWidgets import QWidget, QVBoxLayout, QPushButton, QComboBox, QGridLayout, QApplication
 from qtpy.QtCore import Qt
+from napari.qt.threading import thread_worker
 
 from ._logger import notify
 from ._grabber import grab_layer
@@ -86,7 +87,38 @@ class ProcessingWindow(QWidget):
         
         self.layout().addWidget(content)
         
-    def _run_segmentation(self, demo = False):
+    def _add_segmentation_to_viewer(self, mask):
+        """
+        Adds the segmentation as a layer to the viewer with a specified name
+        
+        Parameters
+        ----------
+        mask : array
+            the segmentation data to add to the viewer
+        """
+        self.viewer.add_labels(mask, name = 'calculated segmentation')
+        print("Added segmentation to viewer")
+        
+    def _run_segmentation(self):
+        """
+        Calls segmentation without demo flag set
+        """
+        print("Calling full segmentation")
+        worker = self._segment_image()
+        worker.returned.connect(self._add_segmentation_to_viewer)
+        worker.start()
+    
+    def _run_demo_segmentation(self):
+        """
+        Calls segmentation with the demo flag set
+        """
+        print("Calling demo segmentation")
+        worker = self._segment_image(True)
+        worker.returned.connect(self._add_segmentation_to_viewer)
+        worker.start()
+    
+    @thread_worker
+    def _segment_image(self, demo = False):
         """
         Run segmentation on the raw image data
         
@@ -125,6 +157,16 @@ class ProcessingWindow(QWidget):
         global segment_slice
         
         def segment_slice(slice, parameters):
+            """
+            Calculate segmentation for a single slice
+            
+            Parameters
+            ----------
+            slice : napari
+                the slice of raw image data to calculate segmentation for
+            parameters : dict
+                the parameters for the segmentation model
+            """
             model = models.CellposeModel(gpu = False, pretrained_model = parameters["model_path"])
             mask = model.eval(
                 slice,
@@ -142,10 +184,10 @@ class ProcessingWindow(QWidget):
         with Pool(AMOUNT_OF_PROCESSES) as p:
             mask = p.starmap(segment_slice, data_with_parameters)
             mask = np.asarray(mask)
-            print("Adding calculated segmentation")
-            self.viewer.add_labels(mask, name = 'calculated segmentation')
+            print("Done calculating segmentation")
         
         QApplication.restoreOverrideCursor()
+        return mask
         
     def _get_parameters(self, model):
         """
@@ -175,13 +217,6 @@ class ProcessingWindow(QWidget):
         params["model_path"] = os.path.dirname(__file__) + params["model_path"]
         
         return params
-    
-    def _run_demo_segmentation(self):
-        """
-        Calls segmentation with the demo flag set
-        """
-        print("Running demo segmentation")
-        self._run_segmentation(True)
     
     def _run_tracking(self):
         """
