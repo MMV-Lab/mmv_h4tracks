@@ -3,6 +3,7 @@ import numpy as np
 import multiprocessing
 from multiprocessing import Pool
 
+import napari
 from qtpy.QtWidgets import QWidget, QVBoxLayout, QPushButton, QComboBox, QGridLayout, QApplication
 from qtpy.QtCore import Qt
 from napari.qt.threading import thread_worker
@@ -31,6 +32,7 @@ class ProcessingWindow(QWidget):
         Replaces track ID 0 & adjusts segmentation IDs to match track IDs
     """
     
+    dock = None
     def __init__(self, viewer, parent):
         """
         Parameters
@@ -45,6 +47,7 @@ class ProcessingWindow(QWidget):
         self.setWindowTitle("Data Processing")
         self.viewer = viewer
         self.parent = parent
+        ProcessingWindow.dock = self
         
         ### QObjects
         # Labels
@@ -98,6 +101,10 @@ class ProcessingWindow(QWidget):
         """
         self.viewer.add_labels(mask, name = 'calculated segmentation')
         print("Added segmentation to viewer")
+        
+    @napari.Viewer.bind_key('Shift-s')
+    def _hotkey_run_segmentation(self):
+        ProcessingWindow.dock._run_segmentation()
         
     def _run_segmentation(self):
         """
