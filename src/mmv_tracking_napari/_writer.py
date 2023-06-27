@@ -2,6 +2,7 @@
 import zarr
 
 import numpy as np
+from qtpy.QtWidgets import QMessageBox
 
 from ._logger import choice_dialog, notify
 
@@ -70,7 +71,7 @@ def save_zarr(parent, zarr_file, layers, cached_tracks):
         raise ValueError("Tracks layer missing!")
     
     response = 1
-    if not np.array_equal(viewer.layers[index_of_tracks], cached_tracks):
+    if not np.array_equal(layers[index_of_tracks].data, cached_tracks):
         print("Difference between displayed and full tracks detected")
         response = choice_dialog(
             ("It looks like you have selected only some of the tracks from your tracks layer. " +
@@ -86,7 +87,7 @@ def save_zarr(parent, zarr_file, layers, cached_tracks):
     tracks = cached_tracks
     if response == 0:
         print("Saving currently displayed tracks")
-        tracks = viewer.layers[index_of_tracks]
+        tracks = layers[index_of_tracks]
     else:
         print("Saving complete tracks")
 
