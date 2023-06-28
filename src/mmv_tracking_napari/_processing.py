@@ -402,9 +402,6 @@ class ProcessingWindow(QWidget):
                 tracks = np.append(tracks, np.array([entry]), axis = 0)
                 visited[i][j] = 1
                 label = matches[i][j][1][1]
-                #labels = []
-                #for k in range(len(visited[i][j+1])):
-                #    labels.append(matches[i][j+1][k][0][1])
                     
                 slice = i + 1
                 while True:
