@@ -1,6 +1,9 @@
-from qtpy.QtWidgets import QMessageBox
 
 import sys
+import time
+
+from qtpy.QtWidgets import QMessageBox
+from napari.qt.threading import thread_worker
 
 def setup_logging():
     """
@@ -27,6 +30,11 @@ def notify(text):
     msg.setText(text)
     print("Notifying user: '{}'".format(text))
     msg.exec()
+    
+@thread_worker
+def notify_with_delay(text):
+    time.sleep(0.2)
+    notify(text)
     
 def choice_dialog(text, choices):
     """

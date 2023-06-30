@@ -114,6 +114,7 @@ class SegmentationWindow(QWidget):
         
     def _add_select_callback(self):
         QApplication.setOverrideCursor(Qt.CrossCursor)
+        self._remove_on_clicks()
         for layer in self.viewer.layers:
             @layer.mouse_drag_callbacks.append
             def _select_label(layer, event):
@@ -134,10 +135,11 @@ class SegmentationWindow(QWidget):
             the ID to set as the currently selected one in the napari viewer
         """
         try:
-            label_layer = self.viewer.layers[self.viewer.layers.index("Segmentation Data")]
+            label_layer = grab_layer(self.viewer, "Segmentation Data")
         except ValueError:
-            print("No label layer found")
-            raise ValueError("Trying to set label id on missing label layer")
+            print("Tried to set label id on missing label layer")
+            notify("Please make sure the label layer exists!")
+            return
         
         if id == 0:
             id = self._get_free_label_id(label_layer)
@@ -171,6 +173,7 @@ class SegmentationWindow(QWidget):
         Sets a new id on the clicked label
         """
         QApplication.setOverrideCursor(Qt.CrossCursor)
+        self._remove_on_clicks()
         for layer in self.viewer.layers:
             @layer.mouse_drag_callbacks.append
             def _replace_label(layer, event):
@@ -181,6 +184,7 @@ class SegmentationWindow(QWidget):
         
     def _add_merge_callback(self):
         QApplication.setOverrideCursor(Qt.CrossCursor)
+        self._remove_on_clicks()
         for layer in self.viewer.layers:
             @layer.mouse_drag_callbacks.append
             def _pick_merge_label(layer, event):

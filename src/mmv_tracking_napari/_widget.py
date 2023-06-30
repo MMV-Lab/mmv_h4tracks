@@ -245,7 +245,7 @@ class MMVTracking(QWidget):
         """
         Opens a [TrackingWindow]
         """
-        self.tracking_window = TrackingWindow()
+        self.tracking_window = TrackingWindow(self)
         print("Opening tracking window")
         self.tracking_window.show()
         
