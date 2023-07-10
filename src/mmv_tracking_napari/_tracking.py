@@ -1,11 +1,14 @@
 
 import numpy as np
 import pandas as pd
+import multiprocessing
+from multiprocessing import Pool
 
 from qtpy.QtWidgets import (QWidget, QVBoxLayout, QLabel, QPushButton, QLineEdit,
                             QGridLayout, QApplication, QMessageBox)
 from qtpy.QtCore import Qt
 from scipy import ndimage
+from napari.qt.threading import thread_worker
 
 from ._logger import notify, notify_with_delay, choice_dialog
 from ._grabber import grab_layer
@@ -20,7 +23,7 @@ class TrackingWindow(QWidget):
     Methods
     -------
     """
-    
+    MIN_TRACK_LENGTH = 5
     def __init__(self, parent):
         """
         Parameters
@@ -55,7 +58,9 @@ class TrackingWindow(QWidget):
         btn_delete_displayed_tracks = QPushButton("Delete displayed tracks")
         btn_delete_displayed_tracks.clicked.connect(self._remove_displayed_tracks)
         btn_auto_track = QPushButton("Automatic tracking for single cell")
+        btn_auto_track.clicked.connect(self._add_auto_track_callback)
         btn_auto_track_all = QPushButton("Automatic tracking for all cells")
+        btn_auto_track_all.clicked.connect(self._proximity_track_all)
         
         # Line Edits
         self.lineedit_trajectory = QLineEdit("")
@@ -134,7 +139,7 @@ class TrackingWindow(QWidget):
             return
         
         to_remove = np.unique(tracks_layer.data[:,0])
-        if np.array_equal(to_remove, np.unique(self.tracks[:,0])):
+        if np.array_equal(to_remove, np.unique(self.parent.tracks[:,0])):
             notify("Can not delete whole tracks layer!")
             return
         
@@ -155,12 +160,12 @@ class TrackingWindow(QWidget):
         if self.btn_remove_correspondence.text() == "Unlink":
             self.btn_remove_correspondence.setText("Confirm")
             self.btn_insert_correspondence.setText("Link")
-            self._remove_on_clicks()
+            self._reset()
             self._add_tracking_callback()
             return
             
         self.btn_remove_correspondence.setText("Unlink")
-        self._remove_on_clicks()
+        self._reset()
         #print(self.track_cells)
         
         try:
@@ -227,12 +232,12 @@ class TrackingWindow(QWidget):
         if self.btn_insert_correspondence.text() == "Link":
             self.btn_insert_correspondence.setText("Confirm")
             self.btn_remove_correspondence.setText("Unlink")
-            self._remove_on_clicks()
+            self._reset()
             self._add_tracking_callback()
             return
             
         self.btn_insert_correspondence.setText("Link")
-        self._remove_on_clicks()
+        self._reset()
         #print(self.track_cells)
         
         try:
@@ -240,13 +245,14 @@ class TrackingWindow(QWidget):
         except ValueError:
             notify("Please make sure the label layer exists!")
             return
-        
         try:
             tracks_layer = grab_layer(self.viewer, "Tracks")
         except ValueError:
             pass
         else:
-            if not np.array_equal(tracks_layer, self.parent.tracks):
+            if not np.array_equal(tracks_layer.data, self.parent.tracks):
+                print("tracks layer: {}".format(tracks_layer.data))
+                print("self.parent.tracks: {}".format(self.parent.tracks))
                 ret = choice_dialog(
                     "All tracks need to be visible, but some tracks are hidden. Do you want to display them now?",
                     [("Display all", QMessageBox.AcceptRole), QMessageBox.Cancel]
@@ -256,7 +262,7 @@ class TrackingWindow(QWidget):
                     return
                 self.lineedit_trajectory.setText("")
                 self._replace_tracks()
-        
+                
         if len(self.track_cells) < 2:
             notify("Less than two cells can not be tracked")
             return
@@ -278,24 +284,24 @@ class TrackingWindow(QWidget):
                 if (tracks[i,1] == self.track_cells[0][0] and 
                     tracks[i,2] == self.track_cells[0][1] and
                     tracks[i,3] == self.track_cells[0][2]):
-                    connected_ids[0] = self.tracks[i,0]
+                    connected_ids[0] = self.parent.tracks[i,0]
                     
                 if (tracks[i,1] == self.track_cells[-1][0] and 
                     tracks[i,2] == self.track_cells[-1][1] and
                     tracks[i,3] == self.track_cells[-1][2]):
-                    connected_ids[0] = self.tracks[i,0]
+                    connected_ids[0] = self.parent.tracks[i,0]
                     
-        if max(old_ids) > 0:
-            if old_ids[0] > 0:
+        if max(connected_ids) > 0:
+            if connected_ids[0] > 0:
                 self.track_cells.remove(self.track_cells[0])
-            if old_ids[1] > 0:
+            if connected_ids[1] > 0:
                 self.track_cells.remove(self.track_cells[-1])
             
-            if min(old_ids) == 0:
-                track_id = max(old_ids)
+            if min(connected_ids) == 0:
+                track_id = max(connected_ids)
             else:
-                track_id = min(old_ids)
-                tracks[np.where(tracks[:,0] == max(old_ids)), 0] = track_id
+                track_id = min(connected_ids)
+                tracks[np.where(tracks[:,0] == max(connected_ids)), 0] = track_id
                 
         for line in self.track_cells:
             try:
@@ -309,9 +315,9 @@ class TrackingWindow(QWidget):
         self.viewer.add_tracks(self.parent.tracks, name = 'Tracks')
         
     def _add_tracking_callback(self):
+        self._reset()
         QApplication.setOverrideCursor(Qt.CrossCursor)
         self.track_cells = []
-        self._remove_on_clicks()
         for layer in self.viewer.layers:
             @layer.mouse_drag_callbacks.append
             def _select_cells(layer, event):
@@ -319,7 +325,7 @@ class TrackingWindow(QWidget):
                     label_layer = grab_layer(self.viewer, "Segmentation Data")
                 except ValueError:
                     notify("Please make sure the label layer exists!")
-                    self._remove_on_clicks()
+                    self._reset()
                     return
                 z = int(event.position[0])
                 selected_id = label_layer.data[
@@ -342,10 +348,152 @@ class TrackingWindow(QWidget):
                 print("Added cell {} to list for track cells".format(cell))
         print("Added callback to record track cells")
         
-    def _remove_on_clicks(self):
+    def _add_auto_track_callback(self):
+        self._reset()
+        QApplication.setOverrideCursor(Qt.CrossCursor)
+        for layer in self.viewer.layers:
+            @layer.mouse_drag_callbacks.append
+            def _proximity_track(layer, event):
+                try:
+                    label_layer = grab_layer(self.viewer, "Segmentation Data")
+                except ValueError:
+                    notify("Please make sure the label layer exists!")
+                    return
+                try:
+                    tracks = grab_layer(self.viewer, "Tracks")
+                except ValueError:
+                    pass
+
+                selected_cell = label_layer.data[
+                    int(event.position[0]),
+                    int(event.position[1]),
+                    int(event.position[2])]
+                if selected_cell == 0:
+                    notify_with_delay("no clicky!")
+                    return
+                worker = self._proximity_track_cell(label_layer, int(event.position[0]), selected_cell)
+                worker.start()
+                
+    @thread_worker
+    def _proximity_track_cell(self, label_layer, start_slice, id):
+        self._reset()
+        self.track_cells = func(label_layer, start_slice, id)
+        self.btn_insert_correspondence.setText("Tracking..")
+        self._link()
+    
+    def _proximity_track_all(self):
+        worker = self._proximity_track_all_worker()
+        worker.start()
+        worker.returned.connect(self._restore_tracks)
+    
+    def _restore_tracks(self, tracks):
+        if tracks is None:
+            return
+        self.parent.tracks = tracks
+        self.viewer.add_tracks(tracks, name = 'Tracks')
+    
+    @thread_worker
+    def _proximity_track_all_worker(self):
+        self._reset()
+        self.parent.tracks = np.empty((1,4), dtype = np.int8)
+        try:
+            self.viewer.layers.remove("Tracks")
+        except ValueError:
+            pass
+        try:
+            label_layer = grab_layer(self.viewer, "Segmentation Data")
+        except ValueError:
+            notify("Please make sure the label layer exists!")
+            return
+        
+        if self.parent.rb_eco.isChecked():
+            AMOUNT_OF_PROCESSES = np.maximum(1,int(multiprocessing.cpu_count() * 0.4))
+        else:
+            AMOUNT_OF_PROCESSES = np.maximum(1,int(multiprocessing.cpu_count() * 0.8))
+        print("Running on {} processes max".format(AMOUNT_OF_PROCESSES))
+        
+        data = []
+        for start_slice in range(len(label_layer.data) - self.MIN_TRACK_LENGTH):
+            for id in np.unique(label_layer.data[start_slice]):
+                if id == 0:
+                    continue
+                data.append([label_layer.data, start_slice, id])
+        
+        with Pool(AMOUNT_OF_PROCESSES) as p:
+            ret = p.starmap(func, data)
+            
+        track_id = 1
+        for entry in ret:
+                
+            if entry is None:
+                continue
+            if 'tracks' in locals() and entry[0] in tracks[:,1:4].tolist():
+                continue
+            for line in entry:
+                try:
+                    tracks = np.r_[tracks, [[track_id] + line]]
+                except UnboundLocalError:
+                    tracks = [[track_id] + line]
+            track_id += 1
+            
+        tracks = np.array(tracks)
+        df = pd.DataFrame(tracks, columns = ['ID', 'Z', 'Y', 'X'])
+        df.sort_values(['ID', 'Z'], ascending = True, inplace = True)
+        return df.values
+        
+    def _reset(self):
         for layer in self.viewer.layers:
             layer.mouse_drag_callbacks = []
+        self.btn_insert_correspondence.setText("Link")
+        self.btn_remove_correspondence.setText("Unlink")
         QApplication.restoreOverrideCursor()
+        
+def func(label_data, start_slice, id):
+    MIN_OVERLAP = 0.7
+    
+    slice = start_slice
+    
+    track_cells = []
+    cell = np.where(label_data[start_slice] == id)
+    while slice + 1 < len(label_data):
+        matching = label_data[slice + 1][cell]
+        matches = np.unique(matching, return_counts = True)
+        maximum = np.argmax(matches[1])
+        if matches[1][maximum] <= MIN_OVERLAP * np.sum(matches[1]) or matches[0][maximum] == 0:
+            """if matches[1][maximum] <= MIN_OVERLAP * np.sum(matches[1]):
+                print("Aborting auto track due to minimum overlap not being reached")
+            else:
+                print("Aborting due to max overlap with background")"""
+            if len(track_cells) < TrackingWindow.MIN_TRACK_LENGTH:
+                return
+            return track_cells
+            
+        if slice == start_slice:
+            centroid = ndimage.center_of_mass(
+                label_data[slice],
+                labels = label_data[slice],
+                index = id
+            )
+            track_cells.append([
+                slice,
+                int(np.rint(centroid[0])),
+                int(np.rint(centroid[1]))
+            ])
+        centroid = ndimage.center_of_mass(
+            label_data[slice + 1],
+            labels = label_data[slice + 1],
+            index = matches[0][maximum]
+        )
+        
+        track_cells.append([slice + 1, int(np.rint(centroid[0])), int(np.rint(centroid[1]))])
+        
+        id = matches[0][maximum]
+        slice += 1
+        cell = np.where(label_data[slice] == id)
+    if len(track_cells) < TrackingWindow.MIN_TRACK_LENGTH:
+        return
+    return track_cells
+    
         
         
         
