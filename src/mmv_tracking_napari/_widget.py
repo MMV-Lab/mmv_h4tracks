@@ -254,7 +254,7 @@ class MMVTracking(QWidget):
         """
         Opens an [AnalysisWindow]
         """
-        self.analysis_window = AnalysisWindow()
+        self.analysis_window = AnalysisWindow(self)
         print("Opening analysis window")
         self.analysis_window.show()
         

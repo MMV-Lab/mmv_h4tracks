@@ -158,9 +158,8 @@ class TrackingWindow(QWidget):
         
     def _unlink(self):
         if self.btn_remove_correspondence.text() == "Unlink":
-            self.btn_remove_correspondence.setText("Confirm")
-            self.btn_insert_correspondence.setText("Link")
             self._reset()
+            self.btn_remove_correspondence.setText("Confirm")
             self._add_tracking_callback()
             return
             
@@ -230,9 +229,8 @@ class TrackingWindow(QWidget):
         
     def _link(self):
         if self.btn_insert_correspondence.text() == "Link":
-            self.btn_insert_correspondence.setText("Confirm")
-            self.btn_remove_correspondence.setText("Unlink")
             self._reset()
+            self.btn_insert_correspondence.setText("Confirm")
             self._add_tracking_callback()
             return
             
@@ -315,7 +313,6 @@ class TrackingWindow(QWidget):
         self.viewer.add_tracks(self.parent.tracks, name = 'Tracks')
         
     def _add_tracking_callback(self):
-        self._reset()
         QApplication.setOverrideCursor(Qt.CrossCursor)
         self.track_cells = []
         for layer in self.viewer.layers:
@@ -383,6 +380,7 @@ class TrackingWindow(QWidget):
     
     def _proximity_track_all(self):
         worker = self._proximity_track_all_worker()
+        QApplication.setOverrideCursor(Qt.WaitCursor)
         worker.start()
         worker.returned.connect(self._restore_tracks)
     
@@ -391,6 +389,7 @@ class TrackingWindow(QWidget):
             return
         self.parent.tracks = tracks
         self.viewer.add_tracks(tracks, name = 'Tracks')
+        QApplication.restoreOverrideCursor()
     
     @thread_worker
     def _proximity_track_all_worker(self):
@@ -460,10 +459,6 @@ def func(label_data, start_slice, id):
         matches = np.unique(matching, return_counts = True)
         maximum = np.argmax(matches[1])
         if matches[1][maximum] <= MIN_OVERLAP * np.sum(matches[1]) or matches[0][maximum] == 0:
-            """if matches[1][maximum] <= MIN_OVERLAP * np.sum(matches[1]):
-                print("Aborting auto track due to minimum overlap not being reached")
-            else:
-                print("Aborting due to max overlap with background")"""
             if len(track_cells) < TrackingWindow.MIN_TRACK_LENGTH:
                 return
             return track_cells

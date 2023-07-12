@@ -1,6 +1,8 @@
 
 from qtpy.QtWidgets import (QWidget, QVBoxLayout, QLabel, QLineEdit, QComboBox, QPushButton,
                             QCheckBox, QHBoxLayout, QGridLayout)
+from matplotlib.figure import Figure
+from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 
 class AnalysisWindow(QWidget):
     """
@@ -13,12 +15,13 @@ class AnalysisWindow(QWidget):
     -------
     """
     
-    def __init__(self):
+    def __init__(self, parent):
         """
         Parameters
         ----------
         """
         super().__init__()
+        self.parent = parent
         self.setLayout(QVBoxLayout())
         self.setWindowTitle("Analysis")
         
@@ -34,6 +37,8 @@ class AnalysisWindow(QWidget):
         btn_export = QPushButton("Export")
         btn_evaluate_segmentation = QPushButton("Evaluate Segmentation")
         btn_evaluate_tracking = QPushButton("Evaluate Tracking")
+        
+        btn_plot.clicked.connect(self._plot)
         
         # Comboboxes
         combobox_plots = QComboBox()
@@ -87,6 +92,43 @@ class AnalysisWindow(QWidget):
         content.layout().addWidget(evaluation)
         
         self.layout().addWidget(content)
+        
+    def _plot(self):
+        fig = Figure(figsize = (6, 7))
+        fig.patch.set_facecolor("#262930")
+        axes = fig.add_subplot(111)
+        axes.set_facecolor("#269230")
+        axes.spines["bottom"].set_color("white")
+        axes.spines["top"].set_color("white")
+        axes.spines["right"].set_color("white")
+        axes.spines["left"].set_color("white")
+        axes.xaxis.label.set_color("white")
+        axes.yaxis.label.set_color("white")
+        axes.tick_params(axis="x", colors="white")
+        axes.tick_params(axis="y", colors="white")
+        
+        """ret = [] # TODO: add function call
+        title = ret[0]
+        x_label = ret[1]
+        y_label = ret[2]"""
+        
+        canvas = FigureCanvas(fig)
+        self.parent.plot_window = QWidget()
+        self.parent.plot_window.setLayout(QVBoxLayout())
+        self.parent.plot_window.layout().addWidget(canvas)
+        print("Showing plot window")
+        self.parent.plot_window.show()
+    
+    def _export(self):
+        pass
+    
+    def _evaluate_segmentation(self):
+        pass
+    
+    def _evaluate_tracking(self):
+        pass
+    
+    
         
         
         
