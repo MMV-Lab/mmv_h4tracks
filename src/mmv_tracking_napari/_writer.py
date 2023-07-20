@@ -1,5 +1,6 @@
 
 import zarr
+import csv
 
 import numpy as np
 from qtpy.QtWidgets import QMessageBox
@@ -121,6 +122,14 @@ def save_zarr(parent, zarr_file, layers, cached_tracks):
         zarr_file['tracking_data'][:] = tracks
     print("Saving to zarr successful")
     notify("Zarr file has been saved.")
+    
+def save_csv(file, data):
+    csvfile = open(file[0], 'w', newline = '')
+    writer = csv.writer(csvfile)
+    [writer.writerow(row) for row in data]
+    csvfile.close()
+    print("Export complete")
+
         
     
         

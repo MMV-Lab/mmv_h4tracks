@@ -7,13 +7,13 @@ from qtpy.QtCore import Qt
 
 import numpy as np
 
-from mmv_tracking_napari._analysis import AnalysisWindow
-from mmv_tracking_napari._logger import setup_logging, notify
-from mmv_tracking_napari._processing import ProcessingWindow
-from mmv_tracking_napari._reader import open_dialog, napari_get_reader
-from mmv_tracking_napari._segmentation import SegmentationWindow
-from mmv_tracking_napari._tracking import TrackingWindow
-from mmv_tracking_napari._writer import save_zarr
+from ._analysis import AnalysisWindow
+from ._logger import setup_logging, notify
+from ._processing import ProcessingWindow
+from ._reader import open_dialog, napari_get_reader
+from ._segmentation import SegmentationWindow
+from ._tracking import TrackingWindow
+from ._writer import save_zarr
 
 
 class MMVTracking(QWidget):
@@ -78,8 +78,9 @@ class MMVTracking(QWidget):
         
         # Radio Buttons
         self.rb_eco = QRadioButton("Eco")
-        self.rb_eco.toggle()
+        #self.rb_eco.toggle()
         rb_heavy = QRadioButton("Heavy")
+        rb_heavy.toggle()
         
         ### Organize objects via widgets
         # widget: parent widget of all content

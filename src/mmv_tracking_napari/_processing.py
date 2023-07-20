@@ -437,7 +437,7 @@ class ProcessingWindow(QWidget):
         QApplication.setOverrideCursor(Qt.WaitCursor)
         import sys
         np.set_printoptions(threshold = sys.maxsize)
-        
+        raise NotIMplementedError
         print(self.viewer.layers[self.viewer.layers.index("Tracks")].data)
         QApplication.restoreOverrideCursor()
         

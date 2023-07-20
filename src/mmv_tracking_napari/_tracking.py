@@ -115,6 +115,11 @@ class TrackingWindow(QWidget):
         self._replace_tracks(ids)
     
     def _replace_tracks(self, ids = []):
+        try:
+            self.viewer.layers.remove('Tracks')
+        except ValueError:
+            pass
+        
         print("Displaying tracks {}".format(ids))
         if ids == []:
             self.viewer.add_tracks(self.parent.tracks, name = 'Tracks')
@@ -381,8 +386,8 @@ class TrackingWindow(QWidget):
     def _proximity_track_all(self):
         worker = self._proximity_track_all_worker()
         QApplication.setOverrideCursor(Qt.WaitCursor)
-        worker.start()
         worker.returned.connect(self._restore_tracks)
+        worker.start()
     
     def _restore_tracks(self, tracks):
         if tracks is None:
