@@ -1,12 +1,12 @@
-
 import zarr
 
 from qtpy.QtWidgets import QFileDialog
 
-def open_dialog(parent, filetype = "*.zarr", directory = ""):
+
+def open_dialog(parent, filetype="*.zarr", directory=""):
     """
     Opens a dialog to select a file to open
-    
+
     Parameters
     ----------
     parent : QWidget
@@ -15,7 +15,7 @@ def open_dialog(parent, filetype = "*.zarr", directory = ""):
         Only files of this file type will be displayed
     directory : str
         Opens view at the specified directory
-        
+
     Returns
     -------
     str
@@ -26,21 +26,23 @@ def open_dialog(parent, filetype = "*.zarr", directory = ""):
     dialog.setNameFilter(filetype)
     filetype_name = filetype[2:].capitalize()
     print("Showing dialog")
-    filepath = dialog.getExistingDirectory(parent, "Select {}-File".format(filetype_name), directory = directory)
+    filepath = dialog.getExistingDirectory(
+        parent, "Select {}-File".format(filetype_name), directory=directory
+    )
     print("Dialog has been closed")
     print("Selected {} as path".format(filepath))
     return filepath
-    
+
 
 def napari_get_reader(path):
     """
     Determines reader type for file(s) at [path]
-    
+
     Parameters
     ----------
     path : str or list of str
         Path to file, or list of paths.
-        
+
     Returns
     -------
     function or None
@@ -54,11 +56,11 @@ def napari_get_reader(path):
         # so we are only going to look at the first file.
         path = path[0]
         print("Selected {} as path from list".format(path))
-        
+
     # if we know we cannot read the file, we immediately return None.
     if not path.endswith(".zarr"):
         return None
-    
+
     # otherwise we return the *function* that can read ``path``.
     return zarr_reader
 
@@ -66,16 +68,14 @@ def napari_get_reader(path):
 def zarr_reader(filename):
     """
     Take a file name and read the file in.
-    
+
     Parameters
     ----------
     filename : str
         Path to a .zarr file
-        
+
     Returns
     -------
         Array or Group
     """
-    return zarr.open(filename, mode = 'a')
-
-
+    return zarr.open(filename, mode="a")
