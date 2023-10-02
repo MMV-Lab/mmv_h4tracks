@@ -44,7 +44,7 @@ class ProcessingWindow(QWidget):
 
     dock = None
 
-    def __init__(self, viewer, parent):
+    def __init__(self, parent):
         """
         Parameters
         ----------
@@ -56,8 +56,8 @@ class ProcessingWindow(QWidget):
         super().__init__()
         self.setLayout(QVBoxLayout())
         self.setWindowTitle("Data Processing")
-        self.viewer = viewer
         self.parent = parent
+        self.viewer = parent.viewer
         ProcessingWindow.dock = self
 
         ### QObjects

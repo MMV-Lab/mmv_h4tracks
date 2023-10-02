@@ -9,6 +9,7 @@ from qtpy.QtWidgets import (
     QApplication,
 )
 from qtpy.QtCore import Qt
+from scipy import ndimage
 
 from ._logger import notify
 from ._grabber import grab_layer
@@ -27,7 +28,7 @@ class SegmentationWindow(QWidget):
     -------
     """
 
-    def __init__(self, viewer):
+    def __init__(self, parent):
         """
         Parameters
         ----------
@@ -37,7 +38,8 @@ class SegmentationWindow(QWidget):
         super().__init__()
         self.setLayout(QVBoxLayout())
         self.setWindowTitle("Segmentation correction")
-        self.viewer = viewer
+        self.parent = parent
+        self.viewer = parent.viewer
 
         ### QObjects
 
@@ -107,11 +109,92 @@ class SegmentationWindow(QWidget):
         position : list
             list of float values describing the position the user clicked on the layer (z,y,x)
         """
+        self.remove_cell_from_tracks(event.position)
+        
         # replace label with 0 to make it background
         self._replace_label(event, 0)
         print("Removed cell")
         self._remove_on_clicks()
         print("Remove cell callback is removed")
+        
+    def remove_cell_from_tracks(self, position):
+        try:
+            label_layer = grab_layer(self.viewer, "Segmentation Data")
+        except ValueError:
+            notify("Please make sure the label layer exists!")
+            return
+        x = int(round(position[2]))
+        y = int(round(position[1]))
+        z = int(position[0])
+        selected_id = label_layer.data[z,y,x]
+        if selected_id == 0:
+            return
+        centroid = ndimage.center_of_mass(
+            label_layer.data[z],
+            labels = label_layer.data[z],
+            index = selected_id
+        )
+        cell = [z, int(np.rint(centroid[0])), int(np.rint(centroid[1]))]
+        try:
+            track_id = self.get_track_id_of_cell(cell)
+        except ValueError:
+            return
+
+        try:
+            tracks = grab_layer(self.viewer, "Tracks").data
+        except ValueError:
+            return
+        
+        next_id = max(tracks[:,0]) + 1
+
+        # find index of entry
+        for i in range(len(tracks)):
+            if (
+                tracks[i, 1] == cell[0]
+                and tracks[i, 2] == cell[1]
+                and tracks[i, 3] == cell[2]
+            ):
+                index = i
+                # get track id of that entry
+                track_id = tracks[i][0]
+                break
+                
+        # find first and last index of that track id
+        indices = np.where(tracks[:,0] == track_id)[0]
+        first = min(indices)
+        last = max(indices)
+        
+        # if index != first and != last index change id of all entries after index
+        if index > first + 1:
+            indices = indices[indices >= index]
+        if index < last - 1:
+            indices = indices[indices <= index]
+         
+        if len(indices) == 1:
+            for i in range(index + 1, last + 1):
+                tracks[i][0] = next_id
+                
+        # remove entry (or entries)
+        tracks = np.delete(tracks, indices, 0)
+        self.viewer.layers.remove("Tracks")
+        self.viewer.add_tracks(tracks, name="Tracks")
+        
+    def get_track_id_of_cell(self, cell):
+        try:
+            tracks_layer = grab_layer(self.viewer, "Tracks")
+        except ValueError:
+            return
+        tracks = tracks_layer.data
+        new_track_id = np.amax(tracks[:,0]) + 1
+        
+        for i in range(len(tracks)):
+            if(
+                tracks[i, 1] == cell[0]
+                and tracks[i, 2] == cell[1]
+                and tracks[i, 3] == cell[2]
+            ):
+                return tracks[i,0]
+        raise ValueError('No matching track found')
 
     def _add_select_callback(self):
         QApplication.setOverrideCursor(Qt.CrossCursor)
@@ -147,7 +230,7 @@ class SegmentationWindow(QWidget):
             id = self._get_free_label_id(label_layer)
 
         # set the new id
-        label_layer.selected_label = self._get_free_label_id(label_layer)
+        label_layer.selected_label = id #self._get_free_label_id(label_layer)
 
         # set the label layer as currently selected layer
         self.viewer.layers.select_all()
@@ -227,9 +310,9 @@ class SegmentationWindow(QWidget):
             notify("Please make sure the label layer exists!")
             return
 
-        x = int(event.position[2])
-        y = int(event.position[1])
-        z = int(event.position[0])
+        x = int(round(event.position[2]))
+        y = int(round(event.position[1]))
+        z = int(round(event.position[0]))
 
         if id == -1:
             id = self._get_free_label_id(label_layer)
@@ -266,9 +349,9 @@ class SegmentationWindow(QWidget):
             notify("Please make sure the label layer exists!")
             return
 
-        x = int(event.position[2])
-        y = int(event.position[1])
-        z = int(event.position[0])
+        x = int(round(event.position[2]))
+        y = int(round(event.position[1]))
+        z = int(round(event.position[0]))
 
         return label_layer.data[z, y, x]
 

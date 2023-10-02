@@ -1,6 +1,7 @@
 import numpy as np
 import multiprocessing
 from multiprocessing import Pool
+from scipy import ndimage
 
 from qtpy.QtWidgets import (
     QWidget,
@@ -13,6 +14,7 @@ from qtpy.QtWidgets import (
     QHBoxLayout,
     QGridLayout,
     QFileDialog,
+    QTableWidget,
 )
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
@@ -42,6 +44,7 @@ class AnalysisWindow(QWidget):
         """
         super().__init__()
         self.parent = parent
+        self.viewer = parent.viewer
         self.setLayout(QVBoxLayout())
         self.setWindowTitle("Analysis")
 
@@ -62,6 +65,9 @@ class AnalysisWindow(QWidget):
 
         btn_plot.clicked.connect(self._start_plot_worker)
         btn_export.clicked.connect(self._start_export_worker)
+        
+        btn_evaluate_segmentation.clicked.connect(self._evaluate_segmentation)
+        btn_evaluate_tracking.clicked.connect(self._evaluate_tracking)
 
         # Comboboxes
         self.combobox_plots = QComboBox()
@@ -87,7 +93,7 @@ class AnalysisWindow(QWidget):
         # Line Edits
         self.lineedit_movement = QLineEdit("")
         self.lineedit_track_duration = QLineEdit("")
-        lineedit_limit_evaluation = QLineEdit("0")
+        self.lineedit_limit_evaluation = QLineEdit("0")
 
         ### Organize objects via widgets
         content = QWidget()
@@ -115,7 +121,7 @@ class AnalysisWindow(QWidget):
         extract_grid.layout().addWidget(btn_export, 2, 2)
 
         content.layout().addWidget(extract_grid)
-        content.layout().addWidget(lineedit_limit_evaluation)
+        content.layout().addWidget(self.lineedit_limit_evaluation)
 
         evaluation = QWidget()
         evaluation.setLayout(QHBoxLayout())
@@ -181,21 +187,19 @@ class AnalysisWindow(QWidget):
             track = np.delete(tracks, np.where(tracks[:, 0] != id), 0)
             x = track[-1, 3] - track[0, 3]
             y = track[0, 2] - track[-1, 2]
-            if y > 0:
-                if x == 0:
-                    direction = np.pi / 2
-                else:
-                    direction = np.pi - np.arctan(np.abs(y / x))
-            elif y < 0:
-                if x == 0:
-                    direction = 1.5 * np.pi
-                else:
-                    direction = np.pi - np.arctan(np.abs(y / x))
-            else:
-                if x < 0:
-                    direction = np.pi
+            if x == 0:
+                if y < 0:
+                    direction = 270
+                elif y > 0:
+                    direction = 90
                 else:
                     direction = 0
+            else:
+                direction = 180 + np.arctan(y / x) / np.pi * 180
+                if x > 0:
+                    direction += 180
+            if direction >= 360:
+                direction -= 360
             distance = np.around(np.sqrt(np.square(x) + np.square(y)), 3)
             direction = np.around(direction, 3)
             try:
@@ -210,10 +214,11 @@ class AnalysisWindow(QWidget):
             x = track[-1, 3] - track[0, 3]
             y = track[0, 2] - track[-1, 2]
             euclidean_distance = np.around(np.sqrt(np.square(x) + np.square(y)), 3)
+            directed_speed = np.around(euclidean_distance / len(track), 3)
             try:
-                retval = np.append(retval, [[id, euclidean_distance, 0]], 0)
+                retval = np.append(retval, [[id, euclidean_distance, len(track), directed_speed]], 0)
             except UnboundLocalError:
-                retval = np.array([[id, euclidean_distance, 0]])
+                retval = np.array([[id, euclidean_distance, len(track), directed_speed]])
         return retval
 
     def _calculate_accumulated_distance(self, tracks):
@@ -228,9 +233,9 @@ class AnalysisWindow(QWidget):
                 )
             accumulated_distance = np.around(np.sum(steps), 3)
             try:
-                retval = np.append(retval, [[id, accumulated_distance, 0]], 0)
+                retval = np.append(retval, [[id, accumulated_distance, len(track)]], 0)
             except UnboundLocalError:
-                retval = np.array([[id, accumulated_distance, 0]])
+                retval = np.array([[id, accumulated_distance, len(track)]])
         return retval
 
     def _start_plot_worker(self):
@@ -269,7 +274,7 @@ class AnalysisWindow(QWidget):
         self.parent.plot_window.setLayout(QVBoxLayout())
         self.parent.plot_window.layout().addWidget(QLabel(ret["Description"]))
 
-        selector = Selector(self, axes, results)
+        selector = Selector(self, axes, results) # TODO: fix selector?
 
         self.parent.plot_window.layout().addWidget(canvas)
         btn_apply = QPushButton("Apply")
@@ -409,7 +414,7 @@ class AnalysisWindow(QWidget):
                     )
                     raise ValueError
                 indices = np.where(
-                    np.unique(tracks[:, 0], return_counts=true)[1] >= min_duration
+                    np.unique(tracks[:, 0], return_counts=True)[1] >= min_duration
                 )
                 duration_mask = np.unique(tracks[:, 0])[indices]
 
@@ -424,9 +429,9 @@ class AnalysisWindow(QWidget):
         min_duration,
         selected_metrics,
     ):
-        metrics = ["", "Number of cells", "Average track duration"]
-        metrics.append("Standard deviation of track duration")
-        individual_metrics = ["ID", "Track duration"]
+        metrics = ["", "Number of cells", "Average track duration [# frames]"]
+        metrics.append("Standard deviation of track duration [# frames]")
+        individual_metrics = ["ID", "Track duration [# frames]"]
         all_values = ["all"]
         all_values.extend(
             [
@@ -478,8 +483,8 @@ class AnalysisWindow(QWidget):
         rows.append([None])
         rows.append(
             [
-                "Movement Threshold: " + str(min_movement),
-                "Duration Threshold: " + str(min_duration),
+                "Movement Threshold: {} pixels/frame".format(str(min_movement)),
+                "Duration Threshold: {} frames".format(str(min_duration)),
             ]
         )
         rows.append([None])
@@ -509,8 +514,8 @@ class AnalysisWindow(QWidget):
         metrics_dict = {}
         if "Speed" in selected_metrics:
             speed = self._calculate_speed(tracks)
-            metrics.append("Average_speed")
-            individual_metrics.extend(["Average speed", "Standard deviation of speed"])
+            metrics.append("Average_speed [# pixels/frame]")
+            individual_metrics.extend(["Average speed [# pixels/frame]", "Standard deviation of speed [# pixels/frame]"])
             all_values.append(np.around(np.average(speed[:, 1]), 3))
             valid_values.append(
                 np.around(
@@ -529,8 +534,8 @@ class AnalysisWindow(QWidget):
         if "Size" in selected_metrics:
             segmentation = grab_layer(self.parent.viewer, "Segmentation Data").data
             size = self._calculate_size(tracks, segmentation)
-            metrics.extend(["Average size", "Standard deviation of size"])
-            individual_metrics.extend(["Average size", "Standard deviation of size"])
+            metrics.extend(["Average size [# pixels]", "Standard deviation of size [# pixels]"])
+            individual_metrics.extend(["Average size [# pixels]", "Standard deviation of size [# pixels]"])
             all_values.extend(
                 [np.around(np.average(size[:, 1]), 3), np.around(np.std(size[:, 1]), 3)]
             )
@@ -563,12 +568,12 @@ class AnalysisWindow(QWidget):
         if "Direction" in selected_metrics:
             metrics.extend(
                 [
-                    "Average direction",
-                    "Standard deviation of direction",
-                    "Average distance",
+                    "Average direction [°]",
+                    "Standard deviation of direction [°]",
+                    "Average distance [# pixels]",
                 ]
             )
-            individual_metrics.extend(["Direction", "Distance"])
+            individual_metrics.extend(["Direction [°]", "Distance [# pixels]"])
             all_values.extend(
                 [
                     np.around(np.average(self.direction[:, 3]), 3),
@@ -614,8 +619,8 @@ class AnalysisWindow(QWidget):
 
         if "Euclidean distance" in selected_metrics:
             euclidean_distance = self._calculate_euclidean_distance(tracks)
-            metrics.extend(["Average euclidean distance", "Average directed speed"])
-            individual_metrics.extend(["Euclidean distance", "Directed speed"])
+            metrics.extend(["Average euclidean distance [# pixels]", "Average velocity [# pixels/frame]"])
+            individual_metrics.extend(["Euclidean distance [# pixels]", "Velocity [# pixels/frame]"])
             all_values.extend(
                 [
                     np.around(np.average(euclidean_distance[:, 1]), 3),
@@ -651,12 +656,12 @@ class AnalysisWindow(QWidget):
                     ),
                 ]
             )
-            metrics_dict.update({"Euclidean Distance": euclidean_distance})
+            metrics_dict.update({"Euclidean distance": euclidean_distance})
 
         if "Accumulated distance" in selected_metrics:
             accumulated_distance = self._calculate_accumulated_distance(tracks)
-            metrics.append("Average accumulated distance")
-            individual_metrics.append("Accumulated distance")
+            metrics.append("Average accumulated distance [# pixels]")
+            individual_metrics.append("Accumulated distance [# pixels]")
             all_values.append(np.around(np.average(accumulated_distance[:, 1]), 3))
             valid_values.append(
                 np.around(
@@ -670,34 +675,19 @@ class AnalysisWindow(QWidget):
                     3,
                 )
             )
-            metrics_dict.update({"Accumulated Distance": accumulated_distance})
+            metrics_dict.update({"Accumulated distance": accumulated_distance})
 
             if "Euclidean distance" in selected_metrics:
                 metrics.append("Average directness")
                 individual_metrics.append("Directness")
 
-                """directness = []
+                directness = []
                 for i in range(len(np.unique(tracks[:, 0]))):
-                    directness.append()
+                    directness.append([euclidean_distance[i, 0], euclidean_distance[i, 1] / accumulated_distance[i,1] if accumulated_distance[i,1] > 0 else 0])
                     
-                directness = np.array(directness)"""
-                directness = np.array(
-                    [
-                        euclidean_distance[i, 0],
-                        euclidean_distance[i, 1] / accumulated_distance[i, 1]
-                        if accumulated_distance[i, 1] > 0
-                        else 0,
-                    ]
-                    for i in range(len(np.unique(tracks[:, 0])))
-                )
-                """directness = np.array([
-                    euclidean_distance[i, 0],
-                    euclidean_distance[i, 1] / accumulated_distance[i, 1]
-                    if accumulated_distance[i, 1] > 0 else 0]
-                for i in range(len(np.unique(tracks[:, 0])))
-                )"""
-                print(directness)
-                all_values.append(np.around(np.average(directness[:, 1]), 3))
+                directness = np.around(np.array(directness), 3)
+                #all_values.append(np.around(np.average(directness[:, 1]), 3))
+                all_values.append((np.average(directness[:, 1])))
                 valid_values.append(
                     np.around(
                         np.average(
@@ -712,8 +702,6 @@ class AnalysisWindow(QWidget):
                 )
                 metrics_dict.update({"Directness": directness})
 
-        print(metrics_dict.keys())
-
         return metrics, individual_metrics, all_values, valid_values, metrics_dict
 
     def _individual_metric_values(self, tracks, filtered_mask, metrics):
@@ -727,16 +715,15 @@ class AnalysisWindow(QWidget):
             if "Size" in metrics:
                 value.extend([metrics["Size"][id][1], metrics["Size"][id][2]])
             if "Direction" in metrics:
-                value.extend([metrics["Direction"][id][1], metrics["Direction"][id][2]])
+                value.extend([metrics["Direction"][id][3], metrics["Direction"][id][4]])
             if "Euclidean distance" in metrics:
                 value.extend(
                     [
                         metrics["Euclidean distance"][id][1],
-                        [metrics["Euclidean distance"][id][2]],
+                        metrics["Euclidean distance"][id][3],
                     ]
                 )
             if "Accumulated distance" in metrics:
-                print(accumulated_distance)
                 value.append(metrics["Accumulated distance"][id][1])
             if "Directness" in metrics:
                 value.append(metrics["Directness"][id][1])
@@ -749,7 +736,320 @@ class AnalysisWindow(QWidget):
         return valid_values, invalid_values
 
     def _evaluate_segmentation(self):
-        raise NotImplementedError
+        automatic_segmentation = self.parent.initial_layers[0]
+        corrected_segmentation = grab_layer(self.viewer, "Segmentation Data").data
+        current_frame = int(self.viewer.dims.point[0])
+        frame_range = [current_frame]
+        try:
+            selected_limit = int(self.lineedit_limit_evaluation.text())
+        except ValueError:
+            notify("Please use integer instead of text")
+            return
+        if selected_limit > current_frame:
+            frame_range.append(selected_limit)
+        else:
+            frame_range.insert(0, selected_limit)
+        frame_range[1] += 1
+        frames = [current_frame, frame_range, len(automatic_segmentation) - 1]
+        ### FOR CURRENT FRAME
+        intersection = np.sum( np.sum( np.logical_and( automatic_segmentation[current_frame], corrected_segmentation[current_frame])))
+        union = np.sum( np.sum( np.logical_or( automatic_segmentation[current_frame], corrected_segmentation[current_frame])))
+        single_iou = intersection / union
+        single_dice = (2 * intersection) / (np.count_nonzero(automatic_segmentation[current_frame]) + np.count_nonzero(corrected_segmentation[current_frame]))
+        single_f1 = (2 * intersection) / (intersection + union)
+        ### FOR SOME FRAMES
+        intersection = np.sum( np.sum( np.sum( np.logical_and( automatic_segmentation[list(range(frame_range[0], frame_range[1]))], corrected_segmentation[list(range(frame_range[0], frame_range[1]))]))))
+        union = np.sum( np.sum( np.sum( np.logical_or( automatic_segmentation[list(range(frame_range[0], frame_range[1]))], corrected_segmentation[list(range(frame_range[0], frame_range[1]))]))))
+        some_iou = intersection / union
+        some_dice = (2 * intersection) / (np.count_nonzero(automatic_segmentation[list(range(frame_range[0], frame_range[1]))]) + np.count_nonzero(corrected_segmentation[list(range(frame_range[0], frame_range[1]))]))
+        some_f1 = (2 * intersection) / (intersection + union)
+        ### FOR ALL FRAMES
+        intersection = np.sum( np.sum( np.sum( np.logical_and( automatic_segmentation, corrected_segmentation))))
+        union = np.sum( np.sum( np.sum( np.logical_or( automatic_segmentation, corrected_segmentation))))
+        all_iou = intersection / union
+        all_dice = (2 * intersection) / (np.count_nonzero(automatic_segmentation) + np.count_nonzero(corrected_segmentation))
+        all_f1 = (2 * intersection) / (intersection + union)
+        results = np.asarray([[all_iou, all_dice, all_f1],
+                              [some_iou, some_dice, some_f1],
+                              [single_iou, single_dice, single_f1]
+                            ])
+        self._display_evaluation_result("Evaluation of Segmentation", results, frames)
 
     def _evaluate_tracking(self):
-        raise NotImplementedError
+        automatic_tracks = self.parent.initial_layers[1]
+        corrected_tracks = grab_layer(self.viewer, "Tracks").data
+        automatic_segmentation = self.parent.initial_layers[0]
+        corrected_segmentation = grab_layer(self.viewer, "Segmentation Data").data
+        
+        fp = 0
+        fn = 0
+        de = 0
+        ae = 0
+        sc = 0
+
+        if self.parent.rb_eco.isChecked():
+            AMOUNT_OF_PROCESSES = np.maximum(1, int(multiprocessing.cpu_count() * 0.4))
+        else:
+            AMOUNT_OF_PROCESSES = np.maximum(1, int(multiprocessing.cpu_count() * 0.8))
+        print("Running on {} processes max".format(AMOUNT_OF_PROCESSES))
+        
+        # create dict with double lookup for cells in gt and prediction
+        # key naming schema: ({p/gt},z,y,x)
+        lookup_dict = {}
+        for slice in range(len(corrected_segmentation)):
+            matches = []
+            for cell in np.unique(corrected_segmentation[slice])[1:]:
+                centroid = ndimage.center_of_mass(
+                    corrected_segmentation[slice],
+                    labels = corrected_segmentation[slice],
+                    index = cell
+                )
+                y = int(np.rint(centroid[0]))
+                x = int(np.rint(centroid[1]))
+                match_id = automatic_segmentation[slice, y, x]
+                matches.append((cell, match_id))
+                if match_id != 0:
+                    p_centroid = ndimage.center_of_mass(
+                        automatic_segmentation[slice],
+                        labels = automatic_segmentation[slice],
+                        index = match_id
+                    )
+                    p_y = int(np.rint(p_centroid[0]))
+                    p_x = int(np.rint(p_centroid[1]))
+                    gt = (slice, y, x)
+                    p = (slice, p_y, p_x)
+                    lookup_dict[f'gt_{gt}'] = p
+                    lookup_dict[f'p_{p}'] = gt
+            matches = np.asarray(matches)
+            uniques_gt = np.unique(matches[:,0], return_counts = True)
+            uniques_pred = np.unique(matches[:,1], return_counts = True)
+            counts_pred = uniques_pred[1]
+            fn_current = 0
+            if uniques_pred[0][0] == 0:
+                fn_current = uniques_pred[1][0]
+                counts_pred = counts_pred[1:]
+            sc_current = sum(counts_pred - np.ones_like(counts_pred))
+            fp += len(uniques_pred[0]) + fn_current + sc_current - len(uniques_gt[0])
+            fn += fn_current
+            sc += sc_current
+            
+        def connection_has_match(connection:tuple, prediction:bool):
+            if not prediction:
+                cell_gt_1 = connection[0]
+                cell_gt_2 = connection[1]
+                if not f"gt_{tuple(cell_gt_1)}" in lookup_dict or not f"gt_{tuple(cell_gt_2)}" in lookup_dict:
+                    return False
+                cell_p_1 = lookup_dict[f"gt_{tuple(cell_gt_1)}"]
+                cell_p_2 = lookup_dict[f"gt_{tuple(cell_gt_2)}"]
+                return is_connection(cell_p_1, cell_p_2, not prediction)
+            else:
+                cell_p_1 = connection[0]
+                cell_p_2 = connection[1]
+                if not f"p_{tuple(cell_p_1)}" in lookup_dict or not f"gt_{tuple(cell_p_2)}" in lookup_dict:
+                    return False
+                cell_gt_1 = lookup_dict[f"p_{tuple(cell_p_1)}"]
+                cell_gt_2 = lookup_dict[f"p_{tuple(cell_p_2)}"]
+                return is_connection(cell_gt_1, cell_gt_2, not prediction)
+    
+        def is_connection(cell_1, cell_2, prediction:bool):
+            cell_1 = np.asarray(cell_1)
+            cell_2 = np.asarray(cell_2)
+            if prediction:
+                index = np.where(np.all(automatic_tracks[:,1:] == cell_1, axis = 1))[0]
+                if len(index) == 0:
+                    return False
+                return np.array_equal(automatic_tracks[index[0]+1,1:], cell_2)
+            index = np.where(np.all(corrected_tracks[:,1:] == cell_1, axis = 1))[0]
+            if len(index) == 0:
+                return False
+            return np.array_equal(corrected_tracks[index[0]+1,1:], cell_2)
+
+        for line in range(len(corrected_tracks) - 1):
+            if corrected_tracks[line, 0] != corrected_tracks[line+1,0]:
+                continue
+            cell_1 = corrected_tracks[line, 1:]
+            cell_2 = corrected_tracks[line+ 1, 1:]
+            connection = (cell_1, cell_2)
+            if not connection_has_match(connection, False):
+                ae += 1
+                
+        for line in range(len(automatic_tracks) -1):
+            if automatic_tracks[line, 0] != automatic_tracks[line +1,0]:
+                continue
+            cell_1 = automatic_tracks[line, 1:]
+            cell_2 = automatic_tracks[line+1,1:]
+            connection = (cell_1, cell_2)
+            if not connection_has_match(connection, True):
+                de += 1 
+
+        print(f"False Negatives: {fn}")
+        print(f"False Positives: {fp}")
+        print(f"Split Cells: {sc}")
+        print(f"Added Edges: {ae}")
+        print(f"Deleted Edges: {de}")
+        
+        fault_value = fp + fn * 10 + de + ae * 1.5 + sc * 5
+        
+        print(f"Fault value: {fault_value}")
+        return
+        
+        
+        
+        
+        
+        
+        
+        """data = []
+        for i in range(len(corrected_segmentation)):
+            data.append((corrected_tracks[i], automatic_tracks[i]))
+        
+        def match_cells(labels1, labels2):
+            "#""
+            Takes two slices as argument. Both should be from the same timestep. Returns list of matching cell ids.
+            "#""
+            pairs = []
+            paired = []
+            
+            for id in np.unique(labels1):
+                if id == 0:
+                    continue
+                
+                ## try to find pair by looking at the centroid
+                centroid = ndimage.center_of_mass(
+                    labels1, labels = labels1, index = id
+                )
+                match_id = labels2[int(np.rint(centroid[0])), int(np.rint(centroid[1]))]
+                if match_id > 0:
+                    pairs.append((id, match_id))
+                    paired.append(match_id)
+                    continue
+                pairs.append((id, -1))
+                
+            for id in np.unique(labels2):
+                if not id in paired:
+                    pairs.append((-1, id))
+                
+            return pairs
+        
+        with Pool(AMOUNT_OF_PROCESSES) as p:
+            matched_cells = p.starmap(match_cells, data)
+            
+        for line in matched_cells:
+            arr = np.asarray(line)
+            unique, counts = np.unique(arr[:,0], return_counts = True)
+            fp += counts[0] # should always be counts of -1
+            unique, counts = np.unique(arr[:,1], return_counts = True)
+            fn += counts[0]
+        
+        data = []
+        def extend_tracks(tracks, segmentation):
+            extended_tracks = np.asarray([[]])
+            for line in tracks:
+                seg_id = segmentation[line[1], line[2], line[3]]
+                np.append(extended_tracks, [line[0],line[1],line[2],line[3],seg_id], axis=0)
+            return extended_tracks
+        
+        extended_corrected_tracks = extend_tracks(corrected_tracks, corrected_segmentation)
+        extended_automatic_tracks = extend_tracks(automatic_tracks, automatic_segmentation)
+        for i in range(len(extended_corrected_tracks)):
+            if extended_corrected_tracks[i,0] == extended_corrected_tracks[i+1,0]:
+                data.append((extended_corrected_tracks[i], extended_corrected_tracks[i+1]), extended_automatic_tracks, matched_cells)
+                
+        def match_track_connections(connection, tracks, matched_cells):
+            connection_id1 = connection[0][4]
+            match_id1 = matched_cells[matched_cells[0].index(connection_id1)][1]
+            connection_id2 = connection[1][4]
+            match_id2 = matched_cells[matched_cells[0].index(connection_id2)][1]
+            index1 = np.where(tracks, tracks[:,4] == match_id1)
+            index2 = np.where(tracks, tracks[:,4] == match_id2)
+            if index1[0] == index2[0] + 1:
+                return index1[0]
+            return -1
+        
+        with Pool(AMOUNT_OF_PROCESSES) as p:
+            matched_indices = p.starmap(match_track_connections, data)
+            
+        for index in matched_indices:
+            if index == -1:
+                ae += 1
+                
+        for index in range(len(automatic_tracks)):
+            if not index in matched_indices:
+                de += 1
+        
+        hit_cells = []
+        for line in corrected_tracks:
+            if not (line[1], line[2], line[3]) in hit_cells:
+                hit_cells.append((line[1], line[2], line[3]))
+            else:
+                sc += 1
+            
+        print(f"False negatives: {fn}")
+        print("False positives: %s" % fp)
+        print("Deleted edges: %s" % de)
+        print("Added edges: %s" % ae)
+        print("Split cells: %s" % sc)
+        
+        fault_value = fp + fn * 10 + de + ae * 1.5 + sc * 5
+        
+        print("Fault value: %s" % fault_value)
+        
+        return
+        
+        
+        
+        current_frame = int(self.viewer.dims.point[0])
+        frame_range = [current_frame]
+        try:
+            selected_limit = int(self.lineedit_limit_evaluation.text())
+        except ValueError:
+            notify("Please use integer instead of text")
+            return
+        if selected_limit > current_frame:
+            frame_range.append(selected_limit)
+        else:
+            frame_range.insert(0, selected_limit)
+            
+        frames = [current_frame, frame_range, len(automatic_segmentation) - 1]
+        self._display_evaluation_result("Evaluation of Tracking", results, frames)
+        
+            
+    def _display_evaluation_result(self, title, results, frames):
+        self.results_window = ResultsWindow(title, results, frames)
+        print("Opening results window")
+        self.results_window.show()"""
+        
+class ResultsWindow(QWidget):
+    def __init__(self, title, results, frames):
+        """
+        Parameters
+        ----------
+        title : str
+            Title of the window
+        results : arr
+            2d array holding the results
+        frames : list
+            list holding the selected, a list of both lower and higher bound frame, and the last frame
+        """
+        super().__init__()
+        self.setLayout(QVBoxLayout())
+        self.setWindowTitle(title)
+        table_widget = QTableWidget(4,4)
+        self.layout().addWidget(table_widget)
+        
+        table_widget.setCellWidget(0,0,QLabel("Evaluation Interval"))
+        table_widget.setCellWidget(0,1,QLabel("IoU Score"))
+        table_widget.setCellWidget(0,2,QLabel("DICE Score"))
+        table_widget.setCellWidget(0,3,QLabel("F1 score"))
+        table_widget.setCellWidget(1,0,QLabel("0 - {}".format(frames[2])))
+        table_widget.setCellWidget(1,1,QLabel(str(results[0,0])))
+        table_widget.setCellWidget(1,2,QLabel(str(results[0,1])))
+        table_widget.setCellWidget(1,3,QLabel(str(results[0,2])))
+        table_widget.setCellWidget(2,0,QLabel("{} - {}".format(frames[1][0], frames[1][1] - 1)))
+        table_widget.setCellWidget(2,1,QLabel(str(results[1,0])))
+        table_widget.setCellWidget(2,2,QLabel(str(results[1,1])))
+        table_widget.setCellWidget(2,3,QLabel(str(results[1,2])))
+        table_widget.setCellWidget(3,0,QLabel(str(frames[0])))
+        table_widget.setCellWidget(3,1,QLabel(str(results[2,0])))
+        table_widget.setCellWidget(3,2,QLabel(str(results[2,1])))
+        table_widget.setCellWidget(3,3,QLabel(str(results[2,2])))

@@ -168,7 +168,7 @@ class TrackingWindow(QWidget):
             self.parent.tracks, np.isin(self.parent.tracks[:, 0], to_remove), 0
         )
         self.viewer.layers.remove("Tracks")
-        self.le_trajectroy.setText("")
+        self.le_trajectory.setText("")
         self.viewer.add_tracks(self.parent.tracks, name="Tracks")
 
     def _unlink(self):
@@ -319,7 +319,7 @@ class TrackingWindow(QWidget):
             self.viewer.layers.remove("Tracks")
             track_id = np.amax(tracks[:, 0]) + 1
 
-        connected_ids = [0, 0]
+        connected_ids = [-1, -1]
         if track_id != 1:
             for i in range(len(tracks)):
                 if (
@@ -334,15 +334,15 @@ class TrackingWindow(QWidget):
                     and tracks[i, 2] == self.track_cells[-1][1]
                     and tracks[i, 3] == self.track_cells[-1][2]
                 ):
-                    connected_ids[0] = self.parent.tracks[i, 0]
+                    connected_ids[1] = self.parent.tracks[i, 0]
 
-        if max(connected_ids) > 0:
-            if connected_ids[0] > 0:
+        if max(connected_ids) > -1:
+            if connected_ids[0] > -1:
                 self.track_cells.remove(self.track_cells[0])
-            if connected_ids[1] > 0:
+            if connected_ids[1] > -1:
                 self.track_cells.remove(self.track_cells[-1])
 
-            if min(connected_ids) == 0:
+            if min(connected_ids) == -1: # TODO: TEST IF WORKS NOW
                 track_id = max(connected_ids)
             else:
                 track_id = min(connected_ids)
@@ -408,9 +408,9 @@ class TrackingWindow(QWidget):
                     pass
 
                 selected_cell = label_layer.data[
-                    int(event.position[0]),
-                    int(event.position[1]),
-                    int(event.position[2]),
+                    int(round(event.position[0])),
+                    int(round(event.position[1])),
+                    int(round(event.position[2])),
                 ]
                 if selected_cell == 0:
                     notify_with_delay("no clicky!")

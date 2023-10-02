@@ -14,6 +14,7 @@ from qtpy.QtWidgets import (
 from qtpy.QtCore import Qt
 
 import numpy as np
+import copy
 
 from ._analysis import AnalysisWindow
 from ._logger import setup_logging, notify
@@ -221,7 +222,7 @@ class MMVTracking(QWidget):
 
         self.zarr = zarr_file
         self.tracks = filtered_tracks
-        self.initial_layers = [segmentation, filtered_tracks]
+        self.initial_layers = [copy.deepcopy(segmentation), copy.deepcopy(filtered_tracks)]
         QApplication.restoreOverrideCursor()
 
     def _save(self):
@@ -247,7 +248,7 @@ class MMVTracking(QWidget):
         """
         Opens a [ProcessingWindow]
         """
-        self.processing_window = ProcessingWindow(self.viewer, self)
+        self.processing_window = ProcessingWindow(self)
         print("Opening processing window")
         self.processing_window.show()
 
@@ -255,7 +256,7 @@ class MMVTracking(QWidget):
         """
         Opens a [SegmentationWindow]
         """
-        self.segmentation_window = SegmentationWindow(self.viewer)
+        self.segmentation_window = SegmentationWindow(self)
         print("Opening segmentation window")
         self.segmentation_window.show()
 
