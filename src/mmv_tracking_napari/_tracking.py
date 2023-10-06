@@ -48,9 +48,9 @@ class TrackingWindow(QWidget):
         ### QObjects
 
         # Labels
-        label_trajectory = QLabel("Filter tracks by ID:")
-        label_remove_correspondence = QLabel("Remove tracking for later Slices for ID:")
-        label_insert_correspondence = QLabel("ID should be tracked with second ID:")
+        label_trajectory = QLabel("Filter tracks by cell:")
+        label_remove_correspondence = QLabel("Remove tracking for later Slices for cell:")
+        label_insert_correspondence = QLabel("ID should be tracked with second cell:")
 
         # Buttons
         self.btn_remove_correspondence = QPushButton("Unlink")
@@ -63,7 +63,7 @@ class TrackingWindow(QWidget):
 
         btn_delete_displayed_tracks = QPushButton("Delete displayed tracks")
         btn_delete_displayed_tracks.clicked.connect(self._remove_displayed_tracks)
-        btn_auto_track = QPushButton("Automatic tracking for single cell")
+        btn_auto_track = QPushButton("Tracking for single slow cell")
         btn_auto_track.clicked.connect(self._add_auto_track_callback)
         btn_auto_track_all = QPushButton("Automatic tracking for all cells")
         btn_auto_track_all.clicked.connect(self._proximity_track_all)

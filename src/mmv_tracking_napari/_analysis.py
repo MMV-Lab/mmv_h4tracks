@@ -495,7 +495,7 @@ class AnalysisWindow(QWidget):
                 tracks, filtered_mask, metrics_dict
             )
 
-            rows.append(["Valid Cells"])
+            rows.append(["Cells matching the filters"])
             # [rows.append(value) for value in valid_values]
             for value in valid_values:
                 rows.append(value)
@@ -503,7 +503,7 @@ class AnalysisWindow(QWidget):
             if not np.array_equal(np.unique(tracks[:, 0]), filtered_mask):
                 rows.append([None])
                 rows.append([None])
-                rows.append(["Invalid cells"])
+                rows.append(["Cells not matching the filters"])
 
                 [rows.append(value) for value in invalid_values]
 
@@ -774,6 +774,8 @@ class AnalysisWindow(QWidget):
                               [single_iou, single_dice, single_f1]
                             ])
         self._display_evaluation_result("Evaluation of Segmentation", results, frames)
+        self.results_window.show()
+        print("Opening results window")
 
     def _evaluate_tracking(self):
         automatic_tracks = self.parent.initial_layers[1]
@@ -891,7 +893,7 @@ class AnalysisWindow(QWidget):
         fault_value = fp + fn * 10 + de + ae * 1.5 + sc * 5
         
         print(f"Fault value: {fault_value}")
-        return
+        #return
         
         
         
@@ -1012,12 +1014,12 @@ class AnalysisWindow(QWidget):
             
         frames = [current_frame, frame_range, len(automatic_segmentation) - 1]
         self._display_evaluation_result("Evaluation of Tracking", results, frames)
+        self.results_window.show()
+        print("Opening results window")"""
         
             
     def _display_evaluation_result(self, title, results, frames):
         self.results_window = ResultsWindow(title, results, frames)
-        print("Opening results window")
-        self.results_window.show()"""
         
 class ResultsWindow(QWidget):
     def __init__(self, title, results, frames):

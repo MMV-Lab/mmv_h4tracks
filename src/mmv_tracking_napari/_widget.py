@@ -7,22 +7,26 @@ from qtpy.QtWidgets import (
     QRadioButton,
     QVBoxLayout,
     QHBoxLayout,
+    QGridLayout,
     QScrollArea,
     QMessageBox,
     QApplication,
+    QFileDialog,
 )
 from qtpy.QtCore import Qt
 
 import numpy as np
 import copy
+import zarr
 
 from ._analysis import AnalysisWindow
-from ._logger import setup_logging, notify
+from ._logger import setup_logging, notify, layer_select
 from ._processing import ProcessingWindow
 from ._reader import open_dialog, napari_get_reader
 from ._segmentation import SegmentationWindow
 from ._tracking import TrackingWindow
 from ._writer import save_zarr
+from ._grabber import grab_layer
 
 
 class MMVTracking(QWidget):
@@ -69,10 +73,14 @@ class MMVTracking(QWidget):
 
         # Labels
         title = QLabel("<font color='green'>HITL4Trk</font>")
+        computation_mode = QLabel("Computation mode")
 
         # Buttons
         btn_load = QPushButton("Load")
+        btn_load.setToolTip("Load a Zarr file")
         btn_save = QPushButton("Save")
+        btn_save_as = QPushButton("Save as")
+        btn_save_as.setToolTip("Save as a new Zarr file")
         btn_processing = QPushButton("Data Processing")
         btn_segmentation = QPushButton("Segmentation correction")
         btn_tracking = QPushButton("Tracking correction")
@@ -80,6 +88,7 @@ class MMVTracking(QWidget):
 
         btn_load.clicked.connect(self._load)
         btn_save.clicked.connect(self._save)
+        btn_save_as.clicked.connect(self.save_as)
         btn_processing.clicked.connect(self._processing)
         btn_segmentation.clicked.connect(self._segmentation)
         btn_tracking.clicked.connect(self._tracking)
@@ -88,7 +97,7 @@ class MMVTracking(QWidget):
         # Radio Buttons
         self.rb_eco = QRadioButton("Eco")
         # self.rb_eco.toggle()
-        rb_heavy = QRadioButton("Heavy")
+        rb_heavy = QRadioButton("Regular")
         rb_heavy.toggle()
 
         ### Organize objects via widgets
@@ -98,9 +107,10 @@ class MMVTracking(QWidget):
         widget.layout().addWidget(title)
 
         computation_mode_rbs = QWidget()
-        computation_mode_rbs.setLayout(QHBoxLayout())
-        computation_mode_rbs.layout().addWidget(self.rb_eco)
-        computation_mode_rbs.layout().addWidget(rb_heavy)
+        computation_mode_rbs.setLayout(QGridLayout())
+        computation_mode_rbs.layout().addWidget(computation_mode, 0, 0, 1, 2)
+        computation_mode_rbs.layout().addWidget(self.rb_eco, 1, 0)
+        computation_mode_rbs.layout().addWidget(rb_heavy, 1, 1)
 
         widget.layout().addWidget(computation_mode_rbs)
 
@@ -108,6 +118,7 @@ class MMVTracking(QWidget):
         read_write_files.setLayout(QHBoxLayout())
         read_write_files.layout().addWidget(btn_load)
         read_write_files.layout().addWidget(btn_save)
+        read_write_files.layout().addWidget(btn_save_as)
 
         widget.layout().addWidget(read_write_files)
 
@@ -128,6 +139,51 @@ class MMVTracking(QWidget):
         self.setMinimumSize(250, 300)
         self.setLayout(QVBoxLayout())
         self.layout().addWidget(scroll_area)
+        """self.viewer.layers.events.inserting.connect(self.ev_inserting)
+        self.viewer.layers.events.inserted.connect(self.ev_inserted)
+        self.viewer.layers.events.removing.connect(self.ev_removing)
+        self.viewer.layers.events.removed.connect(self.ev_removed)
+        self.viewer.layers.events.moving.connect(self.ev_moving)
+        self.viewer.layers.events.moved.connect(self.ev_moved)
+        self.viewer.layers.events.changed.connect(self.ev_changed)
+        self.viewer.layers.events.reordered.connect(self.ev_reordered)
+        self.viewer.layers.selection.events.changed.connect(self.ev_selection_events_changed)
+        self.viewer.layers.selection.events.active.connect(self.ev_selection_events_active)
+        
+    def ev_inserting(self, event):
+        pass
+        #print(f'### emitted "inserting" with index {event.index}')
+    def ev_inserted(self, event):
+        event.value.events.visible.connect(self.shaco)
+        event.value.events.name.connect(self.namechange_is_13500_ip)
+        #print(f'### emitted "inserted" with index {event.index} and value {event.value}')
+    def ev_removing(self, event):
+        pass
+        #print(f'### emitted "removing" with index {event.index}')
+    def ev_removed(self, event):
+        print(f'### emitted "removed" with index {event.index} and value {event.value}')
+    def ev_moving(self, event):
+        pass
+        #print(f'### emitted "moving" with index {event.index} and new index {event.new_index}')
+    def ev_moved(self, event):
+        pass
+        #print(f'### emitted "moved" with index {event.index}, new index {event.new_index} and value {event.value}')
+    def ev_changed(self, event):
+        print(f'### emitted "changed" with index {event.index}, old value {event.old_value} and value {event.value}')
+    def ev_reordered(self, event):
+        pass
+        #print(f'### emitted "reordered" with value {event.value}')
+    def ev_selection_events_changed(self, event):
+        pass
+        #print(f'### emitted "selection.events.changed" with added {event.added} and removed {event.removed}')
+    def ev_selection_events_active(self, event):
+        pass
+        #print(f'### emitted "selection.events.active" with value {event.value}')
+        
+    def shaco(self, event):
+        print(f"now you see me, now you don't!")
+    def namechange_is_13500_ip(self, event):
+        print(f"index: {event.index}, source: {event.source}, type: {event.type}")"""
 
     def _load(self):
         """
@@ -231,6 +287,23 @@ class MMVTracking(QWidget):
         Fails if no zarr file was opened or not all layers exist
         """
         if not hasattr(self, "zarr"):
+            self.save_as()
+            return
+        raw_data = layer_select(self, "Raw Image")
+        if not raw_data[1]:
+            return
+        raw_data = raw_data[0]
+        segmentation_data = layer_select(self, "Segmentation Data")
+        if not segmentation_data[1]:
+            return
+        segmentation_data = segmentation_data[0]
+        track_data = layer_select(self, "Tracks")
+        if not track_data[1]:
+            return
+        track_data = track_data[0]
+        layers = [raw_layer, segmentation_layer, track_layer]
+        save_zarr(self, self.zarr, layers, self.tracks)
+        """if not hasattr(self, "zarr"):
             notify("Open a zarr file before you save it")
             return
         try:
@@ -242,7 +315,34 @@ class MMVTracking(QWidget):
             if str(err) == "Segmentation layer missing!":
                 notify("No layer named 'Segmentation Data' found!")
             if str(err) == "Tracks layer missing!":
-                notify("No layer named 'Tracks' found!")
+                notify("No layer named 'Tracks' found!")"""
+                
+    def save_as(self):
+        raw = layer_select(self, "Raw Image")
+        if not raw[1]:
+            return
+        raw_name= raw[0]
+        raw_data = grab_layer(self.viewer, raw_name).data
+        segmentation = layer_select(self, "Segmentation Data")
+        if not segmentation[1]:
+            return
+        segmentation_name = segmentation[0]
+        segmentation_data = grab_layer(self.viewer, segmentation_name).data
+        tracks = layer_select(self, "Tracks")
+        if not tracks[1]:
+            return
+        track_name = tracks[0]
+        track_data = grab_layer(self.viewer, track_name).data
+
+        dialog = QFileDialog()
+        path = f"{dialog.getSaveFileName()[0]}.zarr"
+        if path == ".zarr":
+            return
+        print(path)
+        z = zarr.open(path, mode='w')
+        r = z.create_dataset('raw_data', shape = raw_data.shape, dtype = 'f8', data = raw_data)
+        s = z.create_dataset('segmentation_data', shape = segmentation_data.shape, dtype = 'i4', data = segmentation_data)
+        t = z.create_dataset('tracking_data', shape = track_data.shape, dtype = 'i4', data = track_data)
 
     def _processing(self):
         """

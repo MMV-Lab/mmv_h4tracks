@@ -6,12 +6,14 @@ from multiprocessing import Pool
 import napari
 from qtpy.QtWidgets import (
     QWidget,
+    QLabel,
     QVBoxLayout,
     QPushButton,
     QComboBox,
     QGridLayout,
     QApplication,
     QMessageBox,
+    QSizePolicy,
 )
 from qtpy.QtCore import Qt
 from napari.qt.threading import thread_worker
@@ -62,12 +64,15 @@ class ProcessingWindow(QWidget):
 
         ### QObjects
         # Labels
+        label_segmentation = QLabel("Segmentation")
+        label_tracking = QLabel("Tracking")
 
         # Buttons
         btn_segment = QPushButton("Run Instance Segmentation")
         btn_preview_segment = QPushButton("Preview Segmentation")
+        btn_preview_segment.setToolTip("Segment the first 5 frames")
         btn_track = QPushButton("Run Tracking")
-        btn_adjust_seg_ids = QPushButton("Adjust Segmentation IDs")
+        btn_adjust_seg_ids = QPushButton("Harmonize segmentation colors")
         btn_adjust_seg_ids.setToolTip("WARNING: This will take a while")
 
         btn_segment.clicked.connect(self._run_segmentation)
@@ -82,22 +87,77 @@ class ProcessingWindow(QWidget):
         self.combobox_segmentation.addItem("model 2")
         self.combobox_segmentation.addItem("model 3")
         self.combobox_segmentation.addItem("model 4")
+        self.combobox_seg_layers = QComboBox()
+        self.combobox_track_layers = QComboBox()
+        self.layer_comboboxes = [self.combobox_seg_layers, self.combobox_track_layers]
+        for layer in self.viewer.layers:
+            self.combobox_seg_layers.addItem(layer.name)
+            self.combobox_track_layers.addItem(layer.name)
+        
+        # Horizontal lines
+        line = QWidget()
+        line.setFixedHeight(4)
+        line.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        line.setStyleSheet("background-color: #c0c0c0")
 
         ### Organize objects via widgets
         content = QWidget()
-        content.setLayout(QGridLayout())
+        content.setLayout(QVBoxLayout())
+        
+        content.layout().addWidget(label_segmentation)
+        content.layout().addWidget(self.combobox_seg_layers)
+        content.layout().addWidget(self.combobox_segmentation)
+        content.layout().addWidget(btn_preview_segment)
+        content.layout().addWidget(btn_segment)
+        content.layout().addWidget(line)
+        content.layout().addWidget(label_tracking)
+        content.layout().addWidget(self.combobox_track_layers)
+        content.layout().addWidget(btn_track)
+        content.layout().addWidget(btn_adjust_seg_ids)
 
-        layout_widget = QWidget()
+        """layout_widget = QWidget()
         layout_widget.setLayout(QVBoxLayout())
-        layout_widget.layout().addWidget(btn_segment)
         layout_widget.layout().addWidget(btn_preview_segment)
+        layout_widget.layout().addWidget(btn_segment)
 
         content.layout().addWidget(layout_widget, 0, 0)
         content.layout().addWidget(btn_track, 0, 1)
         content.layout().addWidget(self.combobox_segmentation, 2, 0)
-        content.layout().addWidget(btn_adjust_seg_ids, 3, 0)
+        content.layout().addWidget(btn_adjust_seg_ids, 3, 0)"""
 
         self.layout().addWidget(content)
+        
+        self.viewer.layers.events.inserted.connect(self.add_entry_to_comboboxes)
+        self.viewer.layers.events.removed.connect(self.remove_entry_from_comboboxes)
+        for layer in self.viewer.layers:
+            layer.events.name.connect(self.rename_entry_in_comboboxes) # doesn't contain index
+        self.viewer.layers.events.moving.connect(self.reorder_entry_in_comboboxes)
+        
+    def add_entry_to_comboboxes(self, event):
+        for combobox in self.layer_comboboxes:
+            combobox.addItem(event.value.name)
+        event.value.events.name.connect(self.rename_entry_in_comboboxes) # contains index
+        
+    def remove_entry_from_comboboxes(self, event):
+        for combobox in self.layer_comboboxes:
+            combobox.removeItem(event.index)
+
+    def rename_entry_in_comboboxes(self, event):
+        if not hasattr(event, 'index'):
+            event.index = self.viewer.layers.index(event.source.name)
+        for combobox in self.layer_comboboxes:
+            index = combobox.currentIndex()
+            combobox.removeItem(event.index)
+            combobox.insertItem(event.index, event.source.name)
+            combobox.setCurrentIndex(index)
+        
+    def reorder_entry_in_comboboxes(self, event):
+        for combobox in self.layer_comboboxes:
+            index = combobox.currentIndex()
+            item = combobox.itemText(event.index)
+            combobox.removeItem(event.index)
+            combobox.insertItem(event.new_index, item)
+            combobox.setCurrentIndex(index)
 
     def _add_segmentation_to_viewer(self, mask):
         """
@@ -156,7 +216,7 @@ class ProcessingWindow(QWidget):
         from cellpose import models
 
         try:
-            data = grab_layer(self.viewer, "Raw Image").data
+            data = grab_layer(self.viewer, self.combobox_seg_layers.currentText()).data
         except ValueError:
             print("Image layer not found in viewer")
             QApplication.restoreOverrideCursor()
@@ -288,7 +348,9 @@ class ProcessingWindow(QWidget):
 
         # get segmentation data
         try:
-            data = grab_layer(self.viewer, "Segmentation Data").data
+            #data = grab_layer(self.viewer, "Segmentation Data").data
+            data = grab_layer(self.viewer, self.combobox_track_layers.currentText()).data
+            #print(f"equal: {np.array_equal(data, other_data)}")
         except ValueError:
             print("Segmentation layer not found in viewer")
             QApplication.restoreOverrideCursor()

@@ -51,30 +51,15 @@ def save_zarr(parent, zarr_file, layers, cached_tracks):
     zarr_file : zarr
         The zarr file to which to save the layers
     layers : list of layer
-        The layers currently open in the viewer
+        The layers raw image, segmentation, tracks in order
     cached_tracks : array
         The complete tracks layer
     """
 
     print("Saving to file")
-    try:
-        index_of_raw = layers.index("Raw Image")
-    except:
-        print("No layer named 'Raw Image' found")
-        raise ValueError("Raw Image layer missing!")
-    try:
-        index_of_segmentation = layers.index("Segmentation Data")
-    except:
-        print("No layer named 'Segmentation Data' found")
-        raise ValueError("Segmentation layer missing!")
-    try:
-        index_of_tracks = layers.index("Tracks")
-    except:
-        print("No layer named 'Tracks' found")
-        raise ValueError("Tracks layer missing!")
 
     response = 1
-    if not np.array_equal(layers[index_of_tracks].data, cached_tracks):
+    if not np.array_equal(layers[2].data, cached_tracks):
         print("Difference between displayed and full tracks detected")
         response = choice_dialog(
             (
@@ -94,7 +79,7 @@ def save_zarr(parent, zarr_file, layers, cached_tracks):
     tracks = cached_tracks
     if response == 0:
         print("Saving currently displayed tracks")
-        tracks = layers[index_of_tracks]
+        tracks = layers[2]
     else:
         print("Saving complete tracks")
 
@@ -104,23 +89,23 @@ def save_zarr(parent, zarr_file, layers, cached_tracks):
         zarr_file = zarr.open(file, mode="w")
         zarr_file.create_dataset(
             "raw_data",
-            shape=layers[index_of_raw].data.shape,
+            shape=layers[0].data.shape,
             dtype="f8",
-            data=layers[index_of_raw].data,
+            data=layers[0].data,
         )
         zarr_file.create_dataset(
             "segmentation_data",
-            shape=layers[index_of_segmentation].data.shape,
+            shape=layers[1].data.shape,
             dtype="i4",
-            data=layers[index_of_segmentation].data,
+            data=layers[1].data,
         )
         zarr_file.create_dataset(
             "tracking_data", shape=tracks.shape, dtype="i4", data=tracks
         )
     else:
         print("Saving to loaded zarr file")
-        zarr_file["raw_data"][:] = layers[index_of_raw].data
-        zarr_file["segmentation_data"][:] = layers[index_of_segmentation].data
+        zarr_file["raw_data"][:] = layers[0].data
+        zarr_file["segmentation_data"][:] = layers[1].data
         zarr_file["tracking_data"].resize(tracks.shape[0], tracks.shape[1])
         zarr_file["tracking_data"][:] = tracks
     print("Saving to zarr successful")
