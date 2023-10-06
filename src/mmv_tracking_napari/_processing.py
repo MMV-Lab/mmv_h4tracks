@@ -18,6 +18,7 @@ from qtpy.QtWidgets import (
 from qtpy.QtCore import Qt
 from napari.qt.threading import thread_worker
 from scipy import ndimage, spatial, optimize
+import napari
 
 from ._logger import notify, choice_dialog
 from ._grabber import grab_layer
@@ -57,10 +58,11 @@ class ProcessingWindow(QWidget):
         """
         super().__init__()
         self.setLayout(QVBoxLayout())
-        self.setWindowTitle("Data Processing")
+        self.setWindowTitle("Data processing")
         self.parent = parent
         self.viewer = parent.viewer
         ProcessingWindow.dock = self
+        self.setStyleSheet(napari.qt.get_stylesheet(theme = "dark"))
 
         ### QObjects
         # Labels
@@ -68,31 +70,32 @@ class ProcessingWindow(QWidget):
         label_tracking = QLabel("Tracking")
 
         # Buttons
-        btn_segment = QPushButton("Run Instance Segmentation")
-        btn_preview_segment = QPushButton("Preview Segmentation")
-        btn_preview_segment.setToolTip("Segment the first 5 frames")
+        self.btn_segment = QPushButton("Run Instance Segmentation")
+        self.btn_preview_segment = QPushButton("Preview Segmentation")
+        self.btn_preview_segment.setToolTip("Segment the first 5 frames")
         btn_track = QPushButton("Run Tracking")
         btn_adjust_seg_ids = QPushButton("Harmonize segmentation colors")
         btn_adjust_seg_ids.setToolTip("WARNING: This will take a while")
+        
+        self.btn_segment.setEnabled(False)
+        self.btn_preview_segment.setEnabled(False)
 
-        btn_segment.clicked.connect(self._run_segmentation)
-        btn_preview_segment.clicked.connect(self._run_demo_segmentation)
+        self.btn_segment.clicked.connect(self._run_segmentation)
+        self.btn_preview_segment.clicked.connect(self._run_demo_segmentation)
         btn_track.clicked.connect(self._run_tracking)
         btn_adjust_seg_ids.clicked.connect(self._adjust_ids)
 
         # Comboboxes
         self.combobox_segmentation = QComboBox()
         self.combobox_segmentation.addItem("select model")
-        self.combobox_segmentation.addItem("model 1")
-        self.combobox_segmentation.addItem("model 2")
-        self.combobox_segmentation.addItem("model 3")
-        self.combobox_segmentation.addItem("model 4")
+        self.read_models()
+        self.combobox_segmentation.currentTextChanged.connect(self.toggle_segmentation_buttons)
         self.combobox_seg_layers = QComboBox()
         self.combobox_track_layers = QComboBox()
         self.layer_comboboxes = [self.combobox_seg_layers, self.combobox_track_layers]
         for layer in self.viewer.layers:
-            self.combobox_seg_layers.addItem(layer.name)
-            self.combobox_track_layers.addItem(layer.name)
+            for comobox in self.layer_comboboxes:
+                combobox.addItem(layer.name)
         
         # Horizontal lines
         line = QWidget()
@@ -107,23 +110,13 @@ class ProcessingWindow(QWidget):
         content.layout().addWidget(label_segmentation)
         content.layout().addWidget(self.combobox_seg_layers)
         content.layout().addWidget(self.combobox_segmentation)
-        content.layout().addWidget(btn_preview_segment)
-        content.layout().addWidget(btn_segment)
+        content.layout().addWidget(self.btn_preview_segment)
+        content.layout().addWidget(self.btn_segment)
         content.layout().addWidget(line)
         content.layout().addWidget(label_tracking)
         content.layout().addWidget(self.combobox_track_layers)
         content.layout().addWidget(btn_track)
         content.layout().addWidget(btn_adjust_seg_ids)
-
-        """layout_widget = QWidget()
-        layout_widget.setLayout(QVBoxLayout())
-        layout_widget.layout().addWidget(btn_preview_segment)
-        layout_widget.layout().addWidget(btn_segment)
-
-        content.layout().addWidget(layout_widget, 0, 0)
-        content.layout().addWidget(btn_track, 0, 1)
-        content.layout().addWidget(self.combobox_segmentation, 2, 0)
-        content.layout().addWidget(btn_adjust_seg_ids, 3, 0)"""
 
         self.layout().addWidget(content)
         
@@ -132,6 +125,19 @@ class ProcessingWindow(QWidget):
         for layer in self.viewer.layers:
             layer.events.name.connect(self.rename_entry_in_comboboxes) # doesn't contain index
         self.viewer.layers.events.moving.connect(self.reorder_entry_in_comboboxes)
+        
+    def toggle_segmentation_buttons(self, text):
+        if text == "select model":
+            self.btn_segment.setEnabled(False)
+            self.btn_preview_segment.setEnabled(False)
+        else:
+            self.btn_segment.setEnabled(True)
+            self.btn_preview_segment.setEnabled(True)
+        
+    def read_models(self):
+        path = f"{os.path.dirname(__file__)}/models"
+        for file in os.listdir(path):
+            self.combobox_segmentation.addItem(file)
         
     def add_entry_to_comboboxes(self, event):
         for combobox in self.layer_comboboxes:
@@ -297,10 +303,10 @@ class ProcessingWindow(QWidget):
             a dictionary of all the parameters based on selected model
         """
         print("Getting parameters")
-        if model == "model 1":
+        if model == "cellpose_neutrophils":
             print("Selected model 1")
             params = {
-                "model_path": "/models/cellpose_neutrophils",
+                "model_path": f"/models/{model}",
                 "diameter": 15,
                 "chan": 0,
                 "chan2": 0,
@@ -521,11 +527,11 @@ class ProcessingWindow(QWidget):
         """
         Replaces track ID 0. Also adjusts segmentation IDs to match track IDs
         """
+        raise NotImplementedError
         print("Adjusting segmentation IDs")
         QApplication.setOverrideCursor(Qt.WaitCursor)
         import sys
 
         np.set_printoptions(threshold=sys.maxsize)
-        raise NotIMplementedError
         print(self.viewer.layers[self.viewer.layers.index("Tracks")].data)
         QApplication.restoreOverrideCursor()

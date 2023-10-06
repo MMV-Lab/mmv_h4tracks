@@ -19,6 +19,7 @@ from qtpy.QtWidgets import (
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from napari.qt.threading import thread_worker
+import napari
 
 from ._grabber import grab_layer
 from ._logger import notify
@@ -47,6 +48,7 @@ class AnalysisWindow(QWidget):
         self.viewer = parent.viewer
         self.setLayout(QVBoxLayout())
         self.setWindowTitle("Analysis")
+        self.setStyleSheet(napari.qt.get_stylesheet(theme = "dark"))
 
         ### QObjects
 
@@ -1038,6 +1040,7 @@ class ResultsWindow(QWidget):
         self.setWindowTitle(title)
         table_widget = QTableWidget(4,4)
         self.layout().addWidget(table_widget)
+        self.setStyleSheet(napari.qt.get_stylesheet(theme = "dark"))
         
         table_widget.setCellWidget(0,0,QLabel("Evaluation Interval"))
         table_widget.setCellWidget(0,1,QLabel("IoU Score"))

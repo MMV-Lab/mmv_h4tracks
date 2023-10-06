@@ -81,7 +81,7 @@ class MMVTracking(QWidget):
         btn_save = QPushButton("Save")
         btn_save_as = QPushButton("Save as")
         btn_save_as.setToolTip("Save as a new Zarr file")
-        btn_processing = QPushButton("Data Processing")
+        btn_processing = QPushButton("Data processing")
         btn_segmentation = QPushButton("Segmentation correction")
         btn_tracking = QPushButton("Tracking correction")
         btn_analysis = QPushButton("Analysis")
@@ -303,19 +303,6 @@ class MMVTracking(QWidget):
         track_data = track_data[0]
         layers = [raw_layer, segmentation_layer, track_layer]
         save_zarr(self, self.zarr, layers, self.tracks)
-        """if not hasattr(self, "zarr"):
-            notify("Open a zarr file before you save it")
-            return
-        try:
-            save_zarr(self, self.zarr, self.viewer.layers, self.tracks)
-        except ValueError as err:
-            print("Caught ValueError: {}".format(err))
-            if str(err) == "Raw Image layer missing!":
-                notify("No layer named 'Raw Image' found!")
-            if str(err) == "Segmentation layer missing!":
-                notify("No layer named 'Segmentation Data' found!")
-            if str(err) == "Tracks layer missing!":
-                notify("No layer named 'Tracks' found!")"""
                 
     def save_as(self):
         raw = layer_select(self, "Raw Image")

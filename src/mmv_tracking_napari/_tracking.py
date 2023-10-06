@@ -12,10 +12,13 @@ from qtpy.QtWidgets import (
     QGridLayout,
     QApplication,
     QMessageBox,
+    QComboBox,
+    QSizePolicy,
 )
 from qtpy.QtCore import Qt
 from scipy import ndimage
 from napari.qt.threading import thread_worker
+import napari
 
 from ._logger import notify, notify_with_delay, choice_dialog
 from ._grabber import grab_layer
@@ -44,13 +47,16 @@ class TrackingWindow(QWidget):
         self.setWindowTitle("Tracking correction")
         self.parent = parent
         self.viewer = parent.viewer
+        self.setStyleSheet(napari.qt.get_stylesheet(theme = "dark"))
 
         ### QObjects
 
         # Labels
         label_trajectory = QLabel("Filter tracks by cell:")
-        label_remove_correspondence = QLabel("Remove tracking for later Slices for cell:")
-        label_insert_correspondence = QLabel("ID should be tracked with second cell:")
+        label_remove_correspondence = QLabel("Remove tracking for later slices for cell:")
+        label_insert_correspondence = QLabel("Cell should be tracked with second cell:")
+        label_segmentation = QLabel("Segmentation layer:")
+        label_tracks = QLabel("Tracks layer:")
 
         # Buttons
         self.btn_remove_correspondence = QPushButton("Unlink")
@@ -71,26 +77,73 @@ class TrackingWindow(QWidget):
         # Line Edits
         self.lineedit_trajectory = QLineEdit("")
         self.lineedit_trajectory.editingFinished.connect(self._filter_tracks)
+        
+        # Comboboxes
+        self.combobox_segmentation = QComboBox()
+        self.combobox_tracks = QComboBox()
+        self.layer_comboboxes = [self.combobox_segmentation, self.combobox_tracks]
+        
+        # Horizontal lines
+        line = QWidget()
+        line.setFixedHeight(4)
+        line.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        line.setStyleSheet("background-color: #c0c0c0")
 
         ### Organize objects via widgets
         content = QWidget()
         content.setLayout(QGridLayout())
-        content.layout().addWidget(label_trajectory, 0, 0)
-        content.layout().addWidget(self.lineedit_trajectory, 0, 1)
-        content.layout().addWidget(btn_delete_displayed_tracks, 0, 2)
-        content.layout().addWidget(label_remove_correspondence, 1, 0)
-        content.layout().addWidget(self.btn_remove_correspondence, 1, 1)
-        content.layout().addWidget(btn_auto_track, 1, 2)
-        content.layout().addWidget(label_insert_correspondence, 2, 0)
-        content.layout().addWidget(self.btn_insert_correspondence, 2, 1)
-        content.layout().addWidget(btn_auto_track_all, 2, 2)
+        content.layout().addWidget(label_segmentation, 0, 0)
+        content.layout().addWidget(self.combobox_segmentation, 0, 1)
+        content.layout().addWidget(label_tracks, 1, 0)
+        content.layout().addWidget(self.combobox_tracks, 1, 1)
+        content.layout().addWidget(line, 2, 0, 1, 3)
+        content.layout().addWidget(label_trajectory, 3, 0)
+        content.layout().addWidget(self.lineedit_trajectory, 3, 1)
+        content.layout().addWidget(btn_delete_displayed_tracks, 3, 2)
+        content.layout().addWidget(label_remove_correspondence, 4, 0)
+        content.layout().addWidget(self.btn_remove_correspondence, 4, 1)
+        content.layout().addWidget(btn_auto_track, 4, 2)
+        content.layout().addWidget(label_insert_correspondence, 5, 0)
+        content.layout().addWidget(self.btn_insert_correspondence, 5, 1)
+        content.layout().addWidget(btn_auto_track_all, 5, 2)
 
         self.layout().addWidget(content)
+        self.viewer.layers.events.inserted.connect(self.add_entry_to_comboboxes)
+        self.viewer.layers.events.removed.connect(self.remove_entry_from_comboboxes)
+        for layer in self.viewer.layers:
+            layer.events.name.connect(self.rename_entry_in_comboboxes) # doesn't contain index
+        self.viewer.layers.events.moving.connect(self.reorder_entry_in_comboboxes)
+        
+    def add_entry_to_comboboxes(self, event):
+        for combobox in self.layer_comboboxes:
+            combobox.addItem(event.value.name)
+        event.value.events.name.connect(self.rename_entry_in_comboboxes) # contains index
+        
+    def remove_entry_from_comboboxes(self, event):
+        for combobox in self.layer_comboboxes:
+            combobox.removeItem(event.index)
+
+    def rename_entry_in_comboboxes(self, event):
+        if not hasattr(event, 'index'):
+            event.index = self.viewer.layers.index(event.source.name)
+        for combobox in self.layer_comboboxes:
+            index = combobox.currentIndex()
+            combobox.removeItem(event.index)
+            combobox.insertItem(event.index, event.source.name)
+            combobox.setCurrentIndex(index)
+        
+    def reorder_entry_in_comboboxes(self, event):
+        for combobox in self.layer_comboboxes:
+            index = combobox.currentIndex()
+            item = combobox.itemText(event.index)
+            combobox.removeItem(event.index)
+            combobox.insertItem(event.new_index, item)
+            combobox.setCurrentIndex(index)
 
     def _filter_tracks(self):
         print("Filtering tracks")
         try:
-            self.viewer.layers.remove("Tracks")
+            self.viewer.layers.remove(self.combobox_tracks.currentText())
         except ValueError:
             print("No tracking layer found")
         input_text = self.lineedit_trajectory.text()
@@ -123,14 +176,15 @@ class TrackingWindow(QWidget):
         self._replace_tracks(ids)
 
     def _replace_tracks(self, ids=[]):
+        tracks_name = self.combobox_tracks.currentText()
         try:
-            self.viewer.layers.remove("Tracks")
+            self.viewer.layers.remove(tracks_name)
         except ValueError:
             pass
 
         print("Displaying tracks {}".format(ids))
         if ids == []:
-            self.viewer.add_tracks(self.parent.tracks, name="Tracks")
+            self.viewer.add_tracks(self.parent.tracks, name=tracks_name)
             return
         tracks_data = [track for track in self.parent.tracks if track[0] in ids]
         if not tracks_data:
@@ -139,14 +193,15 @@ class TrackingWindow(QWidget):
                 + str(tracks)
                 + ", displaying all tracks instead"
             )
-            self.viewer.add_tracks(self.parent.tracks, name="Tracks")
+            self.viewer.add_tracks(self.parent.tracks, name=tracks_name)
             return
-        self.viewer.add_tracks(tracks_data, name="Tracks")
+        self.viewer.add_tracks(tracks_data, name=tracks_name)
 
     def _remove_displayed_tracks(self):
         print("Removing displayed tracks")
+        tracks_name = self.combobox_tracks.currentText()
         try:
-            tracks_layer = grab_layer(self.viewer, "Tracks")
+            tracks_layer = grab_layer(self.viewer, tracks_name)
         except ValueError:
             notify("No tracks layer found!")
             return
@@ -167,9 +222,9 @@ class TrackingWindow(QWidget):
         self.parent.tracks = np.delete(
             self.parent.tracks, np.isin(self.parent.tracks[:, 0], to_remove), 0
         )
-        self.viewer.layers.remove("Tracks")
+        self.viewer.layers.remove(tracks_name)
         self.le_trajectory.setText("")
-        self.viewer.add_tracks(self.parent.tracks, name="Tracks")
+        self.viewer.add_tracks(self.parent.tracks, name=tracks_name)
 
     def _unlink(self):
         if self.btn_remove_correspondence.text() == "Unlink":
@@ -183,13 +238,14 @@ class TrackingWindow(QWidget):
         # print(self.track_cells)
 
         try:
-            label_layer = grab_layer(self.viewer, "Segmentation Data")
+            label_layer = grab_layer(self.viewer, self.combobox_segmentation.currentText())
         except ValueError:
             notify("Please make sure the label layer exists!")
             return
 
+        tracks_name = self.combobox_tracks.currentText()
         try:
-            tracks_layer = grab_layer(self.viewer, "Tracks")
+            tracks_layer = grab_layer(self.viewer, tracks_name)
         except ValueError:
             notify("Can not remove tracks when tracks layer is missing!")
             return
@@ -260,11 +316,11 @@ class TrackingWindow(QWidget):
         tracks = cleaned_tracks[0]
         self.parent.tracks = cleaned_tracks[1]
 
-        self.viewer.layers.remove("Tracks")
+        self.viewer.layers.remove(tracks_name)
         if tracks.size > 0:
-            self.viewer.add_tracks(tracks, name="Tracks")
+            self.viewer.add_tracks(tracks, name=tracks_name)
         elif self.parent.tracks.size > 0:
-            self.viewer.add_tracks(self.parent.tracks, name="Tracks")
+            self.viewer.add_tracks(self.parent.tracks, name=tracks_name)
 
     def _link(self):
         if self.btn_insert_correspondence.text() == "Link":
@@ -278,12 +334,13 @@ class TrackingWindow(QWidget):
         # print(self.track_cells)
 
         try:
-            label_layer = grab_layer(self.viewer, "Segmentation Data")
+            label_layer = grab_layer(self.viewer, self.combobox_segmentation.currentText())
         except ValueError:
             notify("Please make sure the label layer exists!")
             return
+        tracks_name = self.combobox_tracks.currentText()
         try:
-            tracks_layer = grab_layer(self.viewer, "Tracks")
+            tracks_layer = grab_layer(self.viewer, tracks_name)
         except ValueError:
             pass
         else:
@@ -316,7 +373,7 @@ class TrackingWindow(QWidget):
             track_id = 1
         else:
             tracks = tracks_layer.data
-            self.viewer.layers.remove("Tracks")
+            self.viewer.layers.remove(tracks_name)
             track_id = np.amax(tracks[:, 0]) + 1
 
         connected_ids = [-1, -1]
@@ -357,7 +414,7 @@ class TrackingWindow(QWidget):
         df = pd.DataFrame(tracks, columns=["ID", "Z", "Y", "X"])
         df.sort_values(["ID", "Z"], ascending=True, inplace=True)
         self.parent.tracks = df.values
-        self.viewer.add_tracks(self.parent.tracks, name="Tracks")
+        self.viewer.add_tracks(self.parent.tracks, name=tracks_name)
 
     def _add_tracking_callback(self):
         QApplication.setOverrideCursor(Qt.CrossCursor)
@@ -367,7 +424,7 @@ class TrackingWindow(QWidget):
             @layer.mouse_drag_callbacks.append
             def _select_cells(layer, event):
                 try:
-                    label_layer = grab_layer(self.viewer, "Segmentation Data")
+                    label_layer = grab_layer(self.viewer, self.combobox_segmentation.currentText())
                 except ValueError:
                     notify("Please make sure the label layer exists!")
                     self._reset()
@@ -398,14 +455,14 @@ class TrackingWindow(QWidget):
             @layer.mouse_drag_callbacks.append
             def _proximity_track(layer, event):
                 try:
-                    label_layer = grab_layer(self.viewer, "Segmentation Data")
+                    label_layer = grab_layer(self.viewer, self.combobox_segmentation.currentText())
                 except ValueError:
                     notify("Please make sure the label layer exists!")
                     return
-                try:
+                """try:
                     tracks = grab_layer(self.viewer, "Tracks")
                 except ValueError:
-                    pass
+                    pass"""
 
                 selected_cell = label_layer.data[
                     int(round(event.position[0])),
@@ -437,7 +494,7 @@ class TrackingWindow(QWidget):
         if tracks is None:
             return
         self.parent.tracks = tracks
-        self.viewer.add_tracks(tracks, name="Tracks")
+        self.viewer.add_tracks(tracks, name=self.combobox_tracks.currentText())
         QApplication.restoreOverrideCursor()
 
     @thread_worker
@@ -445,11 +502,11 @@ class TrackingWindow(QWidget):
         self._reset()
         self.parent.tracks = np.empty((1, 4), dtype=np.int8)
         try:
-            self.viewer.layers.remove("Tracks")
+            self.viewer.layers.remove(self.combobox_tracks.currenText())
         except ValueError:
             pass
         try:
-            label_layer = grab_layer(self.viewer, "Segmentation Data")
+            label_layer = grab_layer(self.viewer, self.combobox_segmentation.currentText())
         except ValueError:
             notify("Please make sure the label layer exists!")
             return
