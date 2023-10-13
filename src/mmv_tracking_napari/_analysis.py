@@ -48,7 +48,10 @@ class AnalysisWindow(QWidget):
         self.viewer = parent.viewer
         self.setLayout(QVBoxLayout())
         self.setWindowTitle("Analysis")
-        self.setStyleSheet(napari.qt.get_stylesheet(theme = "dark"))
+        try:
+            self.setStyleSheet(napari.qt.get_stylesheet(theme = "dark"))
+        except TypeError:
+            pass
 
         ### QObjects
 
@@ -1189,7 +1192,10 @@ class ResultsWindow(QWidget):
         self.setWindowTitle(title)
         table_widget = QTableWidget(4,4)
         self.layout().addWidget(table_widget)
-        self.setStyleSheet(napari.qt.get_stylesheet(theme = "dark"))
+        try:
+            self.setStyleSheet(napari.qt.get_stylesheet(theme = "dark"))
+        except TypeError:
+            pass
         
         table_widget.setCellWidget(0,0,QLabel("Evaluation Interval"))
         table_widget.setCellWidget(0,1,QLabel("IoU Score"))

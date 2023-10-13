@@ -62,7 +62,10 @@ class ProcessingWindow(QWidget):
         self.parent = parent
         self.viewer = parent.viewer
         ProcessingWindow.dock = self
-        self.setStyleSheet(napari.qt.get_stylesheet(theme = "dark"))
+        try:
+            self.setStyleSheet(napari.qt.get_stylesheet(theme = "dark"))
+        except TypeError:
+            pass
 
         ### QObjects
         # Labels
