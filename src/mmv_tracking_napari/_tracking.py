@@ -82,6 +82,9 @@ class TrackingWindow(QWidget):
         self.combobox_segmentation = QComboBox()
         self.combobox_tracks = QComboBox()
         self.layer_comboboxes = [self.combobox_segmentation, self.combobox_tracks]
+        for layer in self.viewer.layers:
+            for combobox in self.layer_comboboxes:
+                combobox.addItem(layer.name)
         
         # Horizontal lines
         line = QWidget()

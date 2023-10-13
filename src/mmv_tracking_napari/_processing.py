@@ -94,7 +94,7 @@ class ProcessingWindow(QWidget):
         self.combobox_track_layers = QComboBox()
         self.layer_comboboxes = [self.combobox_seg_layers, self.combobox_track_layers]
         for layer in self.viewer.layers:
-            for comobox in self.layer_comboboxes:
+            for combobox in self.layer_comboboxes:
                 combobox.addItem(layer.name)
         
         # Horizontal lines

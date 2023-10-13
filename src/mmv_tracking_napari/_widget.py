@@ -139,9 +139,9 @@ class MMVTracking(QWidget):
         self.setMinimumSize(250, 300)
         self.setLayout(QVBoxLayout())
         self.layout().addWidget(scroll_area)
-        """self.viewer.layers.events.inserting.connect(self.ev_inserting)
-        self.viewer.layers.events.inserted.connect(self.ev_inserted)
-        self.viewer.layers.events.removing.connect(self.ev_removing)
+        #self.viewer.layers.events.inserting.connect(self.ev_inserting)
+        #self.viewer.layers.events.inserted.connect(self.ev_inserted)
+        """self.viewer.layers.events.removing.connect(self.ev_removing)
         self.viewer.layers.events.removed.connect(self.ev_removed)
         self.viewer.layers.events.moving.connect(self.ev_moving)
         self.viewer.layers.events.moved.connect(self.ev_moved)
@@ -149,15 +149,23 @@ class MMVTracking(QWidget):
         self.viewer.layers.events.reordered.connect(self.ev_reordered)
         self.viewer.layers.selection.events.changed.connect(self.ev_selection_events_changed)
         self.viewer.layers.selection.events.active.connect(self.ev_selection_events_active)
-        
     def ev_inserting(self, event):
+        event.
         pass
-        #print(f'### emitted "inserting" with index {event.index}')
-    def ev_inserted(self, event):
-        event.value.events.visible.connect(self.shaco)
-        event.value.events.name.connect(self.namechange_is_13500_ip)
+        #print(f'### emitted "inserting" with index {event.index}')"""
+    """def ev_inserted(self, event):
+        #event.value.events.visible.connect(self.shaco)
+        #event.value.events.name.connect(self.namechange_is_13500_ip)
+        #event.value.events.set_data.connect(self.do_something)
+        event.value.events.set_data.connect(self.do_something) # LOTS of events
+    
+    def do_something(self, event):
+        print(event.source.name)
+        print("attributes:", [attr for attr in dir(event.source) if not attr.startswith("_")])
+        if hasattr(event, 'index'):
+            print(event.index)"""
         #print(f'### emitted "inserted" with index {event.index} and value {event.value}')
-    def ev_removing(self, event):
+    """def ev_removing(self, event):
         pass
         #print(f'### emitted "removing" with index {event.index}')
     def ev_removed(self, event):
@@ -248,31 +256,31 @@ class MMVTracking(QWidget):
 
         print("Adding layers")
         # add layers to viewer
-        try:
-            self.viewer.add_image(zarr_file["raw_data"][:], name="Raw Image")
-            segmentation = zarr_file["segmentation_data"][:]
+        #try:
+        self.viewer.add_image(zarr_file["raw_data"][:], name="Raw Image")
+        segmentation = zarr_file["segmentation_data"][:]
 
-            self.viewer.add_labels(segmentation, name="Segmentation Data")
-            # save tracks so we can delete one slice tracks first
-            tracks = zarr_file["tracking_data"][:]
-        except:
+        self.viewer.add_labels(segmentation, name="Segmentation Data")
+        # save tracks so we can delete one slice tracks first
+        tracks = zarr_file["tracking_data"][:]
+        """except:
             print(
                 "File does not have the right structure of raw_data, segmentation_data and tracking_data!"
             )
-        else:
-            # Filter track ids of tracks that just occur once
-            count_of_track_ids = np.unique(tracks[:, 0], return_counts=True)
-            filtered_track_ids = np.delete(
-                count_of_track_ids, count_of_track_ids[1] == 1, 1
-            )
+        else:"""
+        # Filter track ids of tracks that just occur once
+        count_of_track_ids = np.unique(tracks[:, 0], return_counts=True)
+        filtered_track_ids = np.delete(
+            count_of_track_ids, count_of_track_ids[1] == 1, 1
+        )
 
-            # Remove tracks that only exist in one slice
-            filtered_tracks = np.delete(
-                tracks,
-                np.where(np.isin(tracks[:, 0], filtered_track_ids[0, :], invert=True)),
-                0,
-            )
-            self.viewer.add_tracks(filtered_tracks, name="Tracks")
+        # Remove tracks that only exist in one slice
+        filtered_tracks = np.delete(
+            tracks,
+            np.where(np.isin(tracks[:, 0], filtered_track_ids[0, :], invert=True)),
+            0,
+        )
+        self.viewer.add_tracks(filtered_tracks, name="Tracks")
 
         print("Layers have been added")
 

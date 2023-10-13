@@ -11,10 +11,10 @@ from qtpy.QtWidgets import (
     QComboBox,
     QPushButton,
     QCheckBox,
-    QHBoxLayout,
     QGridLayout,
     QFileDialog,
     QTableWidget,
+    QSizePolicy,
 )
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
@@ -55,7 +55,14 @@ class AnalysisWindow(QWidget):
         # Labels
         label_min_movement = QLabel("Movement Minmum")
         label_min_duration = QLabel("Minimum Track Length")
-        label_metric = QLabel("Evaluation metrics:")
+        label_metric = QLabel("Metric:")
+        label_segmentation = QLabel("Segmentation")
+        label_tracks = QLabel("Tracks")
+        label_plotting = QLabel("Plotting")
+        label_filter = QLabel("Track filter")
+        label_export = QLabel("Export")
+        label_evaluation = QLabel("Evaluation")
+        label_eval_range = QLabel("Evaluate between current slice and slice:")
 
         # Buttons
         btn_plot = QPushButton("Plot")
@@ -76,6 +83,26 @@ class AnalysisWindow(QWidget):
         self.combobox_plots.addItems(
             ["Speed", "Size", "Direction", "Euclidean distance", "Accumulated distance"]
         )
+        self.combobox_segmentation = QComboBox()
+        self.combobox_tracks = QComboBox()
+        self.layer_comboboxes = [self.combobox_segmentation, self.combobox_tracks]
+        for layer in self.viewer.layers:
+            for combobox in self.layer_comboboxes:
+                combobox.addItem(layer.name)
+        
+        # Horizontal lines
+        line = QWidget()
+        line.setFixedHeight(4)
+        line.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        line.setStyleSheet("background-color: #c0c0c0")
+        line2 = QWidget()
+        line2.setFixedHeight(4)
+        line2.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        line2.setStyleSheet("background-color: #c0c0c0")
+        line3 = QWidget()
+        line3.setFixedHeight(4)
+        line3.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        line3.setStyleSheet("background-color: #c0c0c0")
 
         # Checkboxes
         checkbox_speed = QCheckBox("Speed")
@@ -99,7 +126,36 @@ class AnalysisWindow(QWidget):
 
         ### Organize objects via widgets
         content = QWidget()
-        content.setLayout(QVBoxLayout())
+        content.setLayout(QGridLayout())
+        content.layout().addWidget(label_segmentation, 0, 0)
+        content.layout().addWidget(self.combobox_segmentation, 0, 1)
+        content.layout().addWidget(label_tracks, 1, 0)
+        content.layout().addWidget(self.combobox_tracks, 1, 1)
+        content.layout().addWidget(line, 2, 0, 1, 3)
+        content.layout().addWidget(label_plotting , 3, 0)
+        content.layout().addWidget(label_metric, 4, 0)
+        content.layout().addWidget(self.combobox_plots, 4, 1)
+        content.layout().addWidget(btn_plot, 4, 2)
+        content.layout().addWidget(line2, 5, 0, 1, 3)
+        content.layout().addWidget(label_filter, 6, 0)
+        content.layout().addWidget(label_min_movement, 7, 0)
+        content.layout().addWidget(self.lineedit_movement, 7, 1)
+        content.layout().addWidget(label_min_duration, 8, 0)
+        content.layout().addWidget(self.lineedit_track_duration, 8, 1)
+        content.layout().addWidget(label_export, 9, 0)
+        content.layout().addWidget(checkbox_speed, 10, 0)
+        content.layout().addWidget(checkbox_size, 10, 1)
+        content.layout().addWidget(checkbox_direction, 10, 2)
+        content.layout().addWidget(checkbox_euclidean_distance, 11, 0)
+        content.layout().addWidget(checkbox_accumulated_distance, 11, 1)
+        content.layout().addWidget(btn_export, 11, 2)
+        content.layout().addWidget(line3, 12, 0, 1, 3)
+        content.layout().addWidget(label_evaluation, 13, 0)
+        content.layout().addWidget(label_eval_range, 14, 0)
+        content.layout().addWidget(self.lineedit_limit_evaluation, 14, 1)
+        content.layout().addWidget(btn_evaluate_segmentation, 15, 0)
+        content.layout().addWidget(btn_evaluate_tracking, 15, 1)
+        """content.setLayout(QVBoxLayout())
 
         threshhold_grid = QWidget()
         threshhold_grid.setLayout(QGridLayout())
@@ -130,10 +186,41 @@ class AnalysisWindow(QWidget):
         evaluation.layout().addWidget(btn_evaluate_segmentation)
         evaluation.layout().addWidget(btn_evaluate_tracking)
 
-        content.layout().addWidget(evaluation)
+        content.layout().addWidget(evaluation)"""
 
         self.layout().addWidget(content)
+        self.viewer.layers.events.inserted.connect(self.add_entry_to_comboboxes)
+        self.viewer.layers.events.removed.connect(self.remove_entry_from_comboboxes)
+        for layer in self.viewer.layers:
+            layer.events.name.connect(self.rename_entry_in_comboboxes) # doesn't contain index
+        self.viewer.layers.events.moving.connect(self.reorder_entry_in_comboboxes)
 
+    def add_entry_to_comboboxes(self, event):
+        for combobox in self.layer_comboboxes:
+            combobox.addItem(event.value.name)
+        event.value.events.name.connect(self.rename_entry_in_comboboxes) # contains index
+        
+    def remove_entry_from_comboboxes(self, event):
+        for combobox in self.layer_comboboxes:
+            combobox.removeItem(event.index)
+
+    def rename_entry_in_comboboxes(self, event):
+        if not hasattr(event, 'index'):
+            event.index = self.viewer.layers.index(event.source.name)
+        for combobox in self.layer_comboboxes:
+            index = combobox.currentIndex()
+            combobox.removeItem(event.index)
+            combobox.insertItem(event.index, event.source.name)
+            combobox.setCurrentIndex(index)
+        
+    def reorder_entry_in_comboboxes(self, event):
+        for combobox in self.layer_comboboxes:
+            index = combobox.currentIndex()
+            item = combobox.itemText(event.index)
+            combobox.removeItem(event.index)
+            combobox.insertItem(event.new_index, item)
+            combobox.setCurrentIndex(index)
+            
     def _calculate_speed(self, tracks):
         for unique_id in np.unique(tracks[:, 0]):
             track = np.delete(tracks, np.where(tracks[:, 0] != unique_id), 0)
@@ -290,7 +377,11 @@ class AnalysisWindow(QWidget):
         """
         Create dictionary holding metric data and results
         """
-        tracks_layer = grab_layer(self.parent.viewer, "Tracks")
+        try:
+            tracks_layer = grab_layer(self.parent.viewer, self.combobox_tracks.currentText())
+        except ValueError:
+            notify("Please make sure to select the correct tracks layer!")
+            return
         retval = {"Name": metric}
         if metric == "Speed":
             print("Plotting speed")
@@ -301,7 +392,11 @@ class AnalysisWindow(QWidget):
             retval.update({"Results": self._calculate_speed(tracks_layer.data)})
         elif metric == "Size":
             print("Plotting size")
-            segmentation_layer = grab_layer(self.parent.viewer, "Segmentation Data")
+            try:
+                segmentation_layer = grab_layer(self.viewer, self.combobox_segmentation.currentText())
+            except ValueError:
+                notify("Please make sure to select the correct segmentation!")
+                return
             retval.update(
                 {"Description": "Scatterplot Standard Deviation vs Average: Size"}
             )
@@ -358,7 +453,11 @@ class AnalysisWindow(QWidget):
 
     @thread_worker
     def _export(self, file, metrics):
-        tracks = grab_layer(self.parent.viewer, "Tracks").data
+        try:
+            tracks = grab_layer(self.parent.viewer, self.combobox_tracks.currentText()).data
+        except ValueError:
+            notify("Please make sure to select the correct tracks layer!")
+            return
         direction = self._calculate_direction(tracks)
         self.direction = direction
 
@@ -534,7 +633,11 @@ class AnalysisWindow(QWidget):
             metrics_dict.update({"Speed": speed})
 
         if "Size" in selected_metrics:
-            segmentation = grab_layer(self.parent.viewer, "Segmentation Data").data
+            try:
+                segmentation = grab_layer(self.viewer, self.combobox_segmentation.currentText()).data
+            except ValueError:
+                notify("Please make sure the label layer exists!")
+                return
             size = self._calculate_size(tracks, segmentation)
             metrics.extend(["Average size [# pixels]", "Standard deviation of size [# pixels]"])
             individual_metrics.extend(["Average size [# pixels]", "Standard deviation of size [# pixels]"])
@@ -739,7 +842,11 @@ class AnalysisWindow(QWidget):
 
     def _evaluate_segmentation(self):
         automatic_segmentation = self.parent.initial_layers[0]
-        corrected_segmentation = grab_layer(self.viewer, "Segmentation Data").data
+        try:
+            corrected_segmentation = grab_layer(self.viewer, self.combobox_segmentation.currentText()).data
+        except ValueError:
+            notify("Please make sure the label layer exists!")
+            return
         current_frame = int(self.viewer.dims.point[0])
         frame_range = [current_frame]
         try:
@@ -778,12 +885,51 @@ class AnalysisWindow(QWidget):
         self._display_evaluation_result("Evaluation of Segmentation", results, frames)
         self.results_window.show()
         print("Opening results window")
+        
+    def adjust_track_centroids(self):
+        try:
+            tracks_layer = grab_layer(self.parent.viewer, self.combobox_tracks.currentText())
+        except ValueError:
+            notify("Please make sure to select the correct tracks layer!")
+            return
+        try:
+            segmentation = grab_layer(self.viewer, self.combobox_segmentation.currentText()).data
+        except ValueError:
+            notify("Please make sure the label layer exists!")
+            return
+        tracks_old = tracks_layer.data
+        tracks = tracks_layer.data
+        for line in tracks:
+            _,z,y,x = line
+            segmentation_id = segmentation[z,y,x]
+            if segmentation_id == 0:
+                print("couldn't adjust centroid")
+                continue
+            centroid = ndimage.center_of_mass(
+                segmentation[z], labels=segmentation[z], index=segmentation_id
+            )
+            y_new = int(np.rint(centroid[0]))
+            x_new = int(np.rint(centroid[1]))
+            if x_new != x or y_new != y:
+                line[2] = y_new
+                line[3] = x_new
+
+        tracks_layer.data = tracks
 
     def _evaluate_tracking(self):
+        self.adjust_track_centroids()
         automatic_tracks = self.parent.initial_layers[1]
-        corrected_tracks = grab_layer(self.viewer, "Tracks").data
+        try:
+            corrected_tracks = grab_layer(self.parent.viewer, self.combobox_tracks.currentText()).data
+        except ValueError:
+            notify("Please make sure to select the correct tracks layer!")
+            return
         automatic_segmentation = self.parent.initial_layers[0]
-        corrected_segmentation = grab_layer(self.viewer, "Segmentation Data").data
+        try:
+            corrected_segmentation = grab_layer(self.viewer, self.combobox_segmentation.currentText()).data
+        except ValueError:
+            notify("Please make sure the label layer exists!")
+            return
         
         fp = 0
         fn = 0
@@ -849,7 +995,7 @@ class AnalysisWindow(QWidget):
             else:
                 cell_p_1 = connection[0]
                 cell_p_2 = connection[1]
-                if not f"p_{tuple(cell_p_1)}" in lookup_dict or not f"gt_{tuple(cell_p_2)}" in lookup_dict:
+                if not f"p_{tuple(cell_p_1)}" in lookup_dict or not f"p_{tuple(cell_p_2)}" in lookup_dict:
                     return False
                 cell_gt_1 = lookup_dict[f"p_{tuple(cell_p_1)}"]
                 cell_gt_2 = lookup_dict[f"p_{tuple(cell_p_2)}"]
@@ -875,6 +1021,7 @@ class AnalysisWindow(QWidget):
             cell_2 = corrected_tracks[line+ 1, 1:]
             connection = (cell_1, cell_2)
             if not connection_has_match(connection, False):
+                print(f"added edge for {connection}")
                 ae += 1
                 
         for line in range(len(automatic_tracks) -1):
@@ -884,6 +1031,7 @@ class AnalysisWindow(QWidget):
             cell_2 = automatic_tracks[line+1,1:]
             connection = (cell_1, cell_2)
             if not connection_has_match(connection, True):
+                print(f"deleted edge for {connection}")
                 de += 1 
 
         print(f"False Negatives: {fn}")
@@ -895,6 +1043,7 @@ class AnalysisWindow(QWidget):
         fault_value = fp + fn * 10 + de + ae * 1.5 + sc * 5
         
         print(f"Fault value: {fault_value}")
+        #print(lookup_dict)
         #return
         
         
