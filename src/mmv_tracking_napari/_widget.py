@@ -12,6 +12,8 @@ from qtpy.QtWidgets import (
     QMessageBox,
     QApplication,
     QFileDialog,
+    QComboBox,
+    QSizePolicy,
 )
 from qtpy.QtCore import Qt
 
@@ -73,7 +75,12 @@ class MMVTracking(QWidget):
 
         # Labels
         title = QLabel("<font color='green'>HITL4Trk</font>")
+        title.setMaximumHeight(100)
         computation_mode = QLabel("Computation mode")
+        computation_mode.setMaximumHeight(20)
+        label_image = QLabel("Image:")
+        label_segmentation = QLabel("Segmentation:")
+        label_tracks = QLabel("Tracks:")
 
         # Buttons
         btn_load = QPushButton("Load")
@@ -99,37 +106,57 @@ class MMVTracking(QWidget):
         # self.rb_eco.toggle()
         rb_heavy = QRadioButton("Regular")
         rb_heavy.toggle()
+        
+        # Comboboxes
+        self.combobox_image = QComboBox()
+        self.combobox_image.addItem("")
+        self.combobox_segmentation = QComboBox()
+        self.combobox_segmentation.addItem("")
+        self.combobox_tracks = QComboBox()
+        self.combobox_tracks.addItem("")
+        self.layer_comboboxes = [
+            self.combobox_image,
+            self.combobox_segmentation,
+            self.combobox_tracks
+        ]
+        
+        # Horizontal lines
+        line = QWidget()
+        line.setFixedHeight(4)
+        line.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        line.setStyleSheet("background-color: #c0c0c0")
+        line2 = QWidget()
+        line2.setFixedHeight(4)
+        line2.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        line2.setStyleSheet("background-color: #c0c0c0")
+        invisi_line = QWidget()
+        invisi_line.setFixedHeight(4)
+        invisi_line.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
         ### Organize objects via widgets
         # widget: parent widget of all content
         widget = QWidget()
-        widget.setLayout(QVBoxLayout())
-        widget.layout().addWidget(title)
-
-        computation_mode_rbs = QWidget()
-        computation_mode_rbs.setLayout(QGridLayout())
-        computation_mode_rbs.layout().addWidget(computation_mode, 0, 0, 1, 2)
-        computation_mode_rbs.layout().addWidget(self.rb_eco, 1, 0)
-        computation_mode_rbs.layout().addWidget(rb_heavy, 1, 1)
-
-        widget.layout().addWidget(computation_mode_rbs)
-
-        read_write_files = QWidget()
-        read_write_files.setLayout(QHBoxLayout())
-        read_write_files.layout().addWidget(btn_load)
-        read_write_files.layout().addWidget(btn_save)
-        read_write_files.layout().addWidget(btn_save_as)
-
-        widget.layout().addWidget(read_write_files)
-
-        processing = QWidget()
-        processing.setLayout(QVBoxLayout())
-        processing.layout().addWidget(btn_processing)
-        processing.layout().addWidget(btn_segmentation)
-        processing.layout().addWidget(btn_tracking)
-        processing.layout().addWidget(btn_analysis)
-
-        widget.layout().addWidget(processing)
+        widget.setLayout(QGridLayout())
+        widget.layout().addWidget(title, 0, 0, 1, -1)
+        widget.layout().addWidget(computation_mode, 1, 0, 1, -1)
+        widget.layout().addWidget(self.rb_eco, 2, 0)
+        widget.layout().addWidget(rb_heavy, 2, 1)
+        widget.layout().addWidget(invisi_line, 3, 0, 1, -1)
+        widget.layout().addWidget(btn_load, 4, 0)
+        widget.layout().addWidget(btn_save, 4, 1)
+        widget.layout().addWidget(btn_save_as, 4, 2)
+        widget.layout().addWidget(line, 5, 0, 1, -1)
+        widget.layout().addWidget(label_image, 6, 0)
+        widget.layout().addWidget(self.combobox_image, 6, 1, 1, 2)
+        widget.layout().addWidget(label_segmentation, 7, 0)
+        widget.layout().addWidget(self.combobox_segmentation, 7, 1, 1, 2)
+        widget.layout().addWidget(label_tracks, 8, 0)
+        widget.layout().addWidget(self.combobox_tracks, 8, 1, 1, 2)
+        widget.layout().addWidget(line2, 9, 0, 1, -1)
+        widget.layout().addWidget(btn_processing, 10, 0, 1, -1)
+        widget.layout().addWidget(btn_segmentation, 11, 0, 1, -1)
+        widget.layout().addWidget(btn_tracking, 12, 0, 1, -1)
+        widget.layout().addWidget(btn_analysis, 13, 0, 1, -1)
 
         # Scrollarea allows content to be larger than the assigned space (small monitor)
         scroll_area = QScrollArea()
@@ -139,59 +166,48 @@ class MMVTracking(QWidget):
         self.setMinimumSize(250, 300)
         self.setLayout(QVBoxLayout())
         self.layout().addWidget(scroll_area)
-        #self.viewer.layers.events.inserting.connect(self.ev_inserting)
-        #self.viewer.layers.events.inserted.connect(self.ev_inserted)
-        """self.viewer.layers.events.removing.connect(self.ev_removing)
-        self.viewer.layers.events.removed.connect(self.ev_removed)
-        self.viewer.layers.events.moving.connect(self.ev_moving)
-        self.viewer.layers.events.moved.connect(self.ev_moved)
-        self.viewer.layers.events.changed.connect(self.ev_changed)
-        self.viewer.layers.events.reordered.connect(self.ev_reordered)
-        self.viewer.layers.selection.events.changed.connect(self.ev_selection_events_changed)
-        self.viewer.layers.selection.events.active.connect(self.ev_selection_events_active)
-    def ev_inserting(self, event):
-        event.
-        pass
-        #print(f'### emitted "inserting" with index {event.index}')"""
-    """def ev_inserted(self, event):
-        #event.value.events.visible.connect(self.shaco)
-        #event.value.events.name.connect(self.namechange_is_13500_ip)
-        #event.value.events.set_data.connect(self.do_something)
-        event.value.events.set_data.connect(self.do_something) # LOTS of events
-    
-    def do_something(self, event):
-        print(event.source.name)
-        print("attributes:", [attr for attr in dir(event.source) if not attr.startswith("_")])
-        if hasattr(event, 'index'):
-            print(event.index)"""
-        #print(f'### emitted "inserted" with index {event.index} and value {event.value}')
-    """def ev_removing(self, event):
-        pass
-        #print(f'### emitted "removing" with index {event.index}')
-    def ev_removed(self, event):
-        print(f'### emitted "removed" with index {event.index} and value {event.value}')
-    def ev_moving(self, event):
-        pass
-        #print(f'### emitted "moving" with index {event.index} and new index {event.new_index}')
-    def ev_moved(self, event):
-        pass
-        #print(f'### emitted "moved" with index {event.index}, new index {event.new_index} and value {event.value}')
-    def ev_changed(self, event):
-        print(f'### emitted "changed" with index {event.index}, old value {event.old_value} and value {event.value}')
-    def ev_reordered(self, event):
-        pass
-        #print(f'### emitted "reordered" with value {event.value}')
-    def ev_selection_events_changed(self, event):
-        pass
-        #print(f'### emitted "selection.events.changed" with added {event.added} and removed {event.removed}')
-    def ev_selection_events_active(self, event):
-        pass
-        #print(f'### emitted "selection.events.active" with value {event.value}')
+        self.viewer.layers.events.inserted.connect(self.add_entry_to_comboboxes)
+        self.viewer.layers.events.removed.connect(self.remove_entry_from_comboboxes)
+        for layer in self.viewer.layers:
+            layer.events.name.connect(self.rename_entry_in_comboboxes) # doesn't contain index
+        self.viewer.layers.events.moving.connect(self.reorder_entry_in_comboboxes)
         
-    def shaco(self, event):
-        print(f"now you see me, now you don't!")
-    def namechange_is_13500_ip(self, event):
-        print(f"index: {event.index}, source: {event.source}, type: {event.type}")"""
+    def add_entry_to_comboboxes(self, event):
+        for combobox in self.layer_comboboxes:
+            combobox.addItem(event.value.name)
+        event.value.events.name.connect(self.rename_entry_in_comboboxes) # contains index
+        
+    def remove_entry_from_comboboxes(self, event):
+        for combobox in self.layer_comboboxes:
+            combobox.removeItem(event.index + 1)
+
+    def rename_entry_in_comboboxes(self, event):
+        if not hasattr(event, 'index'):
+            event.index = self.viewer.layers.index(event.source.name)
+        for combobox in self.layer_comboboxes:
+            index = combobox.currentIndex()
+            combobox.removeItem(event.index + 1)
+            combobox.insertItem(event.index + 1, event.source.name)
+            combobox.setCurrentIndex(index)
+        
+    def reorder_entry_in_comboboxes(self, event):
+        for combobox in self.layer_comboboxes:
+            current_item = combobox.currentText()
+            item = combobox.itemText(event.index + 1)
+            combobox.removeItem(event.index + 1)
+            new_index = event.new_index
+            if event.index > new_index:
+                new_index += 1
+            combobox.insertItem(new_index, item)
+            index = combobox.findText(current_item)
+            combobox.setCurrentIndex(index)
+            
+    """def apply_on_clicks(self, event):
+        for on_click in self.on_clicks:
+            layer = event.value
+            
+            @layer.mouse_drag_callbacks.append
+            on_click"""
 
     def _load(self):
         """
@@ -287,6 +303,9 @@ class MMVTracking(QWidget):
         self.zarr = zarr_file
         self.tracks = filtered_tracks
         self.initial_layers = [copy.deepcopy(segmentation), copy.deepcopy(filtered_tracks)]
+        self.combobox_image.setCurrentText("Raw Image")
+        self.combobox_segmentation.setCurrentText("Segmentation Data")
+        self.combobox_tracks.setCurrentText("Tracks")
         QApplication.restoreOverrideCursor()
 
     def _save(self):
@@ -339,34 +358,38 @@ class MMVTracking(QWidget):
         s = z.create_dataset('segmentation_data', shape = segmentation_data.shape, dtype = 'i4', data = segmentation_data)
         t = z.create_dataset('tracking_data', shape = track_data.shape, dtype = 'i4', data = track_data)
 
-    def _processing(self):
+    def _processing(self, hide = False):
         """
         Opens a [ProcessingWindow]
         """
         self.processing_window = ProcessingWindow(self)
         print("Opening processing window")
-        self.processing_window.show()
+        if not hide:
+            self.processing_window.show()
 
-    def _segmentation(self):
+    def _segmentation(self, hide = False):
         """
         Opens a [SegmentationWindow]
         """
         self.segmentation_window = SegmentationWindow(self)
         print("Opening segmentation window")
-        self.segmentation_window.show()
+        if not hide:
+            self.segmentation_window.show()
 
-    def _tracking(self):
+    def _tracking(self, hide = False):
         """
         Opens a [TrackingWindow]
         """
         self.tracking_window = TrackingWindow(self)
         print("Opening tracking window")
-        self.tracking_window.show()
+        if not hide:
+            self.tracking_window.show()
 
-    def _analysis(self):
+    def _analysis(self, hide = False):
         """
         Opens an [AnalysisWindow]
         """
         self.analysis_window = AnalysisWindow(self)
         print("Opening analysis window")
-        self.analysis_window.show()
+        if not hide:
+            self.analysis_window.show()

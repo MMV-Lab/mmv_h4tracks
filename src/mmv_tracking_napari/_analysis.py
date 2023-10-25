@@ -59,8 +59,6 @@ class AnalysisWindow(QWidget):
         label_min_movement = QLabel("Movement Minmum")
         label_min_duration = QLabel("Minimum Track Length")
         label_metric = QLabel("Metric:")
-        label_segmentation = QLabel("Segmentation")
-        label_tracks = QLabel("Tracks")
         label_plotting = QLabel("Plotting")
         label_filter = QLabel("Track filter")
         label_export = QLabel("Export")
@@ -86,12 +84,6 @@ class AnalysisWindow(QWidget):
         self.combobox_plots.addItems(
             ["Speed", "Size", "Direction", "Euclidean distance", "Accumulated distance"]
         )
-        self.combobox_segmentation = QComboBox()
-        self.combobox_tracks = QComboBox()
-        self.layer_comboboxes = [self.combobox_segmentation, self.combobox_tracks]
-        for layer in self.viewer.layers:
-            for combobox in self.layer_comboboxes:
-                combobox.addItem(layer.name)
         
         # Horizontal lines
         line = QWidget()
@@ -102,10 +94,6 @@ class AnalysisWindow(QWidget):
         line2.setFixedHeight(4)
         line2.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         line2.setStyleSheet("background-color: #c0c0c0")
-        line3 = QWidget()
-        line3.setFixedHeight(4)
-        line3.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        line3.setStyleSheet("background-color: #c0c0c0")
 
         # Checkboxes
         checkbox_speed = QCheckBox("Speed")
@@ -130,16 +118,11 @@ class AnalysisWindow(QWidget):
         ### Organize objects via widgets
         content = QWidget()
         content.setLayout(QGridLayout())
-        content.layout().addWidget(label_segmentation, 0, 0)
-        content.layout().addWidget(self.combobox_segmentation, 0, 1)
-        content.layout().addWidget(label_tracks, 1, 0)
-        content.layout().addWidget(self.combobox_tracks, 1, 1)
-        content.layout().addWidget(line, 2, 0, 1, 3)
         content.layout().addWidget(label_plotting , 3, 0)
         content.layout().addWidget(label_metric, 4, 0)
         content.layout().addWidget(self.combobox_plots, 4, 1)
         content.layout().addWidget(btn_plot, 4, 2)
-        content.layout().addWidget(line2, 5, 0, 1, 3)
+        content.layout().addWidget(line, 5, 0, 1, -1)
         content.layout().addWidget(label_filter, 6, 0)
         content.layout().addWidget(label_min_movement, 7, 0)
         content.layout().addWidget(self.lineedit_movement, 7, 1)
@@ -152,77 +135,14 @@ class AnalysisWindow(QWidget):
         content.layout().addWidget(checkbox_euclidean_distance, 11, 0)
         content.layout().addWidget(checkbox_accumulated_distance, 11, 1)
         content.layout().addWidget(btn_export, 11, 2)
-        content.layout().addWidget(line3, 12, 0, 1, 3)
+        content.layout().addWidget(line2, 12, 0, 1, -1)
         content.layout().addWidget(label_evaluation, 13, 0)
         content.layout().addWidget(label_eval_range, 14, 0)
         content.layout().addWidget(self.lineedit_limit_evaluation, 14, 1)
         content.layout().addWidget(btn_evaluate_segmentation, 15, 0)
         content.layout().addWidget(btn_evaluate_tracking, 15, 1)
-        """content.setLayout(QVBoxLayout())
-
-        threshhold_grid = QWidget()
-        threshhold_grid.setLayout(QGridLayout())
-        threshhold_grid.layout().addWidget(label_min_movement, 0, 0)
-        threshhold_grid.layout().addWidget(self.lineedit_movement, 0, 1)
-        threshhold_grid.layout().addWidget(label_min_duration, 1, 0)
-        threshhold_grid.layout().addWidget(self.lineedit_track_duration, 1, 1)
-
-        content.layout().addWidget(threshhold_grid)
-
-        extract_grid = QWidget()
-        extract_grid.setLayout(QGridLayout())
-        extract_grid.layout().addWidget(label_metric, 0, 0)
-        extract_grid.layout().addWidget(self.combobox_plots, 0, 1)
-        extract_grid.layout().addWidget(btn_plot, 0, 2)
-        extract_grid.layout().addWidget(checkbox_speed, 1, 0)
-        extract_grid.layout().addWidget(checkbox_size, 1, 1)
-        extract_grid.layout().addWidget(checkbox_direction, 1, 2)
-        extract_grid.layout().addWidget(checkbox_euclidean_distance, 2, 0)
-        extract_grid.layout().addWidget(checkbox_accumulated_distance, 2, 1)
-        extract_grid.layout().addWidget(btn_export, 2, 2)
-
-        content.layout().addWidget(extract_grid)
-        content.layout().addWidget(self.lineedit_limit_evaluation)
-
-        evaluation = QWidget()
-        evaluation.setLayout(QHBoxLayout())
-        evaluation.layout().addWidget(btn_evaluate_segmentation)
-        evaluation.layout().addWidget(btn_evaluate_tracking)
-
-        content.layout().addWidget(evaluation)"""
 
         self.layout().addWidget(content)
-        self.viewer.layers.events.inserted.connect(self.add_entry_to_comboboxes)
-        self.viewer.layers.events.removed.connect(self.remove_entry_from_comboboxes)
-        for layer in self.viewer.layers:
-            layer.events.name.connect(self.rename_entry_in_comboboxes) # doesn't contain index
-        self.viewer.layers.events.moving.connect(self.reorder_entry_in_comboboxes)
-
-    def add_entry_to_comboboxes(self, event):
-        for combobox in self.layer_comboboxes:
-            combobox.addItem(event.value.name)
-        event.value.events.name.connect(self.rename_entry_in_comboboxes) # contains index
-        
-    def remove_entry_from_comboboxes(self, event):
-        for combobox in self.layer_comboboxes:
-            combobox.removeItem(event.index)
-
-    def rename_entry_in_comboboxes(self, event):
-        if not hasattr(event, 'index'):
-            event.index = self.viewer.layers.index(event.source.name)
-        for combobox in self.layer_comboboxes:
-            index = combobox.currentIndex()
-            combobox.removeItem(event.index)
-            combobox.insertItem(event.index, event.source.name)
-            combobox.setCurrentIndex(index)
-        
-    def reorder_entry_in_comboboxes(self, event):
-        for combobox in self.layer_comboboxes:
-            index = combobox.currentIndex()
-            item = combobox.itemText(event.index)
-            combobox.removeItem(event.index)
-            combobox.insertItem(event.new_index, item)
-            combobox.setCurrentIndex(index)
             
     def _calculate_speed(self, tracks):
         for unique_id in np.unique(tracks[:, 0]):
@@ -381,7 +301,7 @@ class AnalysisWindow(QWidget):
         Create dictionary holding metric data and results
         """
         try:
-            tracks_layer = grab_layer(self.parent.viewer, self.combobox_tracks.currentText())
+            tracks_layer = grab_layer(self.parent.viewer, self.parent.combobox_tracks.currentText())
         except ValueError:
             notify("Please make sure to select the correct tracks layer!")
             return
@@ -396,7 +316,7 @@ class AnalysisWindow(QWidget):
         elif metric == "Size":
             print("Plotting size")
             try:
-                segmentation_layer = grab_layer(self.viewer, self.combobox_segmentation.currentText())
+                segmentation_layer = grab_layer(self.viewer, self.parent.combobox_segmentation.currentText())
             except ValueError:
                 notify("Please make sure to select the correct segmentation!")
                 return
@@ -457,7 +377,7 @@ class AnalysisWindow(QWidget):
     @thread_worker
     def _export(self, file, metrics):
         try:
-            tracks = grab_layer(self.parent.viewer, self.combobox_tracks.currentText()).data
+            tracks = grab_layer(self.parent.viewer, self.parent.combobox_tracks.currentText()).data
         except ValueError:
             notify("Please make sure to select the correct tracks layer!")
             return
@@ -637,7 +557,7 @@ class AnalysisWindow(QWidget):
 
         if "Size" in selected_metrics:
             try:
-                segmentation = grab_layer(self.viewer, self.combobox_segmentation.currentText()).data
+                segmentation = grab_layer(self.viewer, self.parent.combobox_segmentation.currentText()).data
             except ValueError:
                 notify("Please make sure the label layer exists!")
                 return
@@ -844,43 +764,36 @@ class AnalysisWindow(QWidget):
         return valid_values, invalid_values
 
     def _evaluate_segmentation(self):
-        automatic_segmentation = self.parent.initial_layers[0]
+        # evaluates segmentation based on changes made by user
+        seg = self.parent.initial_layers[0]
         try:
-            corrected_segmentation = grab_layer(self.viewer, self.combobox_segmentation.currentText()).data
+            gt = grab_layer(self.viewer, self.parent.combobox_segmentation.currentText()).data
         except ValueError:
             notify("Please make sure the label layer exists!")
             return
         current_frame = int(self.viewer.dims.point[0])
-        frame_range = [current_frame]
         try:
             selected_limit = int(self.lineedit_limit_evaluation.text())
         except ValueError:
             notify("Please use integer instead of text")
             return
         if selected_limit > current_frame:
-            frame_range.append(selected_limit)
+            frame_range = list(range(current_frame, selected_limit + 1))
         else:
-            frame_range.insert(0, selected_limit)
-        frame_range[1] += 1
-        frames = [current_frame, frame_range, len(automatic_segmentation) - 1]
+            frame_range = list(range(selected_limit, current_frame + 1))
+        frames = [current_frame, (frame_range[0], frame_range[-1]), len(seg) - 1]
         ### FOR CURRENT FRAME
-        intersection = np.sum( np.sum( np.logical_and( automatic_segmentation[current_frame], corrected_segmentation[current_frame])))
-        union = np.sum( np.sum( np.logical_or( automatic_segmentation[current_frame], corrected_segmentation[current_frame])))
-        single_iou = intersection / union
-        single_dice = (2 * intersection) / (np.count_nonzero(automatic_segmentation[current_frame]) + np.count_nonzero(corrected_segmentation[current_frame]))
-        single_f1 = (2 * intersection) / (intersection + union)
+        single_iou = self.get_iou(gt[current_frame], seg[current_frame])
+        single_dice = self.get_dice(gt[current_frame], seg[current_frame])
+        single_f1 = self.get_f1(gt[current_frame], seg[current_frame])
         ### FOR SOME FRAMES
-        intersection = np.sum( np.sum( np.sum( np.logical_and( automatic_segmentation[list(range(frame_range[0], frame_range[1]))], corrected_segmentation[list(range(frame_range[0], frame_range[1]))]))))
-        union = np.sum( np.sum( np.sum( np.logical_or( automatic_segmentation[list(range(frame_range[0], frame_range[1]))], corrected_segmentation[list(range(frame_range[0], frame_range[1]))]))))
-        some_iou = intersection / union
-        some_dice = (2 * intersection) / (np.count_nonzero(automatic_segmentation[list(range(frame_range[0], frame_range[1]))]) + np.count_nonzero(corrected_segmentation[list(range(frame_range[0], frame_range[1]))]))
-        some_f1 = (2 * intersection) / (intersection + union)
+        some_iou = self.get_iou(gt[frame_range], seg[frame_range])
+        some_dice = self.get_dice(gt[frame_range], seg[frame_range]) 
+        some_f1 = self.get_f1(gt[frame_range], seg[frame_range])
         ### FOR ALL FRAMES
-        intersection = np.sum( np.sum( np.sum( np.logical_and( automatic_segmentation, corrected_segmentation))))
-        union = np.sum( np.sum( np.sum( np.logical_or( automatic_segmentation, corrected_segmentation))))
-        all_iou = intersection / union
-        all_dice = (2 * intersection) / (np.count_nonzero(automatic_segmentation) + np.count_nonzero(corrected_segmentation))
-        all_f1 = (2 * intersection) / (intersection + union)
+        all_iou = self.get_iou(gt, seg)
+        all_dice = self.get_dice(gt, seg)
+        all_f1 = self.get_f1(gt, seg)
         results = np.asarray([[all_iou, all_dice, all_f1],
                               [some_iou, some_dice, some_f1],
                               [single_iou, single_dice, single_f1]
@@ -889,14 +802,41 @@ class AnalysisWindow(QWidget):
         self.results_window.show()
         print("Opening results window")
         
+    def get_intersection(self, seg1, seg2):
+        # takes multidimensional numpy arrays and returns their intersection
+        return np.sum(np.logical_and(seg1, seg2).flat)
+        
+    def get_union(self, seg1, seg2):
+        # takes multidimensional numpy arrays and returns their union
+        return np.sum(np.logical_or(seg1, seg2).flat)
+        
+    def get_iou(self, seg1, seg2):
+        # calculate IoU for two given segmentations
+        intersection = self.get_intersection(seg1, seg2)
+        union = self.get_union(seg1, seg2)
+        return intersection / union
+    
+    def get_dice(self, seg1, seg2):
+        # calculate DICE score for two given segmentations
+        intersection = self.get_intersection(seg1, seg2)
+        union = self.get_union(seg1, seg2)
+        return (2 * intersection) / (np.count_nonzero(seg1) + np.count_nonzero(seg2))
+    
+    def get_f1(self, seg1, seg2):
+        # calculate F1 score for two given segmentations
+        intersection = self.get_intersection(seg1, seg2)
+        union = self.get_union(seg1, seg2)
+        return (2 * intersection) / (intersection + union)
+        
     def adjust_track_centroids(self):
+        # adjusts tracks to centroid of cells
         try:
-            tracks_layer = grab_layer(self.parent.viewer, self.combobox_tracks.currentText())
+            tracks_layer = grab_layer(self.parent.viewer, self.parent.combobox_tracks.currentText())
         except ValueError:
             notify("Please make sure to select the correct tracks layer!")
             return
         try:
-            segmentation = grab_layer(self.viewer, self.combobox_segmentation.currentText()).data
+            segmentation = grab_layer(self.viewer, self.parent.combobox_segmentation.currentText()).data
         except ValueError:
             notify("Please make sure the label layer exists!")
             return
@@ -923,13 +863,13 @@ class AnalysisWindow(QWidget):
         self.adjust_track_centroids()
         automatic_tracks = self.parent.initial_layers[1]
         try:
-            corrected_tracks = grab_layer(self.parent.viewer, self.combobox_tracks.currentText()).data
+            corrected_tracks = grab_layer(self.parent.viewer, self.parent.combobox_tracks.currentText()).data
         except ValueError:
             notify("Please make sure to select the correct tracks layer!")
             return
         automatic_segmentation = self.parent.initial_layers[0]
         try:
-            corrected_segmentation = grab_layer(self.viewer, self.combobox_segmentation.currentText()).data
+            corrected_segmentation = grab_layer(self.viewer, self.parent.combobox_segmentation.currentText()).data
         except ValueError:
             notify("Please make sure the label layer exists!")
             return
@@ -1171,9 +1111,129 @@ class AnalysisWindow(QWidget):
         self.results_window.show()
         print("Opening results window")"""
         
-            
+        
+        ### MATCHING FOR CELLS BASED ON IOU > .4, split cells >= .2! 
+    def get_false_positives(self, gt_seg, eval_seg):
+        # calculates amount of false positives for given segmentation
+        fp = 0
+        if np.array_equal(gt_seg, eval_seg):
+            return fp
+        if self.parent.rb_eco.isChecked():
+            AMOUNT_OF_PROCESSES = np.maximum(1, int(multiprocessing.cpu_count() * 0.4))
+        else:
+            AMOUNT_OF_PROCESSES = np.maximum(1, int(multiprocessing.cpu_count() * 0.8))
+
+        segmentations = []
+        for i in range(len(gt_seg)):
+            segmentations.append([gt_seg[i], eval_seg[i]])
+        
+        global get_false_positives_layer
+        def get_false_positives_layer(gt_slice, eval_slice):
+            fp = 0
+            if np.array_equal(gt_slice, eval_slice):
+                return fp
+            for id in np.unique(eval_slice):
+                if id == 0:
+                    continue
+                # get IoU on all cells in gt at locations of id in eval
+                indices_of_id = np.where(eval_slice == id)
+                gt_ids = np.unique(gt_slice[indices_of_id])
+                ious = []
+                for gt_id in gt_ids:
+                    if gt_id == 0:
+                        continue
+                    iou = get_specific_iou(gt_slice, gt_id, eval_slice, id)
+                    ious.append(iou)
+                if len(ious) < 1:
+                    fp += 1
+                    continue
+                if max(ious) > .4:
+                    continue
+                ious.remove(max(ious))
+                if len(ious) < 1 or max(ious) >= .2:
+                    continue
+                fp += 1
+            return fp
+        
+        with Pool(AMOUNT_OF_PROCESSES) as p:
+            for result in p.starmap(get_false_positives_layer, segmentations):
+                fp += result
+        return fp
+    
+    def get_false_negatives(self, gt_seg, eval_seg):
+        # calculates amount of false negatives for given segmentation
+        fn = 0
+        if np.array_equal(gt_seg, eval_seg):
+            return fn
+        if self.parent.rb_eco.isChecked():
+            AMOUNT_OF_PROCESSES = np.maximum(1, int(multiprocessing.cpu_count() * 0.4))
+        else:
+            AMOUNT_OF_PROCESSES = np.maximum(1, int(multiprocessing.cpu_count() * 0.8))
+
+        segmentations = []
+        for i in range(len(gt_seg)):
+            segmentations.append([gt_seg[i], eval_seg[i]])
+        
+        global get_false_negatives_layer
+        def get_false_negatives_layer(gt_slice, eval_slice):
+            fn = 0
+            if np.array_equal(gt_slice, eval_slice):
+                return fn
+            for id in np.unique(gt_slice):
+                if id == 0:
+                    continue
+                # get IoU on all cells in eval at locations of id in gt
+                indices_of_id = np.where(gt_slice == id)
+                eval_ids = np.unique(eval_slice[indices_of_id])
+                ious = []
+                for eval_id in eval_ids:
+                    if eval_id == 0:
+                        continue
+                    iou = get_specific_iou(gt_slice, id, eval_slice, eval_id)
+                    ious.append(iou)
+                if len(ious) < 1 or not max(ious) > .4:
+                    fn += 1
+            return fn
+        
+        with Pool(AMOUNT_OF_PROCESSES) as p:
+            for result in p.starmap(get_false_negatives_layer, segmentations):
+                fn += result
+        return fn
+    
+    def get_split_cells(self, gt_seg, eval_seg):
+        #  calculates amount of split cells for given segmentation
+        if np.array_equal(gt_seg, eval_seg):
+            return 0
+        pass
+    
+    def get_added_edges(self, gt_seg, eval_seg, gt_tracks, eval_tracks):
+        # calculates amount of added edges for given segmentation and tracks
+        if np.array_equal(gt_tracks, eval_tracks):
+            return 0
+        pass
+    
+    def get_removed_edges(self, gt_seg, eval_seg, gt_tracks, eval_tracks):
+        # calculates amount of removed edges for given segmentation and tracks
+        if np.array_equal(gt_tracks, eval_tracks):
+            return 0
+        pass
+        
     def _display_evaluation_result(self, title, results, frames):
         self.results_window = ResultsWindow(title, results, frames)
+        
+global get_specific_intersection
+def get_specific_intersection(slice1, slice2, id1, id2):
+    return np.sum((slice1 == id1) & (slice2 == id2))
+
+global get_specific_union
+def get_specific_union(slice1, slice2, id1, id2):
+    return np.sum((slice1 == id1) | (slice2 == id2))
+
+global get_specific_iou
+def get_specific_iou(slice1, slice2, id1, id2):
+    intersection = get_specific_intersection(slice1, slice2, id1, id2)
+    union = get_specific_union(slice1, slice2, id1, id2)
+    return intersection / union
         
 class ResultsWindow(QWidget):
     def __init__(self, title, results, frames):
@@ -1190,6 +1250,7 @@ class ResultsWindow(QWidget):
         super().__init__()
         self.setLayout(QVBoxLayout())
         self.setWindowTitle(title)
+        self.setMinimumWidth(500)
         table_widget = QTableWidget(4,4)
         self.layout().addWidget(table_widget)
         try:
@@ -1205,7 +1266,7 @@ class ResultsWindow(QWidget):
         table_widget.setCellWidget(1,1,QLabel(str(results[0,0])))
         table_widget.setCellWidget(1,2,QLabel(str(results[0,1])))
         table_widget.setCellWidget(1,3,QLabel(str(results[0,2])))
-        table_widget.setCellWidget(2,0,QLabel("{} - {}".format(frames[1][0], frames[1][1] - 1)))
+        table_widget.setCellWidget(2,0,QLabel("{} - {}".format(frames[1][0], frames[1][1])))
         table_widget.setCellWidget(2,1,QLabel(str(results[1,0])))
         table_widget.setCellWidget(2,2,QLabel(str(results[1,1])))
         table_widget.setCellWidget(2,3,QLabel(str(results[1,2])))

@@ -14,6 +14,8 @@ def grab_layer(viewer, layer_name):
     layer
         returns layer if it is found, throws ValueError otherwise
     """
+    if layer_name == "":
+        return None
     try:
         return viewer.layers[viewer.layers.index(layer_name)]
     except ValueError:

@@ -7,8 +7,6 @@ from qtpy.QtWidgets import (
     QPushButton,
     QGridLayout,
     QApplication,
-    QComboBox,
-    QSizePolicy,
 )
 from qtpy.QtCore import Qt
 from scipy import ndimage
@@ -56,8 +54,6 @@ class SegmentationWindow(QWidget):
         label_false_merge = QLabel("Separate falsely merged ID:")
         label_false_cut = QLabel("Merge falsely cut ID and second ID:")
         label_grab_label = QLabel("Select label:")
-        label_segmentation = QLabel("Segmentation layer:")
-        label_tracks = QLabel("Tracks layer:")
 
         # Buttons
         btn_false_positive = QPushButton("Remove")
@@ -81,32 +77,11 @@ class SegmentationWindow(QWidget):
         btn_grab_label = QPushButton("Select")
         btn_grab_label.setToolTip("Load selected segmentation label")
         btn_grab_label.clicked.connect(self._add_select_callback)
-        
-        
-        # Comboboxes
-        self.combobox_segmentation = QComboBox()
-        self.combobox_tracks = QComboBox()
-        self.combobox_tracks.addItem("")
-        self.layer_comboboxes = [self.combobox_segmentation, self.combobox_tracks]
-        for layer in self.viewer.layers:
-            for combobox in self.layer_comboboxes:
-                combobox.addItem(layer.name)
-        
-        # Horizontal lines
-        line = QWidget()
-        line.setFixedHeight(4)
-        line.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        line.setStyleSheet("background-color: #c0c0c0")
 
         ### Organize objects via widgets
         content = QWidget()
         content.setLayout(QGridLayout())
 
-        content.layout().addWidget(label_segmentation, 0, 0)
-        content.layout().addWidget(self.combobox_segmentation, 0, 1)
-        content.layout().addWidget(label_tracks, 1, 0)
-        content.layout().addWidget(self.combobox_tracks, 1, 1)
-        content.layout().addWidget(line, 2, 0, 1, 2)
         content.layout().addWidget(label_false_positive, 3, 0)
         content.layout().addWidget(btn_false_positive, 3, 1)
         content.layout().addWidget(label_next_free, 4, 0)
@@ -119,37 +94,6 @@ class SegmentationWindow(QWidget):
         content.layout().addWidget(btn_grab_label, 7, 1)
 
         self.layout().addWidget(content)
-        self.viewer.layers.events.inserted.connect(self.add_entry_to_comboboxes)
-        self.viewer.layers.events.removed.connect(self.remove_entry_from_comboboxes)
-        for layer in self.viewer.layers:
-            layer.events.name.connect(self.rename_entry_in_comboboxes) # doesn't contain index
-        self.viewer.layers.events.moving.connect(self.reorder_entry_in_comboboxes)
-        
-    def add_entry_to_comboboxes(self, event):
-        for combobox in self.layer_comboboxes:
-            combobox.addItem(event.value.name)
-        event.value.events.name.connect(self.rename_entry_in_comboboxes) # contains index
-        
-    def remove_entry_from_comboboxes(self, event):
-        for combobox in self.layer_comboboxes:
-            combobox.removeItem(event.index)
-
-    def rename_entry_in_comboboxes(self, event):
-        if not hasattr(event, 'index'):
-            event.index = self.viewer.layers.index(event.source.name)
-        for combobox in self.layer_comboboxes:
-            index = combobox.currentIndex()
-            combobox.removeItem(event.index)
-            combobox.insertItem(event.index, event.source.name)
-            combobox.setCurrentIndex(index)
-        
-    def reorder_entry_in_comboboxes(self, event):
-        for combobox in self.layer_comboboxes:
-            index = combobox.currentIndex()
-            item = combobox.itemText(event.index)
-            combobox.removeItem(event.index)
-            combobox.insertItem(event.new_index, item)
-            combobox.setCurrentIndex(index)
 
     def _add_remove_callback(self):
         QApplication.setOverrideCursor(Qt.CrossCursor)
@@ -179,11 +123,14 @@ class SegmentationWindow(QWidget):
         print("Remove cell callback is removed")
         
     def remove_cell_from_tracks(self, position): # TODO: doesn't work for cached tracks
-        try:
-            label_layer = grab_layer(self.viewer, self.combobox_segmentation.currentText())
-        except ValueError:
-            notify("Please make sure the label layer exists!")
+        label_layer = grab_layer(self.viewer, self.parent.combobox_segmentation.currentText())
+        
+        if label_layer is None:
+            print("Segmentation layer not selected")
+            QApplication.restoreOverrideCursor()
+            notify("No segmentation layer found")
             return
+            
         x = int(round(position[2]))
         y = int(round(position[1]))
         z = int(position[0])
@@ -201,14 +148,10 @@ class SegmentationWindow(QWidget):
         except ValueError:
             return
 
-        tracks_name = self.combobox_tracks.currentText()
+        tracks_name = self.parent.combobox_tracks.currentText()
         if tracks_name == "":
             return
         tracks = grab_layer(self.viewer, tracks_name).data
-        """try:
-            tracks = grab_layer(self.viewer, "Tracks").data
-        except ValueError:
-            return"""
         
         next_id = max(tracks[:,0]) + 1
 
@@ -245,14 +188,12 @@ class SegmentationWindow(QWidget):
         self.viewer.add_tracks(tracks, name=tracks_name)
         
     def get_track_id_of_cell(self, cell):
-        tracks_name = self.combobox_tracks.currentText()
-        if tracks_name == "":
-            return
-        tracks_layer = grab_layer(self.viewer, tracks_name)
-        """try:
-            tracks_layer = grab_layer(self.viewer, "Tracks")
-        except ValueError:
+        tracks_name = self.parent.combobox_tracks.currentText()
+        """if tracks_name == "":
             return"""
+        tracks_layer = grab_layer(self.viewer, tracks_name)
+        if tracks_layer is None:
+            return
         tracks = tracks_layer.data
         new_track_id = np.amax(tracks[:,0]) + 1
         
@@ -288,9 +229,8 @@ class SegmentationWindow(QWidget):
         id : int
             the ID to set as the currently selected one in the napari viewer
         """
-        try:
-            label_layer = grab_layer(self.viewer, self.combobox_segmentation.currentText())
-        except ValueError:
+        label_layer = grab_layer(self.viewer, self.parent.combobox_segmentation.currentText())
+        if label_layer is None:
             print("Tried to set label id on missing label layer")
             notify("Please make sure the label layer exists!")
             return
@@ -372,9 +312,8 @@ class SegmentationWindow(QWidget):
         id : int
             the id to set for the given position
         """
-        try:
-            label_layer = grab_layer(self.viewer, self.combobox_segmentation.currentText())
-        except ValueError:
+        label_layer = grab_layer(self.viewer, self.parent.combobox_segmentation.currentText())
+        if label_layer is None:
             print("Tried to replace label but no label layer found")
             notify("Please make sure the label layer exists!")
             return
@@ -411,9 +350,8 @@ class SegmentationWindow(QWidget):
         int
             id at the given position in the segmentation layer
         """
-        try:
-            label_layer = grab_layer(self.viewer, self.combobox_segmentation.currentText())
-        except ValueError:
+        label_layer = grab_layer(self.viewer, self.parent.combobox_segmentation.currentText())
+        if label_layer is None:
             print("Tried to replace label but no label layer found")
             notify("Please make sure the label layer exists!")
             return

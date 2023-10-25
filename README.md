@@ -60,3 +60,14 @@ If you encounter any problems, please [file an issue] along with a detailed desc
 [tox]: https://tox.readthedocs.io/en/latest/
 [pip]: https://pypi.org/project/pip/
 [PyPI]: https://pypi.org/
+
+## Notes
+
+false positives:
+	check if cell from eval has a match > .4 IoU. If no, check if cell has 2 or more matches >= .2 IoU. If no, then fp
+	
+false negatives:
+	check if cell from gt has a match > .4 IoU. If no, then fn
+	
+split cell:
+	check if cell from eval does not have a match > .4 IoU and 2 or more matches >= .2 IoU. If yes, then sc

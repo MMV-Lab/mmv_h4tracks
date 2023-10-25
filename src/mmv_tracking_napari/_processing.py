@@ -93,12 +93,6 @@ class ProcessingWindow(QWidget):
         self.combobox_segmentation.addItem("select model")
         self.read_models()
         self.combobox_segmentation.currentTextChanged.connect(self.toggle_segmentation_buttons)
-        self.combobox_seg_layers = QComboBox()
-        self.combobox_track_layers = QComboBox()
-        self.layer_comboboxes = [self.combobox_seg_layers, self.combobox_track_layers]
-        for layer in self.viewer.layers:
-            for combobox in self.layer_comboboxes:
-                combobox.addItem(layer.name)
         
         # Horizontal lines
         line = QWidget()
@@ -111,23 +105,15 @@ class ProcessingWindow(QWidget):
         content.setLayout(QVBoxLayout())
         
         content.layout().addWidget(label_segmentation)
-        content.layout().addWidget(self.combobox_seg_layers)
         content.layout().addWidget(self.combobox_segmentation)
         content.layout().addWidget(self.btn_preview_segment)
         content.layout().addWidget(self.btn_segment)
         content.layout().addWidget(line)
         content.layout().addWidget(label_tracking)
-        content.layout().addWidget(self.combobox_track_layers)
         content.layout().addWidget(btn_track)
         content.layout().addWidget(btn_adjust_seg_ids)
 
         self.layout().addWidget(content)
-        
-        self.viewer.layers.events.inserted.connect(self.add_entry_to_comboboxes)
-        self.viewer.layers.events.removed.connect(self.remove_entry_from_comboboxes)
-        for layer in self.viewer.layers:
-            layer.events.name.connect(self.rename_entry_in_comboboxes) # doesn't contain index
-        self.viewer.layers.events.moving.connect(self.reorder_entry_in_comboboxes)
         
     def toggle_segmentation_buttons(self, text):
         if text == "select model":
@@ -138,35 +124,9 @@ class ProcessingWindow(QWidget):
             self.btn_preview_segment.setEnabled(True)
         
     def read_models(self):
-        path = f"{os.path.dirname(__file__)}/models"
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)),"models")
         for file in os.listdir(path):
             self.combobox_segmentation.addItem(file)
-        
-    def add_entry_to_comboboxes(self, event):
-        for combobox in self.layer_comboboxes:
-            combobox.addItem(event.value.name)
-        event.value.events.name.connect(self.rename_entry_in_comboboxes) # contains index
-        
-    def remove_entry_from_comboboxes(self, event):
-        for combobox in self.layer_comboboxes:
-            combobox.removeItem(event.index)
-
-    def rename_entry_in_comboboxes(self, event):
-        if not hasattr(event, 'index'):
-            event.index = self.viewer.layers.index(event.source.name)
-        for combobox in self.layer_comboboxes:
-            index = combobox.currentIndex()
-            combobox.removeItem(event.index)
-            combobox.insertItem(event.index, event.source.name)
-            combobox.setCurrentIndex(index)
-        
-    def reorder_entry_in_comboboxes(self, event):
-        for combobox in self.layer_comboboxes:
-            index = combobox.currentIndex()
-            item = combobox.itemText(event.index)
-            combobox.removeItem(event.index)
-            combobox.insertItem(event.new_index, item)
-            combobox.setCurrentIndex(index)
 
     def _add_segmentation_to_viewer(self, mask):
         """
@@ -180,8 +140,9 @@ class ProcessingWindow(QWidget):
         try:
             self.viewer.add_labels(mask, name="calculated segmentation")
         except Exception as e:
-            print("ran into some error: {}".format(e))
+            print(f"ran into some error: {e}")
             return
+        self.parent.combobox_segmentation.setCurrentText("calculated segmentation")
         print("Added segmentation to viewer")
 
     @napari.Viewer.bind_key("Shift-s")
@@ -225,13 +186,19 @@ class ProcessingWindow(QWidget):
         from cellpose import models
 
         try:
-            data = grab_layer(self.viewer, self.combobox_seg_layers.currentText()).data
+            data = grab_layer(self.viewer, self.parent.combobox_image.currentText()).data
         except ValueError:
             print("Image layer not found in viewer")
             QApplication.restoreOverrideCursor()
             notify("No image layer found!")
             return
-
+        
+        if data is None:
+            print("Image layer not selected")
+            QApplication.restoreOverrideCursor()
+            notify("Please select the image layer!")
+            return
+        
         if demo:
             data = data[0:5]
 
@@ -320,7 +287,7 @@ class ProcessingWindow(QWidget):
 
         return params
 
-    def _add_tracks_to_viewer(self, tracks):
+    def _add_tracks_to_viewer(self, params):
         """
         Adds the tracks as a layer to the viewer with a specified name
 
@@ -330,11 +297,13 @@ class ProcessingWindow(QWidget):
             the tracks data to add to the viewer
         """
         # check if tracks are usable
-        try:
-            self.viewer.add_tracks(tracks, name="calculated tracks")
-        except Exception as e:
-            print("ran into some error: {}".format(e))
-            return
+        tracks, layername = params
+        tracks_layer = grab_layer(self.viewer, self.parent.combobox_tracks.currentText())
+        if tracks_layer is None:
+            self.viewer.add_tracks(tracks, name = layername)
+        else:
+            tracks_layer.data = tracks
+        self.parent.combobox_tracks.setCurrentText(layername)
         print("Added tracks to viewer")
 
     def _run_tracking(self):
@@ -357,27 +326,37 @@ class ProcessingWindow(QWidget):
 
         # get segmentation data
         try:
-            #data = grab_layer(self.viewer, "Segmentation Data").data
-            data = grab_layer(self.viewer, self.combobox_track_layers.currentText()).data
-            #print(f"equal: {np.array_equal(data, other_data)}")
+            data = grab_layer(self.viewer, self.parent.combobox_segmentation.currentText()).data
         except ValueError:
             print("Segmentation layer not found in viewer")
             QApplication.restoreOverrideCursor()
             notify("No segmentation layer found!")
             return
-
-        # check for tracks layer
-        if "Tracks" in self.viewer.layers:
+        
+        if data is None:
+            print("Segmentation layer not selected")
             QApplication.restoreOverrideCursor()
-            ret = choice_dialog(
-                "Tracks layer found. Do you want to replace it?",
-                [QMessageBox.Yes, QMessageBox.No],
-            )
-            QApplication.setOverrideCursor(Qt.WaitCursor)
-            # 16384 is yes, 65536 is no
-            if ret == 65536:
+            notify("Please select the segmentation layer!")
+            return
+
+        tracks_name = "Tracks"
+        # check for tracks layer
+        try:
+            tracks_layer = grab_layer(self.viewer, self.parent.combobox_tracks.currentText())
+        except ValueError:
+            pass
+        else:
+            if tracks_layer is not None:
                 QApplication.restoreOverrideCursor()
-                return
+                ret = choice_dialog(
+                    "Tracks layer found. Do you want to replace it?",
+                    [QMessageBox.Yes, QMessageBox.No],
+                )
+                QApplication.setOverrideCursor(Qt.WaitCursor)
+                if ret == 65536:
+                    QApplication.restoreOverrideCursor()
+                    return
+                tracks_name = tracks_layer.name
 
         # set process limit
         if self.parent.rb_eco.isChecked():
@@ -521,10 +500,10 @@ class ProcessingWindow(QWidget):
                 next_id += 1
 
         tracks = tracks.astype(int)
-        np.save("tracks.npy", tracks)
+        np.save("tracks.npy", tracks) # TODO: why is this here?
 
         QApplication.restoreOverrideCursor()
-        return tracks
+        return tracks, tracks_name
 
     def _adjust_ids(self):
         """
