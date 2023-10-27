@@ -71,3 +71,9 @@ false negatives:
 	
 split cell:
 	check if cell from eval does not have a match > .4 IoU and 2 or more matches >= .2 IoU. If yes, then sc
+	
+added edge:
+	check if a connection in gt has both cells matched in eval & the matched cells are connected. if no, then ae
+	
+deleted edge:
+	check if a connection in eval has both cells matched in gt & the matched cells are connected. if no, then de

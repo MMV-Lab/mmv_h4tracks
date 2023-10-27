@@ -1202,38 +1202,169 @@ class AnalysisWindow(QWidget):
     
     def get_split_cells(self, gt_seg, eval_seg):
         #  calculates amount of split cells for given segmentation
+        sc = 0
         if np.array_equal(gt_seg, eval_seg):
-            return 0
-        pass
+            return sc
+        if self.parent.rb_eco.isChecked():
+            AMOUNT_OF_PROCESSES = np.maximum(1, int(multiprocessing.cpu_count() * 0.4))
+        else:
+            AMOUNT_OF_PROCESSES = np.maximum(1, int(multiprocessing.cpu_count() * 0.8))
+        
+        segmentations = []
+        for i in range(len(gt_seg)):
+            segmentations.append([gt_seg[i], eval_seg[i]])
+            
+        global get_split_cells_layer
+        def get_split_cells_layer(gt_slice, eval_slice):
+            sc = 0
+            if np.array_equal(gt_slice, eval_slice):
+                return sc
+            for id in np.unique(eval_slice):
+                if id == 0:
+                    continue
+                # get IoU on all cells in gt at locations of id in eval
+                indices_of_id = np.where(eval_slice == id)
+                gt_ids = np.unique(gt_slice[indices_of_id])
+                ious = []
+                for gt_id in gt_ids:
+                    if gt_id == 0:
+                        continue
+                    iou = get_specific_iou(gt_slice, gt_id, eval_slice, id)
+                    ious.append(iou)
+                if len(ious) < 2 or max(ious) > .4:
+                    continue
+                ious.remove(max(ious))
+                if max(ious) >= .2:
+                    sc += 1
+            return sc
+        
+        with Pool(AMOUNT_OF_PROCESSES) as p:
+            for result in p.starmap(get_split_cells_layer, segmentations):
+                sc += result
+        return sc
     
     def get_added_edges(self, gt_seg, eval_seg, gt_tracks, eval_tracks):
         # calculates amount of added edges for given segmentation and tracks
+        ae = 0
         if np.array_equal(gt_tracks, eval_tracks):
-            return 0
-        pass
+            return ae
+        connections = []
+        for i in range(len(gt_tracks) - 1):
+            if gt_tracks[i][0] == gt_tracks[i + 1][0]:
+                connections.append((gt_tracks[i][1:4], gt_tracks[i + 1][1:4]))
+        
+        for connection in connections:
+            gt_id1 = get_id_from_track(eval_seg, connection[0])
+            gt_id2 = get_id_from_track(eval_seg, connection[1])
+            id1 = get_match_cell(gt_seg, eval_seg, gt_id1, connection[0][0])
+            id2 = get_match_cell(gt_seg, eval_seg, gt_id2, connection[1][0])
+            if id1 == 0 or id2 == 0:
+                ae +=1
+                continue
+            centroid1 = ndimage.center_of_mass(
+                eval_seg[connection[0][0]],
+                labels = eval_seg[connection[0][0]],
+                index = id1
+            )
+            centroid1 = [connection[0][0], int(np.rint(centroid1[0])), int(np.rint(centroid1[1]))]
+            centroid2 = ndimage.center_of_mass(
+                eval_seg[connection[1][0]],
+                labels = eval_seg[connection[1][0]],
+                index = id2
+            )
+            centroid2 = [connection[1][0], int(np.rint(centroid2[0])), int(np.rint(centroid2[1]))]
+            if not is_connected(eval_tracks, centroid1, centroid2):
+                ae += 1
+        return ae
     
     def get_removed_edges(self, gt_seg, eval_seg, gt_tracks, eval_tracks):
         # calculates amount of removed edges for given segmentation and tracks
+        re = 0
         if np.array_equal(gt_tracks, eval_tracks):
-            return 0
-        pass
+            return re
+        connections = []
+        for i in range(len(eval_tracks)- 1):
+            if eval_tracks[i][0] == eval_tracks[i + 1][0]:
+                connections.append((eval_tracks[i][1:4], eval_tracks[i + 1][1:4]))
+        
+        for connection in connections:
+            eval_id1 = get_id_from_track(gt_seg, connection[0])
+            eval_id2 = get_id_from_track(gt_seg, connection[1])
+            id1 = get_match_cell(eval_seg, gt_seg, eval_id1, connection[0][0])
+            id2 = get_match_cell(eval_seg, gt_seg, eval_id2, connection[1][0])
+            if id1 == 0 or id2 == 0:
+                re +=1
+                continue
+            centroid1 = ndimage.center_of_mass(
+                gt_seg[connection[0][0]],
+                labels = gt_seg[connection[0][0]],
+                index = id1
+            )
+            centroid1 = [connection[0][0], int(np.rint(centroid1[0])), int(np.rint(centroid1[1]))]
+            centroid2 = ndimage.center_of_mass(
+                gt_seg[connection[1][0]],
+                labels = gt_seg[connection[1][0]],
+                index = id2
+            )
+            centroid2 = [connection[1][0], int(np.rint(centroid2[0])), int(np.rint(centroid2[1]))]
+            if not is_connected(gt_tracks, centroid1, centroid2):
+                re += 1
+        return re
         
     def _display_evaluation_result(self, title, results, frames):
         self.results_window = ResultsWindow(title, results, frames)
         
 global get_specific_intersection
-def get_specific_intersection(slice1, slice2, id1, id2):
+def get_specific_intersection(slice1, id1, slice2, id2):
     return np.sum((slice1 == id1) & (slice2 == id2))
 
 global get_specific_union
-def get_specific_union(slice1, slice2, id1, id2):
+def get_specific_union(slice1, id1, slice2, id2):
     return np.sum((slice1 == id1) | (slice2 == id2))
 
 global get_specific_iou
-def get_specific_iou(slice1, slice2, id1, id2):
-    intersection = get_specific_intersection(slice1, slice2, id1, id2)
-    union = get_specific_union(slice1, slice2, id1, id2)
+def get_specific_iou(slice1, id1, slice2, id2):
+    intersection = get_specific_intersection(slice1, id1, slice2, id2)
+    union = get_specific_union(slice1, id1, slice2, id2)
     return intersection / union
+
+global get_id_from_track
+def get_id_from_track(label_layer, track):
+    z,y,x = track
+    return label_layer[z,y,x]
+
+global get_match_cell
+def get_match_cell(base_layer, compare_layer, base_id, slice_id):
+    # return id of matched cell
+    # check for highest iou (above threshold)
+    IOU_THRESHOLD = .4
+    base_slice = base_layer[slice_id]
+    compare_slice = compare_layer[slice_id]
+    indices_of_id = np.where(base_slice == base_id)
+    compare_ids = np.unique(compare_slice[indices_of_id])
+    ious = []
+    for compare_id in compare_ids:
+        if compare_id == 0:
+            continue
+        iou = [compare_id, get_specific_iou(compare_slice, compare_id, base_slice, base_id)]
+        ious.append(iou)
+    ious = np.array(ious)
+    if len(ious) == 0:
+        return 0
+    max_iou = max(ious[:,1])
+    if max_iou < IOU_THRESHOLD:
+        return 0
+    return int(ious[np.where(ious[:,1] == max_iou),0][0][0])
+
+global is_connected
+def is_connected(tracks, centroid1, centroid2):
+    for i in range(len(tracks) - 1):
+        if centroid1[0] == tracks[i,1] and centroid1[1] == tracks[i,2] and centroid1[2] == tracks[i,3]:
+            #print("checking the stuff")
+            return (
+                centroid2[0] == tracks[i+1,1] and centroid2[1] == tracks[i+1,2] and centroid2[2] == tracks[i+1,3]
+            )
+    return False
         
 class ResultsWindow(QWidget):
     def __init__(self, title, results, frames):

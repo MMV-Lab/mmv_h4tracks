@@ -156,55 +156,91 @@ def test_segmentation_evaluation(get_widget, score, area, frames):
 @pytest.mark.eval
 @pytest.mark.eval_tracking
 @pytest.mark.unit
-def test_false_positives(set_widget_up):
+@pytest.mark.parametrize(
+    "layername, expected_value", [("false positive.tif", 2)]
+)
+def test_false_positives(set_widget_up, layername, expected_value):
     # test if false positives are calculated correctly
     widget = set_widget_up
     viewer = widget.viewer
     widget._analysis(hide = True)
     window = widget.analysis_window
     gt_seg = viewer.layers[viewer.layers.index("GT.tif")].data
-    eval_seg = viewer.layers[viewer.layers.index("false positive.tif")].data
+    eval_seg = viewer.layers[viewer.layers.index(layername)].data
     fp = window.get_false_positives(gt_seg, eval_seg)
-    assert fp == 2
+    assert fp == expected_value
     
 @pytest.mark.eval
 @pytest.mark.eval_tracking
 @pytest.mark.unit
-def test_false_negatives(set_widget_up):
+@pytest.mark.parametrize(
+    "layername, expected_value", [("false_negative.tif", 1)]
+)
+def test_false_negatives(set_widget_up, layername, expected_value):
     # test if false negatives are calculated correctly
     widget = set_widget_up
     viewer = widget.viewer
     widget._analysis(hide = True)
     window = widget.analysis_window
     gt_seg = viewer.layers[viewer.layers.index("GT.tif")].data
-    eval_seg = viewer.layers[viewer.layers.index("false_negative.tif")].data
+    eval_seg = viewer.layers[viewer.layers.index(layername)].data
     fn = window.get_false_negatives(gt_seg, eval_seg)
-    assert fn == 1
+    assert fn == expected_value
     
-@pytest.mark.new
 @pytest.mark.eval
 @pytest.mark.eval_tracking
 @pytest.mark.unit
-def test_split_cells(get_widget):
+@pytest.mark.parametrize(
+    "layername, expected_value", [("falsely_merged.tif", 1)]
+)
+def test_split_cells(set_widget_up, layername, expected_value):
     # test if split cells are calculated correctly
-    widget = get_widget
+    widget = set_widget_up
     viewer = widget.viewer
+    widget._analysis(hide = True)
+    window = widget.analysis_window
+    gt_seg = viewer.layers[viewer.layers.index("GT.tif")].data
+    eval_seg = viewer.layers[viewer.layers.index(layername)].data
+    sc = window.get_split_cells(gt_seg, eval_seg)
+    assert sc == expected_value
     
 @pytest.mark.eval
 @pytest.mark.eval_tracking
 @pytest.mark.unit
-def test_added_edges(get_widget):
+@pytest.mark.parametrize(
+    "layername, expected_value", [("deleted_edge.npy", 2)]
+)
+def test_added_edges(set_widget_up, layername, expected_value):
     # test if added edges are calculated correctly
-    widget = get_widget
+    widget = set_widget_up
     viewer = widget.viewer
+    widget._analysis(hide = True)
+    window = widget.analysis_window
+    gt_seg = viewer.layers[viewer.layers.index("GT.tif")].data
+    eval_seg = gt_seg
+    gt_tracks = viewer.layers[viewer.layers.index("GT_tracks.npy")].data
+    eval_tracks = viewer.layers[viewer.layers.index(layername)].data
+    ae = window.get_added_edges(gt_seg, eval_seg, gt_tracks, eval_tracks)
+    assert ae == expected_value
     
 @pytest.mark.eval
 @pytest.mark.eval_tracking
 @pytest.mark.unit
-def test_deleted_edges(get_widget):
+@pytest.mark.parametrize(
+    "layername, expected_value", [("added_edge.npy", 1)]
+)
+def test_deleted_edges(set_widget_up, layername, expected_value):
     # test if deleted edges are calculated correctly
-    widget = get_widget
+    widget = set_widget_up
     viewer = widget.viewer
+    widget._analysis(hide = True)
+    window = widget.analysis_window
+    gt_seg = viewer.layers[viewer.layers.index("GT.tif")].data
+    eval_seg = gt_seg
+    gt_tracks = viewer.layers[viewer.layers.index("GT_tracks.npy")].data
+    eval_tracks = viewer.layers[viewer.layers.index(layername)].data
+    de = window.get_removed_edges(gt_seg, eval_seg, gt_tracks, eval_tracks)
+    assert de == expected_value
 
 # test if tracking evaluation is calculated right
 # -> false positives
@@ -213,6 +249,7 @@ def test_deleted_edges(get_widget):
 # -> added edges
 # -> removed edges
 
+@pytest.mark.not_implemented
 def test_fault_value(get_widget):
     # test if tracking error is calculated correctly
     widget = get_widget
