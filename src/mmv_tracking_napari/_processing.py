@@ -2,6 +2,7 @@ import os
 import numpy as np
 import multiprocessing
 from multiprocessing import Pool
+import platform
 
 import napari
 from qtpy.QtWidgets import (
@@ -250,10 +251,18 @@ class ProcessingWindow(QWidget):
         for slice in data:
             data_with_parameters.append((slice, parameters))
 
-        with Pool(AMOUNT_OF_PROCESSES) as p:
-            mask = p.starmap(segment_slice, data_with_parameters)
+        if platform.system() == "Windows":
+            mask = []
+            for i in range(len(data_with_parameters)):
+                mask.append(segment_slice(data_with_parameters[i][0],
+                                          data_with_parameters[i][1]))
             mask = np.asarray(mask)
-            print("Done calculating segmentation")
+            
+        else:
+            with Pool(AMOUNT_OF_PROCESSES) as p:
+                mask = p.starmap(segment_slice, data_with_parameters)
+                mask = np.asarray(mask)
+                print("Done calculating segmentation")
 
         QApplication.restoreOverrideCursor()
         return mask
@@ -374,8 +383,14 @@ class ProcessingWindow(QWidget):
 
             return (centroids, labels)
 
-        with Pool(AMOUNT_OF_PROCESSES) as p:
-            extended_centroids = p.map(calculate_centroids, data)
+        if platform.system() == "Windows":
+            extended_centroids = []
+            for i in range(len(data)):
+                extended_centroids.append(data[i])
+
+        else:
+            with Pool(AMOUNT_OF_PROCESSES) as p:
+                extended_centroids = p.map(calculate_centroids, data)
 
         # calculate connections between centroids of adjacent slices
 
@@ -441,8 +456,14 @@ class ProcessingWindow(QWidget):
 
             return matched_pairs
 
-        with Pool(AMOUNT_OF_PROCESSES) as p:
-            matches = p.map(match_centroids, slice_pairs)
+        if platform.system() == "Windows":
+            matches = []
+            for i in range(len(slice_pairs)):
+                matches.append(match_centroids(slice_pair[i]))
+            pass
+        else:
+            with Pool(AMOUNT_OF_PROCESSES) as p:
+                matches = p.map(match_centroids, slice_pairs)
 
         tracks = np.array([])
         next_id = 0

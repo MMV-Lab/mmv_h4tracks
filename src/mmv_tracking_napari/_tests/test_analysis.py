@@ -249,11 +249,24 @@ def test_deleted_edges(set_widget_up, layername, expected_value):
 # -> added edges
 # -> removed edges
 
-@pytest.mark.not_implemented
-def test_fault_value(get_widget):
+@pytest.mark.eval
+@pytest.mark.eval_tracking
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    "layername_seg, layername_tracks, expected_value", [("false positive.tif", "added_edge.npy", 3)]
+)
+def test_fault_value(set_widget_up, layername_seg, layername_tracks, expected_value):
     # test if tracking error is calculated correctly
-    widget = get_widget
+    widget = set_widget_up
     viewer = widget.viewer
+    widget._analysis(hide = True)
+    window = widget.analysis_window
+    gt_seg = viewer.layers[viewer.layers.index("GT.tif")].data
+    eval_seg = viewer.layers[viewer.layers.index(layername_seg)].data
+    gt_tracks = viewer.layers[viewer.layers.index("GT_tracks.npy")].data
+    eval_tracks = viewer.layers[viewer.layers.index(layername_tracks)].data
+    fault_value = window.evaluate_tracking(gt_seg, eval_seg, gt_tracks, eval_tracks)
+    assert fault_value == expected_value
 
 # do by removing part of cell/ adding more to cell
 

@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 import multiprocessing
 from multiprocessing import Pool
+import platform
 
 from qtpy.QtWidgets import (
     QWidget,
@@ -449,8 +450,14 @@ class TrackingWindow(QWidget):
                     continue
                 data.append([label_layer.data, start_slice, id])
 
-        with Pool(AMOUNT_OF_PROCESSES) as p:
-            ret = p.starmap(func, data)
+        if platform.system() == "Windows":
+            ret = []
+            for i in range(len(data)):
+                ret.append(func(data[i][0], data[i][1], data[i][2]))
+            pass
+        else:
+            with Pool(AMOUNT_OF_PROCESSES) as p:
+                ret = p.starmap(func, data)
 
         track_id = 1
         for entry in ret:

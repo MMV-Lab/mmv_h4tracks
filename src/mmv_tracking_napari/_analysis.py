@@ -2,6 +2,7 @@ import numpy as np
 import multiprocessing
 from multiprocessing import Pool
 from scipy import ndimage
+import platform
 
 from qtpy.QtWidgets import (
     QWidget,
@@ -76,8 +77,8 @@ class AnalysisWindow(QWidget):
         btn_plot.clicked.connect(self._start_plot_worker)
         btn_export.clicked.connect(self._start_export_worker)
         
-        btn_evaluate_segmentation.clicked.connect(self._evaluate_segmentation)
-        btn_evaluate_tracking.clicked.connect(self._evaluate_tracking)
+        btn_evaluate_segmentation.clicked.connect(self.call_evaluate_segmentation)
+        btn_evaluate_tracking.clicked.connect(self.call_evaluate_tracking)
 
         # Comboboxes
         self.combobox_plots = QComboBox()
@@ -189,8 +190,14 @@ class AnalysisWindow(QWidget):
             std_deviation = np.around(np.std(sizes), 3)
             return [id, average, std_deviation]
 
-        with Pool(AMOUNT_OF_PROCESSES) as p:
-            sizes = p.starmap(func, track_and_segmentation)
+        if platform.system() == "Windows":
+            sizes = []
+            for i in range(len(track_and_segmentation)):
+                sizes.append(func(track_and_segmentation[i][0],
+                                  track_and_segmentation[i][1]))
+        else:
+            with Pool(AMOUNT_OF_PROCESSES) as p:
+                sizes = p.starmap(func, track_and_segmentation)
 
         return np.array(sizes)
 
@@ -762,15 +769,21 @@ class AnalysisWindow(QWidget):
                 invalid_values.append(value)
 
         return valid_values, invalid_values
-
-    def _evaluate_segmentation(self):
-        # evaluates segmentation based on changes made by user
-        seg = self.parent.initial_layers[0]
+    
+    def call_evaluate_segmentation(self):
         try:
-            gt = grab_layer(self.viewer, self.parent.combobox_segmentation.currentText()).data
+            gt_seg = grab_layer(self.viewer, self.parent.combobox_segmentation.currentText()).data
         except ValueError:
             notify("Please make sure the label layer exists!")
             return
+        eval_seg = self.parent.initial_layers[0]
+        results, frames = self.evaluate_segmentation(gt_seg, eval_seg)
+        self._display_evaluation_result("Evaluation of Segmentation", results, frames)
+        self.results_window.show()
+        print("Opening results window")
+
+    def evaluate_segmentation(self, gt_seg, eval_seg):
+        # evaluates segmentation based on changes made by user
         current_frame = int(self.viewer.dims.point[0])
         try:
             selected_limit = int(self.lineedit_limit_evaluation.text())
@@ -781,26 +794,24 @@ class AnalysisWindow(QWidget):
             frame_range = list(range(current_frame, selected_limit + 1))
         else:
             frame_range = list(range(selected_limit, current_frame + 1))
-        frames = [current_frame, (frame_range[0], frame_range[-1]), len(seg) - 1]
+        frames = [current_frame, (frame_range[0], frame_range[-1]), len(eval_seg) - 1]
         ### FOR CURRENT FRAME
-        single_iou = self.get_iou(gt[current_frame], seg[current_frame])
-        single_dice = self.get_dice(gt[current_frame], seg[current_frame])
-        single_f1 = self.get_f1(gt[current_frame], seg[current_frame])
+        single_iou = self.get_iou(gt_seg[current_frame], eval_seg[current_frame])
+        single_dice = self.get_dice(gt_seg[current_frame], eval_seg[current_frame])
+        single_f1 = self.get_f1(gt_seg[current_frame], eval_seg[current_frame])
         ### FOR SOME FRAMES
-        some_iou = self.get_iou(gt[frame_range], seg[frame_range])
-        some_dice = self.get_dice(gt[frame_range], seg[frame_range]) 
-        some_f1 = self.get_f1(gt[frame_range], seg[frame_range])
+        some_iou = self.get_iou(gt_seg[frame_range], eval_seg[frame_range])
+        some_dice = self.get_dice(gt_seg[frame_range], eval_seg[frame_range]) 
+        some_f1 = self.get_f1(gt_seg[frame_range], eval_seg[frame_range])
         ### FOR ALL FRAMES
-        all_iou = self.get_iou(gt, seg)
-        all_dice = self.get_dice(gt, seg)
-        all_f1 = self.get_f1(gt, seg)
+        all_iou = self.get_iou(gt_seg, eval_seg)
+        all_dice = self.get_dice(gt_seg, eval_seg)
+        all_f1 = self.get_f1(gt_seg, eval_seg)
         results = np.asarray([[all_iou, all_dice, all_f1],
                               [some_iou, some_dice, some_f1],
                               [single_iou, single_dice, single_f1]
                             ])
-        self._display_evaluation_result("Evaluation of Segmentation", results, frames)
-        self.results_window.show()
-        print("Opening results window")
+        return results, frames
         
     def get_intersection(self, seg1, seg2):
         # takes multidimensional numpy arrays and returns their intersection
@@ -859,7 +870,7 @@ class AnalysisWindow(QWidget):
 
         tracks_layer.data = tracks
 
-    def _evaluate_tracking(self):
+    def call_evaluate_tracking(self):
         self.adjust_track_centroids()
         automatic_tracks = self.parent.initial_layers[1]
         try:
@@ -873,244 +884,24 @@ class AnalysisWindow(QWidget):
         except ValueError:
             notify("Please make sure the label layer exists!")
             return
-        
-        fp = 0
-        fn = 0
-        de = 0
-        ae = 0
-        sc = 0
-
-        if self.parent.rb_eco.isChecked():
-            AMOUNT_OF_PROCESSES = np.maximum(1, int(multiprocessing.cpu_count() * 0.4))
-        else:
-            AMOUNT_OF_PROCESSES = np.maximum(1, int(multiprocessing.cpu_count() * 0.8))
-        print("Running on {} processes max".format(AMOUNT_OF_PROCESSES))
-        
-        # create dict with double lookup for cells in gt and prediction
-        # key naming schema: ({p/gt},z,y,x)
-        lookup_dict = {}
-        for slice in range(len(corrected_segmentation)):
-            matches = []
-            for cell in np.unique(corrected_segmentation[slice])[1:]:
-                centroid = ndimage.center_of_mass(
-                    corrected_segmentation[slice],
-                    labels = corrected_segmentation[slice],
-                    index = cell
-                )
-                y = int(np.rint(centroid[0]))
-                x = int(np.rint(centroid[1]))
-                match_id = automatic_segmentation[slice, y, x]
-                matches.append((cell, match_id))
-                if match_id != 0:
-                    p_centroid = ndimage.center_of_mass(
-                        automatic_segmentation[slice],
-                        labels = automatic_segmentation[slice],
-                        index = match_id
-                    )
-                    p_y = int(np.rint(p_centroid[0]))
-                    p_x = int(np.rint(p_centroid[1]))
-                    gt = (slice, y, x)
-                    p = (slice, p_y, p_x)
-                    lookup_dict[f'gt_{gt}'] = p
-                    lookup_dict[f'p_{p}'] = gt
-            matches = np.asarray(matches)
-            uniques_gt = np.unique(matches[:,0], return_counts = True)
-            uniques_pred = np.unique(matches[:,1], return_counts = True)
-            counts_pred = uniques_pred[1]
-            fn_current = 0
-            if uniques_pred[0][0] == 0:
-                fn_current = uniques_pred[1][0]
-                counts_pred = counts_pred[1:]
-            sc_current = sum(counts_pred - np.ones_like(counts_pred))
-            fp += len(uniques_pred[0]) + fn_current + sc_current - len(uniques_gt[0])
-            fn += fn_current
-            sc += sc_current
-            
-        def connection_has_match(connection:tuple, prediction:bool):
-            if not prediction:
-                cell_gt_1 = connection[0]
-                cell_gt_2 = connection[1]
-                if not f"gt_{tuple(cell_gt_1)}" in lookup_dict or not f"gt_{tuple(cell_gt_2)}" in lookup_dict:
-                    return False
-                cell_p_1 = lookup_dict[f"gt_{tuple(cell_gt_1)}"]
-                cell_p_2 = lookup_dict[f"gt_{tuple(cell_gt_2)}"]
-                return is_connection(cell_p_1, cell_p_2, not prediction)
-            else:
-                cell_p_1 = connection[0]
-                cell_p_2 = connection[1]
-                if not f"p_{tuple(cell_p_1)}" in lookup_dict or not f"p_{tuple(cell_p_2)}" in lookup_dict:
-                    return False
-                cell_gt_1 = lookup_dict[f"p_{tuple(cell_p_1)}"]
-                cell_gt_2 = lookup_dict[f"p_{tuple(cell_p_2)}"]
-                return is_connection(cell_gt_1, cell_gt_2, not prediction)
-    
-        def is_connection(cell_1, cell_2, prediction:bool):
-            cell_1 = np.asarray(cell_1)
-            cell_2 = np.asarray(cell_2)
-            if prediction:
-                index = np.where(np.all(automatic_tracks[:,1:] == cell_1, axis = 1))[0]
-                if len(index) == 0:
-                    return False
-                return np.array_equal(automatic_tracks[index[0]+1,1:], cell_2)
-            index = np.where(np.all(corrected_tracks[:,1:] == cell_1, axis = 1))[0]
-            if len(index) == 0:
-                return False
-            return np.array_equal(corrected_tracks[index[0]+1,1:], cell_2)
-
-        for line in range(len(corrected_tracks) - 1):
-            if corrected_tracks[line, 0] != corrected_tracks[line+1,0]:
-                continue
-            cell_1 = corrected_tracks[line, 1:]
-            cell_2 = corrected_tracks[line+ 1, 1:]
-            connection = (cell_1, cell_2)
-            if not connection_has_match(connection, False):
-                print(f"added edge for {connection}")
-                ae += 1
-                
-        for line in range(len(automatic_tracks) -1):
-            if automatic_tracks[line, 0] != automatic_tracks[line +1,0]:
-                continue
-            cell_1 = automatic_tracks[line, 1:]
-            cell_2 = automatic_tracks[line+1,1:]
-            connection = (cell_1, cell_2)
-            if not connection_has_match(connection, True):
-                print(f"deleted edge for {connection}")
-                de += 1 
-
-        print(f"False Negatives: {fn}")
-        print(f"False Positives: {fp}")
-        print(f"Split Cells: {sc}")
-        print(f"Added Edges: {ae}")
-        print(f"Deleted Edges: {de}")
-        
-        fault_value = fp + fn * 10 + de + ae * 1.5 + sc * 5
-        
+        fault_value = self.evaluate_tracking(
+            gt_seg = corrected_segmentation,
+            eval_seg = automatic_segmentation,
+            gt_tracks = corrected_segmentation,
+            eval_tracks = automatic_tracks
+        )
         print(f"Fault value: {fault_value}")
-        #print(lookup_dict)
-        #return
-        
-        
-        
-        
-        
-        
-        
-        """data = []
-        for i in range(len(corrected_segmentation)):
-            data.append((corrected_tracks[i], automatic_tracks[i]))
-        
-        def match_cells(labels1, labels2):
-            "#""
-            Takes two slices as argument. Both should be from the same timestep. Returns list of matching cell ids.
-            "#""
-            pairs = []
-            paired = []
-            
-            for id in np.unique(labels1):
-                if id == 0:
-                    continue
-                
-                ## try to find pair by looking at the centroid
-                centroid = ndimage.center_of_mass(
-                    labels1, labels = labels1, index = id
-                )
-                match_id = labels2[int(np.rint(centroid[0])), int(np.rint(centroid[1]))]
-                if match_id > 0:
-                    pairs.append((id, match_id))
-                    paired.append(match_id)
-                    continue
-                pairs.append((id, -1))
-                
-            for id in np.unique(labels2):
-                if not id in paired:
-                    pairs.append((-1, id))
-                
-            return pairs
-        
-        with Pool(AMOUNT_OF_PROCESSES) as p:
-            matched_cells = p.starmap(match_cells, data)
-            
-        for line in matched_cells:
-            arr = np.asarray(line)
-            unique, counts = np.unique(arr[:,0], return_counts = True)
-            fp += counts[0] # should always be counts of -1
-            unique, counts = np.unique(arr[:,1], return_counts = True)
-            fn += counts[0]
-        
-        data = []
-        def extend_tracks(tracks, segmentation):
-            extended_tracks = np.asarray([[]])
-            for line in tracks:
-                seg_id = segmentation[line[1], line[2], line[3]]
-                np.append(extended_tracks, [line[0],line[1],line[2],line[3],seg_id], axis=0)
-            return extended_tracks
-        
-        extended_corrected_tracks = extend_tracks(corrected_tracks, corrected_segmentation)
-        extended_automatic_tracks = extend_tracks(automatic_tracks, automatic_segmentation)
-        for i in range(len(extended_corrected_tracks)):
-            if extended_corrected_tracks[i,0] == extended_corrected_tracks[i+1,0]:
-                data.append((extended_corrected_tracks[i], extended_corrected_tracks[i+1]), extended_automatic_tracks, matched_cells)
-                
-        def match_track_connections(connection, tracks, matched_cells):
-            connection_id1 = connection[0][4]
-            match_id1 = matched_cells[matched_cells[0].index(connection_id1)][1]
-            connection_id2 = connection[1][4]
-            match_id2 = matched_cells[matched_cells[0].index(connection_id2)][1]
-            index1 = np.where(tracks, tracks[:,4] == match_id1)
-            index2 = np.where(tracks, tracks[:,4] == match_id2)
-            if index1[0] == index2[0] + 1:
-                return index1[0]
-            return -1
-        
-        with Pool(AMOUNT_OF_PROCESSES) as p:
-            matched_indices = p.starmap(match_track_connections, data)
-            
-        for index in matched_indices:
-            if index == -1:
-                ae += 1
-                
-        for index in range(len(automatic_tracks)):
-            if not index in matched_indices:
-                de += 1
-        
-        hit_cells = []
-        for line in corrected_tracks:
-            if not (line[1], line[2], line[3]) in hit_cells:
-                hit_cells.append((line[1], line[2], line[3]))
-            else:
-                sc += 1
-            
-        print(f"False negatives: {fn}")
-        print("False positives: %s" % fp)
-        print("Deleted edges: %s" % de)
-        print("Added edges: %s" % ae)
-        print("Split cells: %s" % sc)
+    
+    def evaluate_tracking(self, gt_seg, eval_seg, gt_tracks, eval_tracks):
+        fp = self.get_false_positives(gt_seg, eval_seg)
+        fn = self.get_false_negatives(gt_seg, eval_seg)
+        sc = self.get_split_cells(gt_seg, eval_seg)
+        de = self.get_removed_edges(gt_seg, eval_seg, gt_tracks, eval_tracks)
+        ae = self.get_added_edges(gt_seg, eval_seg, gt_tracks, eval_tracks)
         
         fault_value = fp + fn * 10 + de + ae * 1.5 + sc * 5
         
-        print("Fault value: %s" % fault_value)
-        
-        return
-        
-        
-        
-        current_frame = int(self.viewer.dims.point[0])
-        frame_range = [current_frame]
-        try:
-            selected_limit = int(self.lineedit_limit_evaluation.text())
-        except ValueError:
-            notify("Please use integer instead of text")
-            return
-        if selected_limit > current_frame:
-            frame_range.append(selected_limit)
-        else:
-            frame_range.insert(0, selected_limit)
-            
-        frames = [current_frame, frame_range, len(automatic_segmentation) - 1]
-        self._display_evaluation_result("Evaluation of Tracking", results, frames)
-        self.results_window.show()
-        print("Opening results window")"""
-        
+        return fault_value
         
         ### MATCHING FOR CELLS BASED ON IOU > .4, split cells >= .2! 
     def get_false_positives(self, gt_seg, eval_seg):
@@ -1155,9 +946,15 @@ class AnalysisWindow(QWidget):
                 fp += 1
             return fp
         
-        with Pool(AMOUNT_OF_PROCESSES) as p:
-            for result in p.starmap(get_false_positives_layer, segmentations):
-                fp += result
+        if platform.system() == "Windows":
+            for i in range(len(segmentations)):
+                fp += get_false_positives_layer(segmentations[i][0],
+                                                segmentations[i][1])
+        else:
+            with Pool(AMOUNT_OF_PROCESSES) as p:
+                for result in p.starmap(get_false_positives_layer, segmentations):
+                    fp += result
+        print(f"False Positives: {fp}")
         return fp
     
     def get_false_negatives(self, gt_seg, eval_seg):
@@ -1195,9 +992,15 @@ class AnalysisWindow(QWidget):
                     fn += 1
             return fn
         
-        with Pool(AMOUNT_OF_PROCESSES) as p:
-            for result in p.starmap(get_false_negatives_layer, segmentations):
-                fn += result
+        if platform.system() == "Windows":
+            for i in range(len(segmentations)):
+                fn += get_false_negatives_layer(segmentations[i][0],
+                                                segmentations[i][1])
+        else:
+            with Pool(AMOUNT_OF_PROCESSES) as p:
+                for result in p.starmap(get_false_negatives_layer, segmentations):
+                    fn += result
+        print(f"False Negatives: {fn}")
         return fn
     
     def get_split_cells(self, gt_seg, eval_seg):
@@ -1238,9 +1041,15 @@ class AnalysisWindow(QWidget):
                     sc += 1
             return sc
         
-        with Pool(AMOUNT_OF_PROCESSES) as p:
-            for result in p.starmap(get_split_cells_layer, segmentations):
-                sc += result
+        if platform.system() == "Windows":
+            for i in range(len(segmentations)):
+                sc += get_split_cells_layer(segmentations[i][0],
+                                            segmentations[i][1])
+        else:
+            with Pool(AMOUNT_OF_PROCESSES) as p:
+                for result in p.starmap(get_split_cells_layer, segmentations):
+                    sc += result
+        print(f"Split Cells: {sc}")
         return sc
     
     def get_added_edges(self, gt_seg, eval_seg, gt_tracks, eval_tracks):
@@ -1275,13 +1084,14 @@ class AnalysisWindow(QWidget):
             centroid2 = [connection[1][0], int(np.rint(centroid2[0])), int(np.rint(centroid2[1]))]
             if not is_connected(eval_tracks, centroid1, centroid2):
                 ae += 1
+        print(f"Added Edges: {ae}")
         return ae
     
     def get_removed_edges(self, gt_seg, eval_seg, gt_tracks, eval_tracks):
         # calculates amount of removed edges for given segmentation and tracks
-        re = 0
+        de = 0
         if np.array_equal(gt_tracks, eval_tracks):
-            return re
+            return de
         connections = []
         for i in range(len(eval_tracks)- 1):
             if eval_tracks[i][0] == eval_tracks[i + 1][0]:
@@ -1293,7 +1103,7 @@ class AnalysisWindow(QWidget):
             id1 = get_match_cell(eval_seg, gt_seg, eval_id1, connection[0][0])
             id2 = get_match_cell(eval_seg, gt_seg, eval_id2, connection[1][0])
             if id1 == 0 or id2 == 0:
-                re +=1
+                de +=1
                 continue
             centroid1 = ndimage.center_of_mass(
                 gt_seg[connection[0][0]],
@@ -1308,8 +1118,9 @@ class AnalysisWindow(QWidget):
             )
             centroid2 = [connection[1][0], int(np.rint(centroid2[0])), int(np.rint(centroid2[1]))]
             if not is_connected(gt_tracks, centroid1, centroid2):
-                re += 1
-        return re
+                de += 1
+        print(f"Deleted Edges: {de}")
+        return de
         
     def _display_evaluation_result(self, title, results, frames):
         self.results_window = ResultsWindow(title, results, frames)
