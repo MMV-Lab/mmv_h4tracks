@@ -386,7 +386,7 @@ class ProcessingWindow(QWidget):
         if platform.system() == "Windows":
             extended_centroids = []
             for i in range(len(data)):
-                extended_centroids.append(data[i])
+                extended_centroids.append(calculate_centroids(data[i]))
 
         else:
             with Pool(AMOUNT_OF_PROCESSES) as p:
@@ -408,7 +408,6 @@ class ProcessingWindow(QWidget):
             num_cells_child = len(slice_pair[1][0])
 
             # calculate distance between each pair of cells
-
             cost_mat = spatial.distance.cdist(slice_pair[0][0], slice_pair[1][0])
 
             # if the distance is too far, change to approx. Inf.
