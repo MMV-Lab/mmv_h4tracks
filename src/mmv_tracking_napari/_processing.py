@@ -459,7 +459,7 @@ class ProcessingWindow(QWidget):
         if platform.system() == "Windows":
             matches = []
             for i in range(len(slice_pairs)):
-                matches.append(match_centroids(slice_pair[i]))
+                matches.append(match_centroids(slice_pairs[i]))
             pass
         else:
             with Pool(AMOUNT_OF_PROCESSES) as p:
