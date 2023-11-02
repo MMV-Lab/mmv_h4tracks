@@ -174,8 +174,9 @@ def test_false_positives(set_widget_up, layername, expected_value):
 @pytest.mark.eval
 @pytest.mark.eval_tracking
 @pytest.mark.unit
+@pytest.mark.new
 @pytest.mark.parametrize(
-    "layername, expected_value", [("false_negative.tif", 1)]
+    "layername, expected_value", [("false_negative.tif", 1), ("false_negative_1.tif", 5)]
 )
 def test_false_negatives(set_widget_up, layername, expected_value):
     # test if false negatives are calculated correctly
