@@ -64,13 +64,13 @@ If you encounter any problems, please [file an issue] along with a detailed desc
 ## Notes
 
 false positives:
-	check if cell from eval has a match > .4 IoU. If no, check if cell has 2 or more matches >= .2 IoU. If no, then fp
+	check if cell from eval has a match > .4 IoU. If no, check if cell has second highest match >= .2 IoU. If no, then fp
 	
 false negatives:
 	check if cell from gt has a match > .4 IoU. If no, then fn
 	
 split cell:
-	check if cell from eval does not have a match > .4 IoU and 2 or more matches >= .2 IoU. If yes, then sc
+	check if cell from eval has more than one match, and if second highest match is >= .2 IoU. If yes, then sc
 	
 added edge:
 	check if a connection in gt has both cells matched in eval & the matched cells are connected. if no, then ae

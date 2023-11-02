@@ -1039,10 +1039,12 @@ class AnalysisWindow(QWidget):
                         continue
                     iou = get_specific_iou(gt_slice, gt_id, eval_slice, id)
                     ious.append(iou)
-                if len(ious) < 2 or max(ious) > .4:
+                if len(ious) < 2: # or max(ious) > .4:
+                    print("cell has less than two matches")
                     continue
                 ious.remove(max(ious))
                 if max(ious) >= .2:
+                    print("second match has large enough area, sc")
                     sc += 1
             return sc
         
