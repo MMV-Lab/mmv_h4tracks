@@ -922,9 +922,11 @@ class AnalysisWindow(QWidget):
         def get_false_positives_layer(gt_slice, eval_slice):
             fp = 0
             if np.array_equal(gt_slice, eval_slice):
+                print("layers are equal")
                 return fp
             for id in np.unique(eval_slice):
                 if id == 0:
+                    print("skipping check for background")
                     continue
                 # get IoU on all cells in gt at locations of id in eval
                 indices_of_id = np.where(eval_slice == id)
@@ -932,18 +934,21 @@ class AnalysisWindow(QWidget):
                 ious = []
                 for gt_id in gt_ids:
                     if gt_id == 0:
+                        # skipping IoU calculation with background
                         continue
                     iou = get_specific_iou(gt_slice, gt_id, eval_slice, id)
                     ious.append(iou)
                 if len(ious) < 1:
                     fp += 1
+                    print("No overlapping cell, fp")
                     continue
                 if max(ious) > .4:
+                    print("overlap high enough")
                     continue
                 ious.remove(max(ious))
-                if len(ious) < 1 or max(ious) >= .2:
-                    continue
-                fp += 1
+                if len(ious) < 1 or max(ious) < .2:
+                    print("single low overlap or multiple very low overlaps, fp")
+                    fp += 1
             return fp
         
         if platform.system() == "Windows":
