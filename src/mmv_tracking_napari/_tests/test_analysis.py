@@ -176,15 +176,15 @@ def test_false_positives(set_widget_up, layername, expected_value):
 @pytest.mark.unit
 @pytest.mark.new
 @pytest.mark.parametrize(
-    "layername, expected_value", [("false_negative.tif", 1), ("false_negative_1.tif", 5)]
+    "layername, expected_value, GT", [("false_negative.tif", 1, "GT.tif"), ("false_negative_1.tif", 5, "GT.tif"), ("false_negative_2.tif", 2, "GT_false_negative_2.tif")]
 )
-def test_false_negatives(set_widget_up, layername, expected_value):
+def test_false_negatives(set_widget_up, layername, expected_value, GT):
     # test if false negatives are calculated correctly
     widget = set_widget_up
     viewer = widget.viewer
     widget._analysis(hide = True)
     window = widget.analysis_window
-    gt_seg = viewer.layers[viewer.layers.index("GT.tif")].data
+    gt_seg = viewer.layers[viewer.layers.index(GT)].data
     eval_seg = viewer.layers[viewer.layers.index(layername)].data
     fn = window.get_false_negatives(gt_seg, eval_seg)
     assert fn == expected_value
@@ -192,8 +192,9 @@ def test_false_negatives(set_widget_up, layername, expected_value):
 @pytest.mark.eval
 @pytest.mark.eval_tracking
 @pytest.mark.unit
+@pytest.mark.new
 @pytest.mark.parametrize(
-    "layername, expected_value", [("falsely_merged.tif", 1)]
+    "layername, expected_value", [("falsely_merged.tif", 3)]
 )
 def test_split_cells(set_widget_up, layername, expected_value):
     # test if split cells are calculated correctly
