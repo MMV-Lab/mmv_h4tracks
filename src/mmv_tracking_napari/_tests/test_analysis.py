@@ -156,8 +156,9 @@ def test_segmentation_evaluation(get_widget, score, area, frames):
 @pytest.mark.eval
 @pytest.mark.eval_tracking
 @pytest.mark.unit
+@pytest.mark.new
 @pytest.mark.parametrize(
-    "layername, expected_value", [("false positive.tif", 2)]
+    "layername, expected_value", [("false positive.tif", 2), ("false positive_1.tif", 3)]
 )
 def test_false_positives(set_widget_up, layername, expected_value):
     # test if false positives are calculated correctly
