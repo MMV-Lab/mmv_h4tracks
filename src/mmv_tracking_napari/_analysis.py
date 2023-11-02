@@ -987,15 +987,41 @@ class AnalysisWindow(QWidget):
                 # get IoU on all cells in eval at locations of id in gt
                 indices_of_id = np.where(gt_slice == id)
                 eval_ids = np.unique(eval_slice[indices_of_id])
-                ious = []
+                max_iou = -1
+                highest_match_eval_id = -1
                 for eval_id in eval_ids:
                     if eval_id == 0:
                         continue
                     iou = get_specific_iou(gt_slice, id, eval_slice, eval_id)
-                    ious.append(iou)
-                if len(ious) < 1 or not max(ious) > .4:
+                    if iou > max_iou:
+                        max_iou = iou
+                        highest_match_eval_id = eval_id
+                if not max_iou > .4:
                     fn += 1
-            return fn
+                    print("Largest IoU too small")
+                    continue
+                indices_of_reverse_id = np.where(eval_slice == eval_id)
+                reverse_ids = np.unique(gt_slice[indices_of_reverse_id])
+                ious = []
+                for reverse_id in reverse_ids:
+                    if reverse_id == 0:
+                        continue
+                    iou = get_specific_iou(gt_slice, reverse_id, eval_slice, eval_id)
+                    ious.append(iou)
+                if len(ious) < 2:
+                    print("Reverse IoU only has one match")
+                    continue
+                if max(ious) > max_iou:
+                    fn += 1
+                    print("Largest IoU large enough, but reverse IoU has larger")
+                    continue
+                max_reverse_iou = max(ious)
+                ious.remove(max(ious))
+                if max(ious) == max_reverse_iou:
+                    fn += .5
+            if int(fn) != fn:
+                raise ValueError("False negatives don't sum up to whole integer")
+            return int(fn)
         
         if platform.system() == "Windows":
             for i in range(len(segmentations)):
