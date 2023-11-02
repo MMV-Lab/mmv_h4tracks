@@ -459,7 +459,6 @@ class ProcessingWindow(QWidget):
             matches = []
             for i in range(len(slice_pairs)):
                 matches.append(match_centroids(slice_pairs[i]))
-            pass
         else:
             with Pool(AMOUNT_OF_PROCESSES) as p:
                 matches = p.map(match_centroids, slice_pairs)
@@ -520,7 +519,7 @@ class ProcessingWindow(QWidget):
                 next_id += 1
 
         tracks = tracks.astype(int)
-        np.save("tracks.npy", tracks) # TODO: why is this here?
+        #np.save("tracks.npy", tracks) # TODO: why is this here?
 
         QApplication.restoreOverrideCursor()
         return tracks, tracks_name
