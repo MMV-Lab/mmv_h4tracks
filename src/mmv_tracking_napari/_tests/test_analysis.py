@@ -156,7 +156,6 @@ def test_segmentation_evaluation(get_widget, score, area, frames):
 @pytest.mark.eval
 @pytest.mark.eval_tracking
 @pytest.mark.unit
-#@pytest.mark.new
 @pytest.mark.parametrize(
     "layername, expected_value", [("false positive.tif", 2), ("false positive_1.tif", 3)]
 )
@@ -174,7 +173,6 @@ def test_false_positives(set_widget_up, layername, expected_value):
 @pytest.mark.eval
 @pytest.mark.eval_tracking
 @pytest.mark.unit
-#@pytest.mark.new
 @pytest.mark.parametrize(
     "layername, expected_value, GT", [("false_negative.tif", 1, "GT.tif"), ("false_negative_1.tif", 5, "GT.tif"), ("false_negative_2.tif", 2, "GT_false_negative_2.tif")]
 )
@@ -192,7 +190,6 @@ def test_false_negatives(set_widget_up, layername, expected_value, GT):
 @pytest.mark.eval
 @pytest.mark.eval_tracking
 @pytest.mark.unit
-#@pytest.mark.new
 @pytest.mark.parametrize(
     "layername, expected_value", [("falsely_merged.tif", 3)]
 )
@@ -210,7 +207,6 @@ def test_split_cells(set_widget_up, layername, expected_value):
 @pytest.mark.eval
 @pytest.mark.eval_tracking
 @pytest.mark.unit
-@pytest.mark.new
 @pytest.mark.parametrize(
     "layername, expected_value", [("deleted_edge.npy", 2), ("justin_centroid_ausserhalb.npy", 2), ("justin_falsely_cut.npy", 0)]
 )
@@ -230,7 +226,6 @@ def test_added_edges(set_widget_up, layername, expected_value):
 @pytest.mark.eval
 @pytest.mark.eval_tracking
 @pytest.mark.unit
-@pytest.mark.new
 @pytest.mark.parametrize(
     "layername, expected_value", [("added_edge.npy", 1), ("justin_centroid_ausserhalb.npy", 2), ("justin_falsely_cut.npy", 0)]
 )

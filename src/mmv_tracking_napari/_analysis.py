@@ -177,27 +177,8 @@ class AnalysisWindow(QWidget):
             AMOUNT_OF_PROCESSES = np.maximum(1, int(multiprocessing.cpu_count() * 0.8))
         print("Running on {} processes max".format(AMOUNT_OF_PROCESSES))
 
-        global func
-
-        def func(track, segmentation):
-            id = track[0, 0]
-            sizes = []
-            for line in track:
-                _, z, y, x = line
-                seg_id = segmentation[z, y, x]
-                sizes.append(len(np.where(segmentation[z] == seg_id)[0]))
-            average = np.around(np.average(sizes), 3)
-            std_deviation = np.around(np.std(sizes), 3)
-            return [id, average, std_deviation]
-
-        if platform.system() == "Windows":
-            sizes = []
-            for i in range(len(track_and_segmentation)):
-                sizes.append(func(track_and_segmentation[i][0],
-                                  track_and_segmentation[i][1]))
-        else:
-            with Pool(AMOUNT_OF_PROCESSES) as p:
-                sizes = p.starmap(func, track_and_segmentation)
+        with Pool(AMOUNT_OF_PROCESSES) as p:
+            sizes = p.starmap(func, track_and_segmentation)
 
         return np.array(sizes)
 
@@ -918,47 +899,9 @@ class AnalysisWindow(QWidget):
         for i in range(len(gt_seg)):
             segmentations.append([gt_seg[i], eval_seg[i]])
         
-        global get_false_positives_layer
-        def get_false_positives_layer(gt_slice, eval_slice):
-            fp = 0
-            if np.array_equal(gt_slice, eval_slice):
-                print("layers are equal")
-                return fp
-            for id in np.unique(eval_slice):
-                if id == 0:
-                    print("skipping check for background")
-                    continue
-                # get IoU on all cells in gt at locations of id in eval
-                indices_of_id = np.where(eval_slice == id)
-                gt_ids = np.unique(gt_slice[indices_of_id])
-                ious = []
-                for gt_id in gt_ids:
-                    if gt_id == 0:
-                        # skipping IoU calculation with background
-                        continue
-                    iou = get_specific_iou(gt_slice, gt_id, eval_slice, id)
-                    ious.append(iou)
-                if len(ious) < 1:
-                    fp += 1
-                    print("No overlapping cell, fp")
-                    continue
-                if max(ious) > .4:
-                    print("overlap high enough")
-                    continue
-                ious.remove(max(ious))
-                if len(ious) < 1 or max(ious) < .2:
-                    print("single low overlap or multiple very low overlaps, fp")
-                    fp += 1
-            return fp
-        
-        if platform.system() == "Windows":
-            for i in range(len(segmentations)):
-                fp += get_false_positives_layer(segmentations[i][0],
-                                                segmentations[i][1])
-        else:
-            with Pool(AMOUNT_OF_PROCESSES) as p:
-                for result in p.starmap(get_false_positives_layer, segmentations):
-                    fp += result
+        with Pool(AMOUNT_OF_PROCESSES) as p:
+            for result in p.starmap(get_false_positives_layer, segmentations):
+                fp += result
         print(f"False Positives: {fp}")
         return fp
     
@@ -976,61 +919,9 @@ class AnalysisWindow(QWidget):
         for i in range(len(gt_seg)):
             segmentations.append([gt_seg[i], eval_seg[i]])
         
-        global get_false_negatives_layer
-        def get_false_negatives_layer(gt_slice, eval_slice):
-            fn = 0
-            if np.array_equal(gt_slice, eval_slice):
-                return fn
-            for id in np.unique(gt_slice):
-                if id == 0:
-                    continue
-                # get IoU on all cells in eval at locations of id in gt
-                indices_of_id = np.where(gt_slice == id)
-                eval_ids = np.unique(eval_slice[indices_of_id])
-                max_iou = -1
-                highest_match_eval_id = -1
-                for eval_id in eval_ids:
-                    if eval_id == 0:
-                        continue
-                    iou = get_specific_iou(gt_slice, id, eval_slice, eval_id)
-                    if iou > max_iou:
-                        max_iou = iou
-                        highest_match_eval_id = eval_id
-                if not max_iou > .4:
-                    fn += 1
-                    print("Largest IoU too small")
-                    continue
-                indices_of_reverse_id = np.where(eval_slice == eval_id)
-                reverse_ids = np.unique(gt_slice[indices_of_reverse_id])
-                ious = []
-                for reverse_id in reverse_ids:
-                    if reverse_id == 0:
-                        continue
-                    iou = get_specific_iou(gt_slice, reverse_id, eval_slice, eval_id)
-                    ious.append(iou)
-                if len(ious) < 2:
-                    print("Reverse IoU only has one match")
-                    continue
-                if max(ious) > max_iou:
-                    fn += 1
-                    print("Largest IoU large enough, but reverse IoU has larger")
-                    continue
-                max_reverse_iou = max(ious)
-                ious.remove(max(ious))
-                if max(ious) == max_reverse_iou:
-                    fn += .5
-            if int(fn) != fn:
-                raise ValueError("False negatives don't sum up to whole integer")
-            return int(fn)
-        
-        if platform.system() == "Windows":
-            for i in range(len(segmentations)):
-                fn += get_false_negatives_layer(segmentations[i][0],
-                                                segmentations[i][1])
-        else:
-            with Pool(AMOUNT_OF_PROCESSES) as p:
-                for result in p.starmap(get_false_negatives_layer, segmentations):
-                    fn += result
+        with Pool(AMOUNT_OF_PROCESSES) as p:
+            for result in p.starmap(get_false_negatives_layer, segmentations):
+                fn += result
         print(f"False Negatives: {fn}")
         return fn
     
@@ -1047,41 +938,10 @@ class AnalysisWindow(QWidget):
         segmentations = []
         for i in range(len(gt_seg)):
             segmentations.append([gt_seg[i], eval_seg[i]])
-            
-        global get_split_cells_layer
-        def get_split_cells_layer(gt_slice, eval_slice):
-            sc = 0
-            if np.array_equal(gt_slice, eval_slice):
-                return sc
-            for id in np.unique(eval_slice):
-                if id == 0:
-                    continue
-                # get IoU on all cells in gt at locations of id in eval
-                indices_of_id = np.where(eval_slice == id)
-                gt_ids = np.unique(gt_slice[indices_of_id])
-                ious = []
-                for gt_id in gt_ids:
-                    if gt_id == 0:
-                        continue
-                    iou = get_specific_iou(gt_slice, gt_id, eval_slice, id)
-                    ious.append(iou)
-                if len(ious) < 2: # or max(ious) > .4:
-                    print("cell has less than two matches")
-                    continue
-                ious.remove(max(ious))
-                if max(ious) >= .2:
-                    print("second match has large enough area, sc")
-                    sc += 1
-            return sc
         
-        if platform.system() == "Windows":
-            for i in range(len(segmentations)):
-                sc += get_split_cells_layer(segmentations[i][0],
-                                            segmentations[i][1])
-        else:
-            with Pool(AMOUNT_OF_PROCESSES) as p:
-                for result in p.starmap(get_split_cells_layer, segmentations):
-                    sc += result
+        with Pool(AMOUNT_OF_PROCESSES) as p:
+            for result in p.starmap(get_split_cells_layer, segmentations):
+                sc += result
         print(f"Split Cells: {sc}")
         return sc
     
@@ -1158,26 +1018,21 @@ class AnalysisWindow(QWidget):
     def _display_evaluation_result(self, title, results, frames):
         self.results_window = ResultsWindow(title, results, frames)
         
-global get_specific_intersection
 def get_specific_intersection(slice1, id1, slice2, id2):
     return np.sum((slice1 == id1) & (slice2 == id2))
 
-global get_specific_union
 def get_specific_union(slice1, id1, slice2, id2):
     return np.sum((slice1 == id1) | (slice2 == id2))
 
-global get_specific_iou
 def get_specific_iou(slice1, id1, slice2, id2):
     intersection = get_specific_intersection(slice1, id1, slice2, id2)
     union = get_specific_union(slice1, id1, slice2, id2)
     return intersection / union
 
-global get_id_from_track
 def get_id_from_track(label_layer, track):
     z,y,x = track
     return label_layer[z,y,x]
 
-global get_match_cell
 def get_match_cell(base_layer, compare_layer, base_id, slice_id):
     # return id of matched cell
     # check for highest iou (above threshold)
@@ -1200,7 +1055,6 @@ def get_match_cell(base_layer, compare_layer, base_id, slice_id):
         return 0
     return int(ious[np.where(ious[:,1] == max_iou),0][0][0])
 
-global is_connected
 def is_connected(tracks, centroid1, centroid2):
     for i in range(len(tracks) - 1):
         if centroid1[0] == tracks[i,1] and centroid1[1] == tracks[i,2] and centroid1[2] == tracks[i,3]:
@@ -1209,6 +1063,120 @@ def is_connected(tracks, centroid1, centroid2):
                 centroid2[0] == tracks[i+1,1] and centroid2[1] == tracks[i+1,2] and centroid2[2] == tracks[i+1,3]
             )
     return False
+
+def func(track, segmentation):
+    id = track[0, 0]
+    sizes = []
+    for line in track:
+        _, z, y, x = line
+        seg_id = segmentation[z, y, x]
+        sizes.append(len(np.where(segmentation[z] == seg_id)[0]))
+    average = np.around(np.average(sizes), 3)
+    std_deviation = np.around(np.std(sizes), 3)
+    return [id, average, std_deviation]
+
+def get_false_positives_layer(gt_slice, eval_slice):
+    fp = 0
+    if np.array_equal(gt_slice, eval_slice):
+        print("layers are equal")
+        return fp
+    for id in np.unique(eval_slice):
+        if id == 0:
+            print("skipping check for background")
+            continue
+        # get IoU on all cells in gt at locations of id in eval
+        indices_of_id = np.where(eval_slice == id)
+        gt_ids = np.unique(gt_slice[indices_of_id])
+        ious = []
+        for gt_id in gt_ids:
+            if gt_id == 0:
+                # skipping IoU calculation with background
+                continue
+            iou = get_specific_iou(gt_slice, gt_id, eval_slice, id)
+            ious.append(iou)
+        if len(ious) < 1:
+            fp += 1
+            print("No overlapping cell, fp")
+            continue
+        if max(ious) > .4:
+            print("overlap high enough")
+            continue
+        ious.remove(max(ious))
+        if len(ious) < 1 or max(ious) < .2:
+            print("single low overlap or multiple very low overlaps, fp")
+            fp += 1
+    return fp
+
+def get_false_negatives_layer(gt_slice, eval_slice):
+    fn = 0
+    if np.array_equal(gt_slice, eval_slice):
+        return fn
+    for id in np.unique(gt_slice):
+        if id == 0:
+            continue
+        # get IoU on all cells in eval at locations of id in gt
+        indices_of_id = np.where(gt_slice == id)
+        eval_ids = np.unique(eval_slice[indices_of_id])
+        max_iou = -1
+        highest_match_eval_id = -1
+        for eval_id in eval_ids:
+            if eval_id == 0:
+                continue
+            iou = get_specific_iou(gt_slice, id, eval_slice, eval_id)
+            if iou > max_iou:
+                max_iou = iou
+                highest_match_eval_id = eval_id
+        if not max_iou > .4:
+            fn += 1
+            print("Largest IoU too small")
+            continue
+        indices_of_reverse_id = np.where(eval_slice == eval_id)
+        reverse_ids = np.unique(gt_slice[indices_of_reverse_id])
+        ious = []
+        for reverse_id in reverse_ids:
+            if reverse_id == 0:
+                continue
+            iou = get_specific_iou(gt_slice, reverse_id, eval_slice, eval_id)
+            ious.append(iou)
+        if len(ious) < 2:
+            print("Reverse IoU only has one match")
+            continue
+        if max(ious) > max_iou:
+            fn += 1
+            print("Largest IoU large enough, but reverse IoU has larger")
+            continue
+        max_reverse_iou = max(ious)
+        ious.remove(max(ious))
+        if max(ious) == max_reverse_iou:
+            fn += .5
+    if int(fn) != fn:
+        raise ValueError("False negatives don't sum up to whole integer")
+    return int(fn)
+
+def get_split_cells_layer(gt_slice, eval_slice):
+    sc = 0
+    if np.array_equal(gt_slice, eval_slice):
+        return sc
+    for id in np.unique(eval_slice):
+        if id == 0:
+            continue
+        # get IoU on all cells in gt at locations of id in eval
+        indices_of_id = np.where(eval_slice == id)
+        gt_ids = np.unique(gt_slice[indices_of_id])
+        ious = []
+        for gt_id in gt_ids:
+            if gt_id == 0:
+                continue
+            iou = get_specific_iou(gt_slice, gt_id, eval_slice, id)
+            ious.append(iou)
+        if len(ious) < 2: # or max(ious) > .4:
+            print("cell has less than two matches")
+            continue
+        ious.remove(max(ious))
+        if max(ious) >= .2:
+            print("second match has large enough area, sc")
+            sc += 1
+    return sc
         
 class ResultsWindow(QWidget):
     def __init__(self, title, results, frames):

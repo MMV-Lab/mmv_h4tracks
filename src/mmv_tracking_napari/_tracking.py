@@ -47,7 +47,7 @@ class TrackingWindow(QWidget):
         self.parent = parent
         self.viewer = parent.viewer
         try:
-            self.setStyleSheet(napari.qt.get_stylesheet(theme = "dark"))
+            self.setStyleSheet(napari.qt.get_stylesheet(theme="dark"))
         except TypeError:
             pass
 
@@ -55,7 +55,9 @@ class TrackingWindow(QWidget):
 
         # Labels
         label_trajectory = QLabel("Filter tracks by cell:")
-        label_remove_correspondence = QLabel("Remove tracking for later slices for cell:")
+        label_remove_correspondence = QLabel(
+            "Remove tracking for later slices for cell:"
+        )
         label_insert_correspondence = QLabel("Cell should be tracked with second cell:")
 
         # Buttons
@@ -81,7 +83,7 @@ class TrackingWindow(QWidget):
         ### Organize objects via widgets
         content = QWidget()
         content.setLayout(QGridLayout())
-        
+
         content.layout().addWidget(label_trajectory, 3, 0)
         content.layout().addWidget(self.lineedit_trajectory, 3, 1)
         content.layout().addWidget(btn_delete_displayed_tracks, 3, 2)
@@ -131,7 +133,7 @@ class TrackingWindow(QWidget):
 
         print("Displaying tracks {}".format(ids))
         if ids == []:
-            tracks_layer.data = self.parent.tracks 
+            tracks_layer.data = self.parent.tracks
             return
         tracks_data = [track for track in self.parent.tracks if track[0] in ids]
         if not tracks_data:
@@ -181,8 +183,9 @@ class TrackingWindow(QWidget):
         self.btn_remove_correspondence.setText("Unlink")
         self._reset()
 
-        
-        label_layer = grab_layer(self.viewer, self.parent.combobox_segmentation.currentText())
+        label_layer = grab_layer(
+            self.viewer, self.parent.combobox_segmentation.currentText()
+        )
         if label_layer is None:
             notify("Please make sure the label layer exists!")
             return
@@ -258,7 +261,7 @@ class TrackingWindow(QWidget):
 
         tracks = cleaned_tracks[0]
         self.parent.tracks = cleaned_tracks[1]
-        
+
         if tracks.size > 0:
             tracks_layer.data = tracks
         elif self.parent.tracks.size > 0:
@@ -275,7 +278,9 @@ class TrackingWindow(QWidget):
         self._reset()
         # print(self.track_cells)
 
-        label_layer = grab_layer(self.viewer, self.parent.combobox_segmentation.currentText())
+        label_layer = grab_layer(
+            self.viewer, self.parent.combobox_segmentation.currentText()
+        )
         if label_layer is None:
             notify("Please make sure the label layer exists!")
             return
@@ -336,7 +341,7 @@ class TrackingWindow(QWidget):
             if connected_ids[1] > -1:
                 self.track_cells.remove(self.track_cells[-1])
 
-            if min(connected_ids) == -1: # TODO: TEST IF WORKS NOW
+            if min(connected_ids) == -1:  # TODO: TEST IF WORKS NOW
                 track_id = max(connected_ids)
             else:
                 track_id = min(connected_ids)
@@ -360,7 +365,9 @@ class TrackingWindow(QWidget):
 
             @layer.mouse_drag_callbacks.append
             def _select_cells(layer, event):
-                label_layer = grab_layer(self.viewer, self.parent.combobox_segmentation.currentText())
+                label_layer = grab_layer(
+                    self.viewer, self.parent.combobox_segmentation.currentText()
+                )
                 if label_layer is None:
                     notify("Please make sure the label layer exists!")
                     self._reset()
@@ -390,7 +397,9 @@ class TrackingWindow(QWidget):
 
             @layer.mouse_drag_callbacks.append
             def _proximity_track(layer, event):
-                label_layer = grab_layer(self.viewer, self.parent.combobox_segmentation.currentText())
+                label_layer = grab_layer(
+                    self.viewer, self.parent.combobox_segmentation.currentText()
+                )
                 if label_layer is None:
                     notify("Please make sure the label layer exists!")
                     return
@@ -432,7 +441,9 @@ class TrackingWindow(QWidget):
     def _proximity_track_all_worker(self):
         self._reset()
         self.parent.tracks = np.empty((1, 4), dtype=np.int8)
-        label_layer = grab_layer(self.viewer, self.parent.combobox_segmentation.currentText())
+        label_layer = grab_layer(
+            self.viewer, self.parent.combobox_segmentation.currentText()
+        )
         if label_layer is None:
             notify("Please make sure the label layer exists!")
             return
@@ -450,14 +461,8 @@ class TrackingWindow(QWidget):
                     continue
                 data.append([label_layer.data, start_slice, id])
 
-        if platform.system() == "Windows":
-            ret = []
-            for i in range(len(data)):
-                ret.append(func(data[i][0], data[i][1], data[i][2]))
-            pass
-        else:
-            with Pool(AMOUNT_OF_PROCESSES) as p:
-                ret = p.starmap(func, data)
+        with Pool(AMOUNT_OF_PROCESSES) as p:
+            ret = p.starmap(func, data)
 
         track_id = 1
         for entry in ret:
