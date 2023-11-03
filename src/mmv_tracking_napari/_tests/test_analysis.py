@@ -207,8 +207,9 @@ def test_split_cells(set_widget_up, layername, expected_value):
 @pytest.mark.eval
 @pytest.mark.eval_tracking
 @pytest.mark.unit
+@pytest.mark.new
 @pytest.mark.parametrize(
-    "layername, expected_value", [("deleted_edge.npy", 2), ("justin_centroid_ausserhalb.npy", 2), ("justin_falsely_cut.npy", 0)]
+    "layername, expected_value", [("added_edge.npy", 0), ("deleted_edge.npy", 4), ("justin_centroid_ausserhalb.npy", 2), ("justin_falsely_cut.npy", 0), ("switch.npy", 4)]
 )
 def test_added_edges(set_widget_up, layername, expected_value):
     # test if added edges are calculated correctly
@@ -226,8 +227,9 @@ def test_added_edges(set_widget_up, layername, expected_value):
 @pytest.mark.eval
 @pytest.mark.eval_tracking
 @pytest.mark.unit
+@pytest.mark.new
 @pytest.mark.parametrize(
-    "layername, expected_value", [("added_edge.npy", 1), ("justin_centroid_ausserhalb.npy", 2), ("justin_falsely_cut.npy", 0)]
+    "layername, expected_value", [("deleted_edge.npy", 4), ("added_edge.npy", 6), ("justin_centroid_ausserhalb.npy", 2), ("justin_falsely_cut.npy", 0), ("switch.npy", 4)]
 )
 def test_deleted_edges(set_widget_up, layername, expected_value):
     # test if deleted edges are calculated correctly
