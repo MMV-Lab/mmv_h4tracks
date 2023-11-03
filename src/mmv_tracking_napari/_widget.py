@@ -6,7 +6,6 @@ from qtpy.QtWidgets import (
     QPushButton,
     QRadioButton,
     QVBoxLayout,
-    QHBoxLayout,
     QGridLayout,
     QScrollArea,
     QMessageBox,
@@ -103,10 +102,9 @@ class MMVTracking(QWidget):
 
         # Radio Buttons
         self.rb_eco = QRadioButton("Eco")
-        # self.rb_eco.toggle()
         rb_heavy = QRadioButton("Regular")
         rb_heavy.toggle()
-        
+
         # Comboboxes
         self.combobox_image = QComboBox()
         self.combobox_image.addItem("")
@@ -117,9 +115,9 @@ class MMVTracking(QWidget):
         self.layer_comboboxes = [
             self.combobox_image,
             self.combobox_segmentation,
-            self.combobox_tracks
+            self.combobox_tracks,
         ]
-        
+
         # Horizontal lines
         line = QWidget()
         line.setFixedHeight(4)
@@ -169,27 +167,31 @@ class MMVTracking(QWidget):
         self.viewer.layers.events.inserted.connect(self.add_entry_to_comboboxes)
         self.viewer.layers.events.removed.connect(self.remove_entry_from_comboboxes)
         for layer in self.viewer.layers:
-            layer.events.name.connect(self.rename_entry_in_comboboxes) # doesn't contain index
+            layer.events.name.connect(
+                self.rename_entry_in_comboboxes
+            )  # doesn't contain index
         self.viewer.layers.events.moving.connect(self.reorder_entry_in_comboboxes)
-        
+
     def add_entry_to_comboboxes(self, event):
         for combobox in self.layer_comboboxes:
             combobox.addItem(event.value.name)
-        event.value.events.name.connect(self.rename_entry_in_comboboxes) # contains index
-        
+        event.value.events.name.connect(
+            self.rename_entry_in_comboboxes
+        )  # contains index
+
     def remove_entry_from_comboboxes(self, event):
         for combobox in self.layer_comboboxes:
             combobox.removeItem(event.index + 1)
 
     def rename_entry_in_comboboxes(self, event):
-        if not hasattr(event, 'index'):
+        if not hasattr(event, "index"):
             event.index = self.viewer.layers.index(event.source.name)
         for combobox in self.layer_comboboxes:
             index = combobox.currentIndex()
             combobox.removeItem(event.index + 1)
             combobox.insertItem(event.index + 1, event.source.name)
             combobox.setCurrentIndex(index)
-        
+
     def reorder_entry_in_comboboxes(self, event):
         for combobox in self.layer_comboboxes:
             current_item = combobox.currentText()
@@ -201,7 +203,7 @@ class MMVTracking(QWidget):
             combobox.insertItem(new_index, item)
             index = combobox.findText(current_item)
             combobox.setCurrentIndex(index)
-            
+
     """def apply_on_clicks(self, event):
         for on_click in self.on_clicks:
             layer = event.value
@@ -272,7 +274,7 @@ class MMVTracking(QWidget):
 
         print("Adding layers")
         # add layers to viewer
-        #try:
+        # try:
         self.viewer.add_image(zarr_file["raw_data"][:], name="Raw Image")
         segmentation = zarr_file["segmentation_data"][:]
 
@@ -302,7 +304,10 @@ class MMVTracking(QWidget):
 
         self.zarr = zarr_file
         self.tracks = filtered_tracks
-        self.initial_layers = [copy.deepcopy(segmentation), copy.deepcopy(filtered_tracks)]
+        self.initial_layers = [
+            copy.deepcopy(segmentation),
+            copy.deepcopy(filtered_tracks),
+        ]
         self.combobox_image.setCurrentText("Raw Image")
         self.combobox_segmentation.setCurrentText("Segmentation Data")
         self.combobox_tracks.setCurrentText("Tracks")
@@ -316,36 +321,45 @@ class MMVTracking(QWidget):
         if not hasattr(self, "zarr"):
             self.save_as()
             return
-        raw_data = layer_select(self, "Raw Image")
+        raw_data = self.combobox_image.currentText()
+        """raw_data = layer_select(self, "Raw Image")
         if not raw_data[1]:
             return
-        raw_data = raw_data[0]
-        segmentation_data = layer_select(self, "Segmentation Data")
+        raw_data = raw_data[0]"""
+        raw_layer = grab_layer(raw_data)
+        segmentation_data = self.combobox_segmentation.currentText()
+        """segmentation_data = layer_select(self, "Segmentation Data")
         if not segmentation_data[1]:
             return
-        segmentation_data = segmentation_data[0]
-        track_data = layer_select(self, "Tracks")
+        segmentation_data = segmentation_data[0]"""
+        segmentation_layer = grab_layer(segmentation_data)
+        track_data = self.combobox_tracks.currentText()
+        """track_data = layer_select(self, "Tracks")
         if not track_data[1]:
             return
-        track_data = track_data[0]
+        track_data = track_data[0]"""
+        track_layer = grab_layer(track_data)
         layers = [raw_layer, segmentation_layer, track_layer]
         save_zarr(self, self.zarr, layers, self.tracks)
-                
+
     def save_as(self):
-        raw = layer_select(self, "Raw Image")
+        raw_name = self.combobox_image.currentText()
+        """raw = layer_select(self, "Raw Image")
         if not raw[1]:
             return
-        raw_name= raw[0]
+        raw_name= raw[0]"""
         raw_data = grab_layer(self.viewer, raw_name).data
-        segmentation = layer_select(self, "Segmentation Data")
+        segmentation_name = self.combobox_segmentation.currentText()
+        """segmentation = layer_select(self, "Segmentation Data")
         if not segmentation[1]:
             return
-        segmentation_name = segmentation[0]
+        segmentation_name = segmentation[0]"""
         segmentation_data = grab_layer(self.viewer, segmentation_name).data
-        tracks = layer_select(self, "Tracks")
+        tracks_name = self.combobox_tracks.currentText()
+        """tracks = layer_select(self, "Tracks")
         if not tracks[1]:
             return
-        track_name = tracks[0]
+        track_name = tracks[0]"""
         track_data = grab_layer(self.viewer, track_name).data
 
         dialog = QFileDialog()
@@ -353,12 +367,21 @@ class MMVTracking(QWidget):
         if path == ".zarr":
             return
         print(path)
-        z = zarr.open(path, mode='w')
-        r = z.create_dataset('raw_data', shape = raw_data.shape, dtype = 'f8', data = raw_data)
-        s = z.create_dataset('segmentation_data', shape = segmentation_data.shape, dtype = 'i4', data = segmentation_data)
-        t = z.create_dataset('tracking_data', shape = track_data.shape, dtype = 'i4', data = track_data)
+        z = zarr.open(path, mode="w")
+        r = z.create_dataset(
+            "raw_data", shape=raw_data.shape, dtype="f8", data=raw_data
+        )
+        s = z.create_dataset(
+            "segmentation_data",
+            shape=segmentation_data.shape,
+            dtype="i4",
+            data=segmentation_data,
+        )
+        t = z.create_dataset(
+            "tracking_data", shape=track_data.shape, dtype="i4", data=track_data
+        )
 
-    def _processing(self, hide = False):
+    def _processing(self, hide=False):
         """
         Opens a [ProcessingWindow]
         """
@@ -367,7 +390,7 @@ class MMVTracking(QWidget):
         if not hide:
             self.processing_window.show()
 
-    def _segmentation(self, hide = False):
+    def _segmentation(self, hide=False):
         """
         Opens a [SegmentationWindow]
         """
@@ -376,7 +399,7 @@ class MMVTracking(QWidget):
         if not hide:
             self.segmentation_window.show()
 
-    def _tracking(self, hide = False):
+    def _tracking(self, hide=False):
         """
         Opens a [TrackingWindow]
         """
@@ -385,7 +408,7 @@ class MMVTracking(QWidget):
         if not hide:
             self.tracking_window.show()
 
-    def _analysis(self, hide = False):
+    def _analysis(self, hide=False):
         """
         Opens an [AnalysisWindow]
         """

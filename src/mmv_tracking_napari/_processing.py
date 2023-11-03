@@ -19,7 +19,6 @@ from qtpy.QtWidgets import (
 from qtpy.QtCore import Qt
 from napari.qt.threading import thread_worker
 from scipy import ndimage, spatial, optimize
-import napari
 
 from ._logger import notify, choice_dialog
 from ._grabber import grab_layer
@@ -219,50 +218,14 @@ class ProcessingWindow(QWidget):
             AMOUNT_OF_PROCESSES = np.maximum(1, int(multiprocessing.cpu_count() * 0.8))
         print("Running on {} processes max".format(AMOUNT_OF_PROCESSES))
 
-        global segment_slice
-
-        def segment_slice(slice, parameters):
-            """
-            Calculate segmentation for a single slice
-
-            Parameters
-            ----------
-            slice : napari
-                the slice of raw image data to calculate segmentation for
-            parameters : dict
-                the parameters for the segmentation model
-
-            Returns
-            -------
-            """
-            model = models.CellposeModel(
-                gpu=False, pretrained_model=parameters["model_path"]
-            )
-            mask = model.eval(
-                slice,
-                channels=[parameters["chan"], parameters["chan2"]],
-                diameter=parameters["diameter"],
-                flow_threshold=parameters["flow_threshold"],
-                cellprob_threshold=parameters["cellprob_threshold"],
-            )[0]
-            return mask
-
         data_with_parameters = []
         for slice in data:
             data_with_parameters.append((slice, parameters))
 
-        if platform.system() == "Windows":
-            mask = []
-            for i in range(len(data_with_parameters)):
-                mask.append(segment_slice(data_with_parameters[i][0],
-                                          data_with_parameters[i][1]))
+        with Pool(AMOUNT_OF_PROCESSES) as p:
+            mask = p.starmap(segment_slice, data_with_parameters)
             mask = np.asarray(mask)
-            
-        else:
-            with Pool(AMOUNT_OF_PROCESSES) as p:
-                mask = p.starmap(segment_slice, data_with_parameters)
-                mask = np.asarray(mask)
-                print("Done calculating segmentation")
+            print("Done calculating segmentation")
 
         QApplication.restoreOverrideCursor()
         return mask
@@ -374,23 +337,8 @@ class ProcessingWindow(QWidget):
             AMOUNT_OF_PROCESSES = np.maximum(1, int(multiprocessing.cpu_count() * 0.8))
         print("Running on {} processes max".format(AMOUNT_OF_PROCESSES))
 
-        global calculate_centroids
-
-        # calculate centroids
-        def calculate_centroids(slice):
-            labels = np.unique(slice)[1:]
-            centroids = ndimage.center_of_mass(slice, labels=slice, index=labels)
-
-            return (centroids, labels)
-
-        if platform.system() == "Windows":
-            extended_centroids = []
-            for i in range(len(data)):
-                extended_centroids.append(calculate_centroids(data[i]))
-
-        else:
-            with Pool(AMOUNT_OF_PROCESSES) as p:
-                extended_centroids = p.map(calculate_centroids, data)
+        with Pool(AMOUNT_OF_PROCESSES) as p:
+            extended_centroids = p.map(calculate_centroids, data)
 
         # calculate connections between centroids of adjacent slices
 
@@ -401,67 +349,8 @@ class ProcessingWindow(QWidget):
         APPROX_INF = 65535
         MAX_MATCHING_DIST = 45
 
-        global match_centroids
-
-        def match_centroids(slice_pair):
-            num_cells_parent = len(slice_pair[0][0])
-            num_cells_child = len(slice_pair[1][0])
-
-            # calculate distance between each pair of cells
-            cost_mat = spatial.distance.cdist(slice_pair[0][0], slice_pair[1][0])
-
-            # if the distance is too far, change to approx. Inf.
-            cost_mat[cost_mat > MAX_MATCHING_DIST] = APPROX_INF
-
-            # add edges from cells in previous frame to auxillary vertices
-            # in order to accomendate segmentation errors and leaving cells
-            cost_mat_aug = (
-                MAX_MATCHING_DIST
-                * 1.2
-                * np.ones(
-                    (num_cells_parent, num_cells_child + num_cells_parent), dtype=float
-                )
-            )
-            cost_mat_aug[:num_cells_parent, :num_cells_child] = cost_mat[:, :]
-
-            # solve the optimization problem
-
-            if (
-                sum(sum(1 * np.isnan(cost_mat))) > 0
-            ):  # check if there is at least one np.nan in cost_mat
-                print("TODO: Remove this (Justin)")
-                return
-            row_ind, col_ind = optimize.linear_sum_assignment(cost_mat_aug)
-
-            matched_pairs = []
-
-            parent_centroids = slice_pair[0][0]
-            parent_ids = slice_pair[0][1]
-            child_centroids = slice_pair[1][0]
-            child_ids = slice_pair[1][1]
-
-            for i in range(len(row_ind)):
-                parent_centroid = np.around(parent_centroids[row_ind[i]])
-                parent_id = parent_ids[row_ind[i]]
-                try:
-                    child_centroid = np.around(child_centroids[col_ind[i]])
-                    child_id = child_ids[col_ind[i]]
-                except:
-                    continue
-
-                matched_pairs.append(
-                    ([parent_centroid, parent_id], [child_centroid, child_id])
-                )
-
-            return matched_pairs
-
-        if platform.system() == "Windows":
-            matches = []
-            for i in range(len(slice_pairs)):
-                matches.append(match_centroids(slice_pairs[i]))
-        else:
-            with Pool(AMOUNT_OF_PROCESSES) as p:
-                matches = p.map(match_centroids, slice_pairs)
+        with Pool(AMOUNT_OF_PROCESSES) as p:
+            matches = p.map(match_centroids, slice_pairs)
 
         tracks = np.array([])
         next_id = 0
@@ -536,3 +425,88 @@ class ProcessingWindow(QWidget):
         np.set_printoptions(threshold=sys.maxsize)
         print(self.viewer.layers[self.viewer.layers.index("Tracks")].data)
         QApplication.restoreOverrideCursor()
+
+def segment_slice(slice, parameters):
+    """
+    Calculate segmentation for a single slice
+
+    Parameters
+    ----------
+    slice : napari
+        the slice of raw image data to calculate segmentation for
+    parameters : dict
+        the parameters for the segmentation model
+
+    Returns
+    -------
+    """
+    model = models.CellposeModel(
+        gpu=False, pretrained_model=parameters["model_path"]
+    )
+    mask = model.eval(
+        slice,
+        channels=[parameters["chan"], parameters["chan2"]],
+        diameter=parameters["diameter"],
+        flow_threshold=parameters["flow_threshold"],
+        cellprob_threshold=parameters["cellprob_threshold"],
+    )[0]
+    return mask
+
+# calculate centroids
+def calculate_centroids(slice):
+    labels = np.unique(slice)[1:]
+    centroids = ndimage.center_of_mass(slice, labels=slice, index=labels)
+
+    return (centroids, labels)
+
+def match_centroids(slice_pair):
+    num_cells_parent = len(slice_pair[0][0])
+    num_cells_child = len(slice_pair[1][0])
+
+    # calculate distance between each pair of cells
+    cost_mat = spatial.distance.cdist(slice_pair[0][0], slice_pair[1][0])
+
+    # if the distance is too far, change to approx. Inf.
+    cost_mat[cost_mat > MAX_MATCHING_DIST] = APPROX_INF
+
+    # add edges from cells in previous frame to auxillary vertices
+    # in order to accomendate segmentation errors and leaving cells
+    cost_mat_aug = (
+        MAX_MATCHING_DIST
+        * 1.2
+        * np.ones(
+            (num_cells_parent, num_cells_child + num_cells_parent), dtype=float
+        )
+    )
+    cost_mat_aug[:num_cells_parent, :num_cells_child] = cost_mat[:, :]
+
+    # solve the optimization problem
+
+    if (
+        sum(sum(1 * np.isnan(cost_mat))) > 0
+    ):  # check if there is at least one np.nan in cost_mat
+        print("TODO: Remove this (Justin)")
+        return
+    row_ind, col_ind = optimize.linear_sum_assignment(cost_mat_aug)
+
+    matched_pairs = []
+
+    parent_centroids = slice_pair[0][0]
+    parent_ids = slice_pair[0][1]
+    child_centroids = slice_pair[1][0]
+    child_ids = slice_pair[1][1]
+
+    for i in range(len(row_ind)):
+        parent_centroid = np.around(parent_centroids[row_ind[i]])
+        parent_id = parent_ids[row_ind[i]]
+        try:
+            child_centroid = np.around(child_centroids[col_ind[i]])
+            child_id = child_ids[col_ind[i]]
+        except:
+            continue
+
+        matched_pairs.append(
+            ([parent_centroid, parent_id], [child_centroid, child_id])
+        )
+
+    return matched_pairs
