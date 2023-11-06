@@ -326,19 +326,19 @@ class MMVTracking(QWidget):
         if not raw_data[1]:
             return
         raw_data = raw_data[0]"""
-        raw_layer = grab_layer(raw_data)
+        raw_layer = grab_layer(self.viewer, raw_data)
         segmentation_data = self.combobox_segmentation.currentText()
         """segmentation_data = layer_select(self, "Segmentation Data")
         if not segmentation_data[1]:
             return
         segmentation_data = segmentation_data[0]"""
-        segmentation_layer = grab_layer(segmentation_data)
+        segmentation_layer = grab_layer(self.viewer, segmentation_data)
         track_data = self.combobox_tracks.currentText()
         """track_data = layer_select(self, "Tracks")
         if not track_data[1]:
             return
         track_data = track_data[0]"""
-        track_layer = grab_layer(track_data)
+        track_layer = grab_layer(self.viewer, track_data)
         layers = [raw_layer, segmentation_layer, track_layer]
         save_zarr(self, self.zarr, layers, self.tracks)
 
@@ -360,7 +360,7 @@ class MMVTracking(QWidget):
         if not tracks[1]:
             return
         track_name = tracks[0]"""
-        track_data = grab_layer(self.viewer, track_name).data
+        track_data = grab_layer(self.viewer, tracks_name).data
 
         dialog = QFileDialog()
         path = f"{dialog.getSaveFileName()[0]}.zarr"

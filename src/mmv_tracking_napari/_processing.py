@@ -346,9 +346,6 @@ class ProcessingWindow(QWidget):
         for i in range(1, len(data)):
             slice_pairs.append((extended_centroids[i - 1], extended_centroids[i]))
 
-        APPROX_INF = 65535
-        MAX_MATCHING_DIST = 45
-
         with Pool(AMOUNT_OF_PROCESSES) as p:
             matches = p.map(match_centroids, slice_pairs)
 
@@ -460,6 +457,9 @@ def calculate_centroids(slice):
     return (centroids, labels)
 
 def match_centroids(slice_pair):
+    APPROX_INF = 65535
+    MAX_MATCHING_DIST = 45
+    
     num_cells_parent = len(slice_pair[0][0])
     num_cells_child = len(slice_pair[1][0])
 

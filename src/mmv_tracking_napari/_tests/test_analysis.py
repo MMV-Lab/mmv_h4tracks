@@ -9,6 +9,8 @@ PATH = f"{os.path.dirname(__file__)}/data"
 
 @pytest.fixture
 def set_widget_up(make_napari_viewer):
+    SEGMENTATION_GT = "GT.tif"
+    TRACKS_GT = "GT_tracks.npy"
     viewer = make_napari_viewer()
     my_widget = MMVTracking(viewer)
     """im = tifffile.imread(f"{PATH}/images/Raw Image.tif")
@@ -28,6 +30,8 @@ def set_widget_up(make_napari_viewer):
             tracks,
             name = name
         )
+    my_widget.combobox_segmentation.setCurrentIndex(my_widget.combobox_segmentation.findText(SEGMENTATION_GT))
+    my_widget.combobox_tracks.setCurrentIndex(my_widget.combobox_tracks.findText(TRACKS_GT))
     yield my_widget
 
 @pytest.fixture

@@ -50,7 +50,7 @@ class AnalysisWindow(QWidget):
         self.setLayout(QVBoxLayout())
         self.setWindowTitle("Analysis")
         try:
-            self.setStyleSheet(napari.qt.get_stylesheet(theme = "dark"))
+            self.setStyleSheet(napari.qt.get_stylesheet(theme="dark"))
         except TypeError:
             pass
 
@@ -76,7 +76,7 @@ class AnalysisWindow(QWidget):
 
         btn_plot.clicked.connect(self._start_plot_worker)
         btn_export.clicked.connect(self._start_export_worker)
-        
+
         btn_evaluate_segmentation.clicked.connect(self.call_evaluate_segmentation)
         btn_evaluate_tracking.clicked.connect(self.call_evaluate_tracking)
 
@@ -85,7 +85,7 @@ class AnalysisWindow(QWidget):
         self.combobox_plots.addItems(
             ["Speed", "Size", "Direction", "Euclidean distance", "Accumulated distance"]
         )
-        
+
         # Horizontal lines
         line = QWidget()
         line.setFixedHeight(4)
@@ -119,7 +119,7 @@ class AnalysisWindow(QWidget):
         ### Organize objects via widgets
         content = QWidget()
         content.setLayout(QGridLayout())
-        content.layout().addWidget(label_plotting , 3, 0)
+        content.layout().addWidget(label_plotting, 3, 0)
         content.layout().addWidget(label_metric, 4, 0)
         content.layout().addWidget(self.combobox_plots, 4, 1)
         content.layout().addWidget(btn_plot, 4, 2)
@@ -144,7 +144,7 @@ class AnalysisWindow(QWidget):
         content.layout().addWidget(btn_evaluate_tracking, 15, 1)
 
         self.layout().addWidget(content)
-            
+
     def _calculate_speed(self, tracks):
         for unique_id in np.unique(tracks[:, 0]):
             track = np.delete(tracks, np.where(tracks[:, 0] != unique_id), 0)
@@ -216,9 +216,13 @@ class AnalysisWindow(QWidget):
             euclidean_distance = np.around(np.sqrt(np.square(x) + np.square(y)), 3)
             directed_speed = np.around(euclidean_distance / len(track), 3)
             try:
-                retval = np.append(retval, [[id, euclidean_distance, len(track), directed_speed]], 0)
+                retval = np.append(
+                    retval, [[id, euclidean_distance, len(track), directed_speed]], 0
+                )
             except UnboundLocalError:
-                retval = np.array([[id, euclidean_distance, len(track), directed_speed]])
+                retval = np.array(
+                    [[id, euclidean_distance, len(track), directed_speed]]
+                )
         return retval
 
     def _calculate_accumulated_distance(self, tracks):
@@ -274,7 +278,7 @@ class AnalysisWindow(QWidget):
         self.parent.plot_window.setLayout(QVBoxLayout())
         self.parent.plot_window.layout().addWidget(QLabel(ret["Description"]))
 
-        selector = Selector(self, axes, results) # TODO: fix selector?
+        selector = Selector(self, axes, results)  # TODO: fix selector?
 
         self.parent.plot_window.layout().addWidget(canvas)
         btn_apply = QPushButton("Apply")
@@ -289,7 +293,9 @@ class AnalysisWindow(QWidget):
         Create dictionary holding metric data and results
         """
         try:
-            tracks_layer = grab_layer(self.parent.viewer, self.parent.combobox_tracks.currentText())
+            tracks_layer = grab_layer(
+                self.parent.viewer, self.parent.combobox_tracks.currentText()
+            )
         except ValueError:
             notify("Please make sure to select the correct tracks layer!")
             return
@@ -304,7 +310,9 @@ class AnalysisWindow(QWidget):
         elif metric == "Size":
             print("Plotting size")
             try:
-                segmentation_layer = grab_layer(self.viewer, self.parent.combobox_segmentation.currentText())
+                segmentation_layer = grab_layer(
+                    self.viewer, self.parent.combobox_segmentation.currentText()
+                )
             except ValueError:
                 notify("Please make sure to select the correct segmentation!")
                 return
@@ -365,7 +373,9 @@ class AnalysisWindow(QWidget):
     @thread_worker
     def _export(self, file, metrics):
         try:
-            tracks = grab_layer(self.parent.viewer, self.parent.combobox_tracks.currentText()).data
+            tracks = grab_layer(
+                self.parent.viewer, self.parent.combobox_tracks.currentText()
+            ).data
         except ValueError:
             notify("Please make sure to select the correct tracks layer!")
             return
@@ -527,7 +537,12 @@ class AnalysisWindow(QWidget):
         if "Speed" in selected_metrics:
             speed = self._calculate_speed(tracks)
             metrics.append("Average_speed [# pixels/frame]")
-            individual_metrics.extend(["Average speed [# pixels/frame]", "Standard deviation of speed [# pixels/frame]"])
+            individual_metrics.extend(
+                [
+                    "Average speed [# pixels/frame]",
+                    "Standard deviation of speed [# pixels/frame]",
+                ]
+            )
             all_values.append(np.around(np.average(speed[:, 1]), 3))
             valid_values.append(
                 np.around(
@@ -545,13 +560,19 @@ class AnalysisWindow(QWidget):
 
         if "Size" in selected_metrics:
             try:
-                segmentation = grab_layer(self.viewer, self.parent.combobox_segmentation.currentText()).data
+                segmentation = grab_layer(
+                    self.viewer, self.parent.combobox_segmentation.currentText()
+                ).data
             except ValueError:
                 notify("Please make sure the label layer exists!")
                 return
             size = self._calculate_size(tracks, segmentation)
-            metrics.extend(["Average size [# pixels]", "Standard deviation of size [# pixels]"])
-            individual_metrics.extend(["Average size [# pixels]", "Standard deviation of size [# pixels]"])
+            metrics.extend(
+                ["Average size [# pixels]", "Standard deviation of size [# pixels]"]
+            )
+            individual_metrics.extend(
+                ["Average size [# pixels]", "Standard deviation of size [# pixels]"]
+            )
             all_values.extend(
                 [np.around(np.average(size[:, 1]), 3), np.around(np.std(size[:, 1]), 3)]
             )
@@ -635,8 +656,15 @@ class AnalysisWindow(QWidget):
 
         if "Euclidean distance" in selected_metrics:
             euclidean_distance = self._calculate_euclidean_distance(tracks)
-            metrics.extend(["Average euclidean distance [# pixels]", "Average velocity [# pixels/frame]"])
-            individual_metrics.extend(["Euclidean distance [# pixels]", "Velocity [# pixels/frame]"])
+            metrics.extend(
+                [
+                    "Average euclidean distance [# pixels]",
+                    "Average velocity [# pixels/frame]",
+                ]
+            )
+            individual_metrics.extend(
+                ["Euclidean distance [# pixels]", "Velocity [# pixels/frame]"]
+            )
             all_values.extend(
                 [
                     np.around(np.average(euclidean_distance[:, 1]), 3),
@@ -699,10 +727,17 @@ class AnalysisWindow(QWidget):
 
                 directness = []
                 for i in range(len(np.unique(tracks[:, 0]))):
-                    directness.append([euclidean_distance[i, 0], euclidean_distance[i, 1] / accumulated_distance[i,1] if accumulated_distance[i,1] > 0 else 0])
-                    
+                    directness.append(
+                        [
+                            euclidean_distance[i, 0],
+                            euclidean_distance[i, 1] / accumulated_distance[i, 1]
+                            if accumulated_distance[i, 1] > 0
+                            else 0,
+                        ]
+                    )
+
                 directness = np.around(np.array(directness), 3)
-                #all_values.append(np.around(np.average(directness[:, 1]), 3))
+                # all_values.append(np.around(np.average(directness[:, 1]), 3))
                 all_values.append((np.average(directness[:, 1])))
                 valid_values.append(
                     np.around(
@@ -750,10 +785,12 @@ class AnalysisWindow(QWidget):
                 invalid_values.append(value)
 
         return valid_values, invalid_values
-    
+
     def call_evaluate_segmentation(self):
         try:
-            gt_seg = grab_layer(self.viewer, self.parent.combobox_segmentation.currentText()).data
+            gt_seg = grab_layer(
+                self.viewer, self.parent.combobox_segmentation.currentText()
+            ).data
         except ValueError:
             notify("Please make sure the label layer exists!")
             return
@@ -782,61 +819,70 @@ class AnalysisWindow(QWidget):
         single_f1 = self.get_f1(gt_seg[current_frame], eval_seg[current_frame])
         ### FOR SOME FRAMES
         some_iou = self.get_iou(gt_seg[frame_range], eval_seg[frame_range])
-        some_dice = self.get_dice(gt_seg[frame_range], eval_seg[frame_range]) 
+        some_dice = self.get_dice(gt_seg[frame_range], eval_seg[frame_range])
         some_f1 = self.get_f1(gt_seg[frame_range], eval_seg[frame_range])
         ### FOR ALL FRAMES
         all_iou = self.get_iou(gt_seg, eval_seg)
         all_dice = self.get_dice(gt_seg, eval_seg)
         all_f1 = self.get_f1(gt_seg, eval_seg)
-        results = np.asarray([[all_iou, all_dice, all_f1],
-                              [some_iou, some_dice, some_f1],
-                              [single_iou, single_dice, single_f1]
-                            ])
+        results = np.asarray(
+            [
+                [all_iou, all_dice, all_f1],
+                [some_iou, some_dice, some_f1],
+                [single_iou, single_dice, single_f1],
+            ]
+        )
         return results, frames
-        
+
     def get_intersection(self, seg1, seg2):
         # takes multidimensional numpy arrays and returns their intersection
         return np.sum(np.logical_and(seg1, seg2).flat)
-        
+
     def get_union(self, seg1, seg2):
         # takes multidimensional numpy arrays and returns their union
         return np.sum(np.logical_or(seg1, seg2).flat)
-        
+
     def get_iou(self, seg1, seg2):
         # calculate IoU for two given segmentations
         intersection = self.get_intersection(seg1, seg2)
         union = self.get_union(seg1, seg2)
         return intersection / union
-    
+
     def get_dice(self, seg1, seg2):
         # calculate DICE score for two given segmentations
         intersection = self.get_intersection(seg1, seg2)
         union = self.get_union(seg1, seg2)
         return (2 * intersection) / (np.count_nonzero(seg1) + np.count_nonzero(seg2))
-    
+
     def get_f1(self, seg1, seg2):
         # calculate F1 score for two given segmentations
         intersection = self.get_intersection(seg1, seg2)
         union = self.get_union(seg1, seg2)
         return (2 * intersection) / (intersection + union)
-        
+
     def adjust_track_centroids(self):
         # adjusts tracks to centroid of cells
+        print(f"segmentation: {self.parent.combobox_segmentation.currentText()}")
+        print(f"tracks: {self.parent.combobox_tracks.currentText()}")
         try:
-            tracks_layer = grab_layer(self.parent.viewer, self.parent.combobox_tracks.currentText())
+            tracks_layer = grab_layer(
+                self.parent.viewer, self.parent.combobox_tracks.currentText()
+            )
         except ValueError:
             notify("Please make sure to select the correct tracks layer!")
             return
         try:
-            segmentation = grab_layer(self.viewer, self.parent.combobox_segmentation.currentText()).data
+            segmentation = grab_layer(
+                self.viewer, self.parent.combobox_segmentation.currentText()
+            ).data
         except ValueError:
             notify("Please make sure the label layer exists!")
             return
         tracks_old = tracks_layer.data
         tracks = tracks_layer.data
         for line in tracks:
-            _,z,y,x = line
-            segmentation_id = segmentation[z,y,x]
+            _, z, y, x = line
+            segmentation_id = segmentation[z, y, x]
             if segmentation_id == 0:
                 print("couldn't adjust centroid")
                 continue
@@ -852,39 +898,44 @@ class AnalysisWindow(QWidget):
         tracks_layer.data = tracks
 
     def call_evaluate_tracking(self):
-        self.adjust_track_centroids()
         automatic_tracks = self.parent.initial_layers[1]
         try:
-            corrected_tracks = grab_layer(self.parent.viewer, self.parent.combobox_tracks.currentText()).data
+            corrected_tracks = grab_layer(
+                self.parent.viewer, self.parent.combobox_tracks.currentText()
+            ).data
         except ValueError:
             notify("Please make sure to select the correct tracks layer!")
             return
         automatic_segmentation = self.parent.initial_layers[0]
         try:
-            corrected_segmentation = grab_layer(self.viewer, self.parent.combobox_segmentation.currentText()).data
+            corrected_segmentation = grab_layer(
+                self.viewer, self.parent.combobox_segmentation.currentText()
+            ).data
         except ValueError:
             notify("Please make sure the label layer exists!")
             return
         fault_value = self.evaluate_tracking(
-            gt_seg = corrected_segmentation,
-            eval_seg = automatic_segmentation,
-            gt_tracks = corrected_segmentation,
-            eval_tracks = automatic_tracks
+            gt_seg=corrected_segmentation,
+            eval_seg=automatic_segmentation,
+            gt_tracks=corrected_segmentation,
+            eval_tracks=automatic_tracks,
         )
         print(f"Fault value: {fault_value}")
-    
+
     def evaluate_tracking(self, gt_seg, eval_seg, gt_tracks, eval_tracks):
+        self.adjust_track_centroids()
         fp = self.get_false_positives(gt_seg, eval_seg)
         fn = self.get_false_negatives(gt_seg, eval_seg)
         sc = self.get_split_cells(gt_seg, eval_seg)
         de = self.get_removed_edges(gt_seg, eval_seg, gt_tracks, eval_tracks)
         ae = self.get_added_edges(gt_seg, eval_seg, gt_tracks, eval_tracks)
-        
+
         fault_value = fp + fn * 10 + de + ae * 1.5 + sc * 5
-        
+
         return fault_value
-        
-        ### MATCHING FOR CELLS BASED ON IOU > .4, split cells >= .2! 
+
+        ### MATCHING FOR CELLS BASED ON IOU > .4, split cells >= .2!
+
     def get_false_positives(self, gt_seg, eval_seg):
         # calculates amount of false positives for given segmentation
         fp = 0
@@ -898,13 +949,13 @@ class AnalysisWindow(QWidget):
         segmentations = []
         for i in range(len(gt_seg)):
             segmentations.append([gt_seg[i], eval_seg[i]])
-        
+
         with Pool(AMOUNT_OF_PROCESSES) as p:
             for result in p.starmap(get_false_positives_layer, segmentations):
                 fp += result
         print(f"False Positives: {fp}")
         return fp
-    
+
     def get_false_negatives(self, gt_seg, eval_seg):
         # calculates amount of false negatives for given segmentation
         fn = 0
@@ -918,13 +969,13 @@ class AnalysisWindow(QWidget):
         segmentations = []
         for i in range(len(gt_seg)):
             segmentations.append([gt_seg[i], eval_seg[i]])
-        
+
         with Pool(AMOUNT_OF_PROCESSES) as p:
             for result in p.starmap(get_false_negatives_layer, segmentations):
                 fn += result
         print(f"False Negatives: {fn}")
         return fn
-    
+
     def get_split_cells(self, gt_seg, eval_seg):
         #  calculates amount of split cells for given segmentation
         sc = 0
@@ -934,19 +985,20 @@ class AnalysisWindow(QWidget):
             AMOUNT_OF_PROCESSES = np.maximum(1, int(multiprocessing.cpu_count() * 0.4))
         else:
             AMOUNT_OF_PROCESSES = np.maximum(1, int(multiprocessing.cpu_count() * 0.8))
-        
+
         segmentations = []
         for i in range(len(gt_seg)):
             segmentations.append([gt_seg[i], eval_seg[i]])
-        
+
         with Pool(AMOUNT_OF_PROCESSES) as p:
             for result in p.starmap(get_split_cells_layer, segmentations):
                 sc += result
         print(f"Split Cells: {sc}")
         return sc
-    
+
     def get_added_edges(self, gt_seg, eval_seg, gt_tracks, eval_tracks):
         # calculates amount of added edges for given segmentation and tracks
+        # self.adjust_track_centroids()
         ae = 0
         if np.array_equal(gt_tracks, eval_tracks):
             return ae
@@ -954,89 +1006,103 @@ class AnalysisWindow(QWidget):
         for i in range(len(gt_tracks) - 1):
             if gt_tracks[i][0] == gt_tracks[i + 1][0]:
                 connections.append((gt_tracks[i][1:4], gt_tracks[i + 1][1:4]))
-        
+
         for connection in connections:
             gt_id1 = get_id_from_track(eval_seg, connection[0])
             gt_id2 = get_id_from_track(eval_seg, connection[1])
             id1 = get_match_cell(gt_seg, eval_seg, gt_id1, connection[0][0])
             id2 = get_match_cell(gt_seg, eval_seg, gt_id2, connection[1][0])
             if id1 == 0 or id2 == 0:
-                ae +=1
+                ae += 1
                 continue
             centroid1 = ndimage.center_of_mass(
-                eval_seg[connection[0][0]],
-                labels = eval_seg[connection[0][0]],
-                index = id1
+                eval_seg[connection[0][0]], labels=eval_seg[connection[0][0]], index=id1
             )
-            centroid1 = [connection[0][0], int(np.rint(centroid1[0])), int(np.rint(centroid1[1]))]
+            centroid1 = [
+                connection[0][0],
+                int(np.rint(centroid1[0])),
+                int(np.rint(centroid1[1])),
+            ]
             centroid2 = ndimage.center_of_mass(
-                eval_seg[connection[1][0]],
-                labels = eval_seg[connection[1][0]],
-                index = id2
+                eval_seg[connection[1][0]], labels=eval_seg[connection[1][0]], index=id2
             )
-            centroid2 = [connection[1][0], int(np.rint(centroid2[0])), int(np.rint(centroid2[1]))]
+            centroid2 = [
+                connection[1][0],
+                int(np.rint(centroid2[0])),
+                int(np.rint(centroid2[1])),
+            ]
             if not is_connected(eval_tracks, centroid1, centroid2):
                 ae += 1
         print(f"Added Edges: {ae}")
         return ae
-    
+
     def get_removed_edges(self, gt_seg, eval_seg, gt_tracks, eval_tracks):
         # calculates amount of removed edges for given segmentation and tracks
+        # self.adjust_track_centroids()
         de = 0
         if np.array_equal(gt_tracks, eval_tracks):
             return de
         connections = []
-        for i in range(len(eval_tracks)- 1):
+        for i in range(len(eval_tracks) - 1):
             if eval_tracks[i][0] == eval_tracks[i + 1][0]:
                 connections.append((eval_tracks[i][1:4], eval_tracks[i + 1][1:4]))
-        
+
         for connection in connections:
             eval_id1 = get_id_from_track(gt_seg, connection[0])
             eval_id2 = get_id_from_track(gt_seg, connection[1])
             id1 = get_match_cell(eval_seg, gt_seg, eval_id1, connection[0][0])
             id2 = get_match_cell(eval_seg, gt_seg, eval_id2, connection[1][0])
             if id1 == 0 or id2 == 0:
-                de +=1
+                de += 1
                 continue
             centroid1 = ndimage.center_of_mass(
-                gt_seg[connection[0][0]],
-                labels = gt_seg[connection[0][0]],
-                index = id1
+                gt_seg[connection[0][0]], labels=gt_seg[connection[0][0]], index=id1
             )
-            centroid1 = [connection[0][0], int(np.rint(centroid1[0])), int(np.rint(centroid1[1]))]
+            centroid1 = [
+                connection[0][0],
+                int(np.rint(centroid1[0])),
+                int(np.rint(centroid1[1])),
+            ]
             centroid2 = ndimage.center_of_mass(
-                gt_seg[connection[1][0]],
-                labels = gt_seg[connection[1][0]],
-                index = id2
+                gt_seg[connection[1][0]], labels=gt_seg[connection[1][0]], index=id2
             )
-            centroid2 = [connection[1][0], int(np.rint(centroid2[0])), int(np.rint(centroid2[1]))]
+            centroid2 = [
+                connection[1][0],
+                int(np.rint(centroid2[0])),
+                int(np.rint(centroid2[1])),
+            ]
             if not is_connected(gt_tracks, centroid1, centroid2):
                 de += 1
         print(f"Deleted Edges: {de}")
         return de
-        
+
     def _display_evaluation_result(self, title, results, frames):
         self.results_window = ResultsWindow(title, results, frames)
-        
+
+
 def get_specific_intersection(slice1, id1, slice2, id2):
     return np.sum((slice1 == id1) & (slice2 == id2))
 
+
 def get_specific_union(slice1, id1, slice2, id2):
     return np.sum((slice1 == id1) | (slice2 == id2))
+
 
 def get_specific_iou(slice1, id1, slice2, id2):
     intersection = get_specific_intersection(slice1, id1, slice2, id2)
     union = get_specific_union(slice1, id1, slice2, id2)
     return intersection / union
 
+
 def get_id_from_track(label_layer, track):
-    z,y,x = track
-    return label_layer[z,y,x]
+    z, y, x = track
+    return label_layer[z, y, x]
+
 
 def get_match_cell(base_layer, compare_layer, base_id, slice_id):
     # return id of matched cell
     # check for highest iou (above threshold)
-    IOU_THRESHOLD = .4
+    IOU_THRESHOLD = 0.4
     base_slice = base_layer[slice_id]
     compare_slice = compare_layer[slice_id]
     indices_of_id = np.where(base_slice == base_id)
@@ -1045,24 +1111,35 @@ def get_match_cell(base_layer, compare_layer, base_id, slice_id):
     for compare_id in compare_ids:
         if compare_id == 0:
             continue
-        iou = [compare_id, get_specific_iou(compare_slice, compare_id, base_slice, base_id)]
+        iou = [
+            compare_id,
+            get_specific_iou(compare_slice, compare_id, base_slice, base_id),
+        ]
         ious.append(iou)
     ious = np.array(ious)
     if len(ious) == 0:
         return 0
-    max_iou = max(ious[:,1])
+    max_iou = max(ious[:, 1])
     if max_iou < IOU_THRESHOLD:
         return 0
-    return int(ious[np.where(ious[:,1] == max_iou),0][0][0])
+    return int(ious[np.where(ious[:, 1] == max_iou), 0][0][0])
+
 
 def is_connected(tracks, centroid1, centroid2):
     for i in range(len(tracks) - 1):
-        if centroid1[0] == tracks[i,1] and centroid1[1] == tracks[i,2] and centroid1[2] == tracks[i,3]:
-            #print("checking the stuff")
+        if (
+            centroid1[0] == tracks[i, 1]
+            and centroid1[1] == tracks[i, 2]
+            and centroid1[2] == tracks[i, 3]
+        ):
+            # print("checking the stuff")
             return (
-                centroid2[0] == tracks[i+1,1] and centroid2[1] == tracks[i+1,2] and centroid2[2] == tracks[i+1,3]
+                centroid2[0] == tracks[i + 1, 1]
+                and centroid2[1] == tracks[i + 1, 2]
+                and centroid2[2] == tracks[i + 1, 3]
             )
     return False
+
 
 def func(track, segmentation):
     id = track[0, 0]
@@ -1074,6 +1151,7 @@ def func(track, segmentation):
     average = np.around(np.average(sizes), 3)
     std_deviation = np.around(np.std(sizes), 3)
     return [id, average, std_deviation]
+
 
 def get_false_positives_layer(gt_slice, eval_slice):
     fp = 0
@@ -1098,14 +1176,15 @@ def get_false_positives_layer(gt_slice, eval_slice):
             fp += 1
             print("No overlapping cell, fp")
             continue
-        if max(ious) > .4:
+        if max(ious) > 0.4:
             print("overlap high enough")
             continue
         ious.remove(max(ious))
-        if len(ious) < 1 or max(ious) < .2:
+        if len(ious) < 1 or max(ious) < 0.2:
             print("single low overlap or multiple very low overlaps, fp")
             fp += 1
     return fp
+
 
 def get_false_negatives_layer(gt_slice, eval_slice):
     fn = 0
@@ -1126,7 +1205,7 @@ def get_false_negatives_layer(gt_slice, eval_slice):
             if iou > max_iou:
                 max_iou = iou
                 highest_match_eval_id = eval_id
-        if not max_iou > .4:
+        if not max_iou > 0.4:
             fn += 1
             print("Largest IoU too small")
             continue
@@ -1148,10 +1227,11 @@ def get_false_negatives_layer(gt_slice, eval_slice):
         max_reverse_iou = max(ious)
         ious.remove(max(ious))
         if max(ious) == max_reverse_iou:
-            fn += .5
+            fn += 0.5
     if int(fn) != fn:
         raise ValueError("False negatives don't sum up to whole integer")
     return int(fn)
+
 
 def get_split_cells_layer(gt_slice, eval_slice):
     sc = 0
@@ -1169,15 +1249,16 @@ def get_split_cells_layer(gt_slice, eval_slice):
                 continue
             iou = get_specific_iou(gt_slice, gt_id, eval_slice, id)
             ious.append(iou)
-        if len(ious) < 2: # or max(ious) > .4:
+        if len(ious) < 2:  # or max(ious) > .4:
             print("cell has less than two matches")
             continue
         ious.remove(max(ious))
-        if max(ious) >= .2:
+        if max(ious) >= 0.2:
             print("second match has large enough area, sc")
             sc += 1
     return sc
-        
+
+
 class ResultsWindow(QWidget):
     def __init__(self, title, results, frames):
         """
@@ -1194,26 +1275,28 @@ class ResultsWindow(QWidget):
         self.setLayout(QVBoxLayout())
         self.setWindowTitle(title)
         self.setMinimumWidth(500)
-        table_widget = QTableWidget(4,4)
+        table_widget = QTableWidget(4, 4)
         self.layout().addWidget(table_widget)
         try:
-            self.setStyleSheet(napari.qt.get_stylesheet(theme = "dark"))
+            self.setStyleSheet(napari.qt.get_stylesheet(theme="dark"))
         except TypeError:
             pass
-        
-        table_widget.setCellWidget(0,0,QLabel("Evaluation Interval"))
-        table_widget.setCellWidget(0,1,QLabel("IoU Score"))
-        table_widget.setCellWidget(0,2,QLabel("DICE Score"))
-        table_widget.setCellWidget(0,3,QLabel("F1 score"))
-        table_widget.setCellWidget(1,0,QLabel("0 - {}".format(frames[2])))
-        table_widget.setCellWidget(1,1,QLabel(str(results[0,0])))
-        table_widget.setCellWidget(1,2,QLabel(str(results[0,1])))
-        table_widget.setCellWidget(1,3,QLabel(str(results[0,2])))
-        table_widget.setCellWidget(2,0,QLabel("{} - {}".format(frames[1][0], frames[1][1])))
-        table_widget.setCellWidget(2,1,QLabel(str(results[1,0])))
-        table_widget.setCellWidget(2,2,QLabel(str(results[1,1])))
-        table_widget.setCellWidget(2,3,QLabel(str(results[1,2])))
-        table_widget.setCellWidget(3,0,QLabel(str(frames[0])))
-        table_widget.setCellWidget(3,1,QLabel(str(results[2,0])))
-        table_widget.setCellWidget(3,2,QLabel(str(results[2,1])))
-        table_widget.setCellWidget(3,3,QLabel(str(results[2,2])))
+
+        table_widget.setCellWidget(0, 0, QLabel("Evaluation Interval"))
+        table_widget.setCellWidget(0, 1, QLabel("IoU Score"))
+        table_widget.setCellWidget(0, 2, QLabel("DICE Score"))
+        table_widget.setCellWidget(0, 3, QLabel("F1 score"))
+        table_widget.setCellWidget(1, 0, QLabel("0 - {}".format(frames[2])))
+        table_widget.setCellWidget(1, 1, QLabel(str(results[0, 0])))
+        table_widget.setCellWidget(1, 2, QLabel(str(results[0, 1])))
+        table_widget.setCellWidget(1, 3, QLabel(str(results[0, 2])))
+        table_widget.setCellWidget(
+            2, 0, QLabel("{} - {}".format(frames[1][0], frames[1][1]))
+        )
+        table_widget.setCellWidget(2, 1, QLabel(str(results[1, 0])))
+        table_widget.setCellWidget(2, 2, QLabel(str(results[1, 1])))
+        table_widget.setCellWidget(2, 3, QLabel(str(results[1, 2])))
+        table_widget.setCellWidget(3, 0, QLabel(str(frames[0])))
+        table_widget.setCellWidget(3, 1, QLabel(str(results[2, 0])))
+        table_widget.setCellWidget(3, 2, QLabel(str(results[2, 1])))
+        table_widget.setCellWidget(3, 3, QLabel(str(results[2, 2])))
