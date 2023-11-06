@@ -884,7 +884,6 @@ class AnalysisWindow(QWidget):
             _, z, y, x = line
             segmentation_id = segmentation[z, y, x]
             if segmentation_id == 0:
-                print("couldn't adjust centroid")
                 continue
             centroid = ndimage.center_of_mass(
                 segmentation[z], labels=segmentation[z], index=segmentation_id
@@ -998,7 +997,7 @@ class AnalysisWindow(QWidget):
 
     def get_added_edges(self, gt_seg, eval_seg, gt_tracks, eval_tracks):
         # calculates amount of added edges for given segmentation and tracks
-        # self.adjust_track_centroids()
+        self.adjust_track_centroids()
         ae = 0
         if np.array_equal(gt_tracks, eval_tracks):
             return ae
@@ -1013,6 +1012,7 @@ class AnalysisWindow(QWidget):
             id1 = get_match_cell(gt_seg, eval_seg, gt_id1, connection[0][0])
             id2 = get_match_cell(gt_seg, eval_seg, gt_id2, connection[1][0])
             if id1 == 0 or id2 == 0:
+                print("AE case 1")
                 ae += 1
                 continue
             centroid1 = ndimage.center_of_mass(
@@ -1032,19 +1032,20 @@ class AnalysisWindow(QWidget):
                 int(np.rint(centroid2[1])),
             ]
             if not is_connected(eval_tracks, centroid1, centroid2):
+                print(f"AE case 2, {centroid1} and {centroid2}")
                 ae += 1
         print(f"Added Edges: {ae}")
         return ae
 
     def get_removed_edges(self, gt_seg, eval_seg, gt_tracks, eval_tracks):
         # calculates amount of removed edges for given segmentation and tracks
-        # self.adjust_track_centroids()
+        self.adjust_track_centroids()
         de = 0
         if np.array_equal(gt_tracks, eval_tracks):
             return de
         connections = []
         for i in range(len(eval_tracks) - 1):
-            if eval_tracks[i][0] == eval_tracks[i + 1][0]:
+            if eval_tracks[i][0] == eval_tracks[i + 1][0] and eval_tracks[i][1] + 1 == eval_tracks[i + 1][1]:
                 connections.append((eval_tracks[i][1:4], eval_tracks[i + 1][1:4]))
 
         for connection in connections:
@@ -1053,6 +1054,7 @@ class AnalysisWindow(QWidget):
             id1 = get_match_cell(eval_seg, gt_seg, eval_id1, connection[0][0])
             id2 = get_match_cell(eval_seg, gt_seg, eval_id2, connection[1][0])
             if id1 == 0 or id2 == 0:
+                print("DE case 1")
                 de += 1
                 continue
             centroid1 = ndimage.center_of_mass(
@@ -1072,6 +1074,7 @@ class AnalysisWindow(QWidget):
                 int(np.rint(centroid2[1])),
             ]
             if not is_connected(gt_tracks, centroid1, centroid2):
+                print(f"DE case 2, {centroid1} and {centroid2}")
                 de += 1
         print(f"Deleted Edges: {de}")
         return de

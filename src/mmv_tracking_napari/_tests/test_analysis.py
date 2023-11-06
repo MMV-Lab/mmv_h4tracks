@@ -31,7 +31,6 @@ def set_widget_up(make_napari_viewer):
             name = name
         )
     my_widget.combobox_segmentation.setCurrentIndex(my_widget.combobox_segmentation.findText(SEGMENTATION_GT))
-    my_widget.combobox_tracks.setCurrentIndex(my_widget.combobox_tracks.findText(TRACKS_GT))
     yield my_widget
 
 @pytest.fixture
@@ -225,6 +224,7 @@ def test_added_edges(set_widget_up, layername, expected_value):
     eval_seg = gt_seg
     gt_tracks = viewer.layers[viewer.layers.index("GT_tracks.npy")].data
     eval_tracks = viewer.layers[viewer.layers.index(layername)].data
+    widget.combobox_tracks.setCurrentIndex(widget.combobox_tracks.findText(layername))
     ae = window.get_added_edges(gt_seg, eval_seg, gt_tracks, eval_tracks)
     assert ae == expected_value
     
@@ -233,7 +233,7 @@ def test_added_edges(set_widget_up, layername, expected_value):
 @pytest.mark.unit
 @pytest.mark.new
 @pytest.mark.parametrize(
-    "layername, expected_value", [("deleted_edge.npy", 4), ("added_edge.npy", 6), ("justin_centroid_ausserhalb.npy", 2), ("justin_falsely_cut.npy", 0), ("switch.npy", 4)]
+    "layername, expected_value", [("deleted_edge.npy", 0), ("added_edge.npy", 5), ("justin_centroid_ausserhalb.npy", 2), ("justin_falsely_cut.npy", 0), ("switch.npy", 4)]
 )
 def test_deleted_edges(set_widget_up, layername, expected_value):
     # test if deleted edges are calculated correctly
@@ -245,6 +245,7 @@ def test_deleted_edges(set_widget_up, layername, expected_value):
     eval_seg = gt_seg
     gt_tracks = viewer.layers[viewer.layers.index("GT_tracks.npy")].data
     eval_tracks = viewer.layers[viewer.layers.index(layername)].data
+    widget.combobox_tracks.setCurrentIndex(widget.combobox_tracks.findText(layername))
     de = window.get_removed_edges(gt_seg, eval_seg, gt_tracks, eval_tracks)
     assert de == expected_value
 
@@ -271,6 +272,7 @@ def test_fault_value(set_widget_up, layername_seg, layername_tracks, expected_va
     eval_seg = viewer.layers[viewer.layers.index(layername_seg)].data
     gt_tracks = viewer.layers[viewer.layers.index("GT_tracks.npy")].data
     eval_tracks = viewer.layers[viewer.layers.index(layername_tracks)].data
+    widget.combobox_tracks.setCurrentIndex(widget.combobox_tracks.findText(layername_tracks))
     fault_value = window.evaluate_tracking(gt_seg, eval_seg, gt_tracks, eval_tracks)
     assert fault_value == expected_value
 
