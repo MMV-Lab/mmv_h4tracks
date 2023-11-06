@@ -460,6 +460,8 @@ def calculate_centroids(slice):
     return (centroids, labels)
 
 def match_centroids(slice_pair):
+    APPROX_INF = 65535
+    MAX_MATCHING_DIST = 45    
     num_cells_parent = len(slice_pair[0][0])
     num_cells_child = len(slice_pair[1][0])
 
