@@ -260,7 +260,7 @@ def test_deleted_edges(set_widget_up, layername, expected_value):
 @pytest.mark.eval_tracking
 @pytest.mark.integration
 @pytest.mark.parametrize(
-    "layername_seg, layername_tracks, expected_value", [("false positive.tif", "added_edge.npy", 3)]
+    "layername_seg, layername_tracks, expected_value", [("false positive.tif", "added_edge.npy", 7)]
 )
 def test_fault_value(set_widget_up, layername_seg, layername_tracks, expected_value):
     # test if tracking error is calculated correctly

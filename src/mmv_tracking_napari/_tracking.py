@@ -420,7 +420,10 @@ class TrackingWindow(QWidget):
     @thread_worker
     def _proximity_track_cell(self, label_layer, start_slice, id):
         self._reset()
-        self.track_cells = func(label_layer, start_slice, id)
+        self.track_cells = func(label_layer.data, start_slice, id)
+        if self.track_cells is None:
+            print("Track too short")
+            return
         self.btn_insert_correspondence.setText("Tracking..")
         self._link()
 
@@ -477,6 +480,9 @@ class TrackingWindow(QWidget):
                     tracks = [[track_id] + line]
             track_id += 1
 
+        if not "tracks"in locals():
+            print("no tracks created")
+            return None
         tracks = np.array(tracks)
         df = pd.DataFrame(tracks, columns=["ID", "Z", "Y", "X"])
         df.sort_values(["ID", "Z"], ascending=True, inplace=True)

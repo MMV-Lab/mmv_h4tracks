@@ -187,7 +187,7 @@ class ProcessingWindow(QWidget):
 
         try:
             data = grab_layer(self.viewer, self.parent.combobox_image.currentText()).data
-        except ValueError:
+        except AttributeError:
             print("Image layer not found in viewer")
             QApplication.restoreOverrideCursor()
             notify("No image layer found!")
@@ -299,7 +299,7 @@ class ProcessingWindow(QWidget):
         # get segmentation data
         try:
             data = grab_layer(self.viewer, self.parent.combobox_segmentation.currentText()).data
-        except ValueError:
+        except AttributeError:
             print("Segmentation layer not found in viewer")
             QApplication.restoreOverrideCursor()
             notify("No segmentation layer found!")

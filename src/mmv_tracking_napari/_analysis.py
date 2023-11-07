@@ -375,7 +375,7 @@ class AnalysisWindow(QWidget):
             tracks = grab_layer(
                 self.parent.viewer, self.parent.combobox_tracks.currentText()
             ).data
-        except ValueError:
+        except AttributeError:
             notify("Please make sure to select the correct tracks layer!")
             return
         direction = self._calculate_direction(tracks)
@@ -562,7 +562,7 @@ class AnalysisWindow(QWidget):
                 segmentation = grab_layer(
                     self.viewer, self.parent.combobox_segmentation.currentText()
                 ).data
-            except ValueError:
+            except AttributeError:
                 notify("Please make sure the label layer exists!")
                 return
             size = self._calculate_size(tracks, segmentation)
@@ -790,7 +790,7 @@ class AnalysisWindow(QWidget):
             gt_seg = grab_layer(
                 self.viewer, self.parent.combobox_segmentation.currentText()
             ).data
-        except ValueError:
+        except AttributeError:
             notify("Please make sure the label layer exists!")
             return
         eval_seg = self.parent.initial_layers[0]
@@ -874,7 +874,7 @@ class AnalysisWindow(QWidget):
             segmentation = grab_layer(
                 self.viewer, self.parent.combobox_segmentation.currentText()
             ).data
-        except ValueError:
+        except AttributeError:
             notify("Please make sure the label layer exists!")
             return
         tracks_old = tracks_layer.data
@@ -901,7 +901,7 @@ class AnalysisWindow(QWidget):
             corrected_tracks = grab_layer(
                 self.parent.viewer, self.parent.combobox_tracks.currentText()
             ).data
-        except ValueError:
+        except AttributeError:
             notify("Please make sure to select the correct tracks layer!")
             return
         automatic_segmentation = self.parent.initial_layers[0]
@@ -909,7 +909,7 @@ class AnalysisWindow(QWidget):
             corrected_segmentation = grab_layer(
                 self.viewer, self.parent.combobox_segmentation.currentText()
             ).data
-        except ValueError:
+        except AttributeError:
             notify("Please make sure the label layer exists!")
             return
         fault_value = self.evaluate_tracking(
