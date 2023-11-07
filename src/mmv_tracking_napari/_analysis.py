@@ -915,7 +915,7 @@ class AnalysisWindow(QWidget):
         fault_value = self.evaluate_tracking(
             gt_seg=corrected_segmentation,
             eval_seg=automatic_segmentation,
-            gt_tracks=corrected_segmentation,
+            gt_tracks=corrected_tracks,
             eval_tracks=automatic_tracks,
         )
         print(f"Fault value: {fault_value}")
