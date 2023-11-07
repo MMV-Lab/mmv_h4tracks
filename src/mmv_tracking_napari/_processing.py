@@ -19,6 +19,7 @@ from qtpy.QtWidgets import (
 from qtpy.QtCore import Qt
 from napari.qt.threading import thread_worker
 from scipy import ndimage, spatial, optimize
+from cellpose import models
 
 from ._logger import notify, choice_dialog
 from ._grabber import grab_layer
@@ -183,7 +184,6 @@ class ProcessingWindow(QWidget):
         """
         print("Running segmentation")
         QApplication.setOverrideCursor(Qt.WaitCursor)
-        from cellpose import models
 
         try:
             data = grab_layer(self.viewer, self.parent.combobox_image.currentText()).data
