@@ -12,7 +12,6 @@ class Selector:
         self.collection = ax.scatter(
             results[:, 1], results[:, 2], c=np.array([[0, 0.240802676, 0.70703125, 1]])
         )
-
         self.xys = self.collection.get_offsets()
         self.Npts = len(self.xys)
 
@@ -22,8 +21,8 @@ class Selector:
             raise ValueError("Collection must have a facecolor")
         elif len(self.fc) == 1:
             self.fc = np.tile(self.fc, (self.Npts, 1))
-
-        self.lasso = LassoSelector(ax, self.onselect, button=1)
+        
+        self.lasso = LassoSelector(ax, onselect = self.onselect, button=1)
 
     def onselect(self, vertices):
         path = Path(vertices)
@@ -33,11 +32,12 @@ class Selector:
         self.collection.set_facecolors(self.fc)
         self.canvas.draw_idle()
 
-    def disconnect(self):
+    """def disconnect(self):
+        print("disconnect")
         self.lasso.disconnect_events()
         self.fc[:, -1] = 1
         self.collection.set_facecolors(self.fc)
-        self.canvas.draw_idle()
+        self.canvas.draw_idle()"""
 
     def apply(self):
         widget = self.parent.parent

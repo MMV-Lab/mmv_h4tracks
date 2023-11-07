@@ -277,12 +277,11 @@ class AnalysisWindow(QWidget):
         self.parent.plot_window = QWidget()
         self.parent.plot_window.setLayout(QVBoxLayout())
         self.parent.plot_window.layout().addWidget(QLabel(ret["Description"]))
-
-        selector = Selector(self, axes, results)  # TODO: fix selector?
+        self.selector = Selector(self, axes, results)  # TODO: fix selector?
 
         self.parent.plot_window.layout().addWidget(canvas)
         btn_apply = QPushButton("Apply")
-        btn_apply.clicked.connect(selector.apply)
+        btn_apply.clicked.connect(self.selector.apply)
         self.parent.plot_window.layout().addWidget(btn_apply)
         print("Showing plot window")
         self.parent.plot_window.show()
