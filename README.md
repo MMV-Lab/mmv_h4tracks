@@ -7,19 +7,14 @@
 [![codecov](https://codecov.io/gh/MMV-Lab/mmv-tracking-napari/branch/main/graph/badge.svg)](https://codecov.io/gh/MMV-Lab/mmv-tracking-napari)
 [![napari hub](https://img.shields.io/endpoint?url=https://api.napari-hub.org/shields/mmv-tracking-napari)](https://napari-hub.org/plugins/mmv-tracking-napari)
 
-A simple plugin to use with napari
+A plugin to use with napari to segment and track cells via HumanInTheLoop(HITL)-approach.
 
 ----------------------------------
 
 This [napari] plugin was generated with [Cookiecutter] using [@napari]'s [cookiecutter-napari-plugin] template.
 
-<!--
-Don't miss the full getting started guide to set up your new package:
-https://github.com/napari/cookiecutter-napari-plugin#getting-started
-
-and review the napari docs for plugin developers:
-https://napari.org/plugins/stable/index.html
--->
+## Usage
+Load a zarr-file consisting of Image, Label and Tracks layer.
 
 ## Installation
 
@@ -65,3 +60,22 @@ If you encounter any problems, please [file an issue] along with a detailed desc
 [tox]: https://tox.readthedocs.io/en/latest/
 [pip]: https://pypi.org/project/pip/
 [PyPI]: https://pypi.org/
+
+## Notes
+
+false positives:
+	check if cell from eval has a match > .4 IoU. If no, check if cell has second highest match >= .2 IoU. If no, then fp
+	
+false negatives:
+	check if cell from gt has a match > .4. If no, then fn 
+	check if matched cell maxIoU is higher than match. If yes, then fn
+	ckeck if matched cell top 2 maxIoU are equal. If yes, then half fn (this will apply for both cells)
+	
+split cell:
+	check if cell from eval has more than one match, and if second highest match is >= .2 IoU. If yes, then sc
+	
+added edge:
+	check if a connection in gt has both cells matched in eval & the matched cells are connected. if no, then ae
+	
+deleted edge:
+	check if a connection in eval has both cells matched in gt & the matched cells are connected. if no, then de

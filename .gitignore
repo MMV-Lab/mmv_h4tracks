@@ -83,3 +83,7 @@ venv/
 # written by setuptools_scm
 **/_version.py
 
+/.pytest_cache/
+
+# program log
+hitl4trk.log
