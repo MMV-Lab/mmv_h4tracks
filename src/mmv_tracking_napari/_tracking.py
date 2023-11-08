@@ -446,7 +446,8 @@ class TrackingWindow(QWidget):
         layername = self.parent.combobox_tracks.currentText()
         if layername == "":
             layername = "Tracks"
-        self.viewer.add_tracks(tracks, name=layername)
+        layer = self.viewer.add_tracks(tracks, name=layername)
+        self.parent.combobox_tracks.setCurrentText(layer.name)
         QApplication.restoreOverrideCursor()
 
     @thread_worker
