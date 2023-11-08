@@ -46,6 +46,7 @@ class Selector:
         else:
             self.hightlighted = self.track_ids[self.highlighted]
         print("User selected tracks {}".format(self.hightlighted))
+        remove_window = False
         if not hasattr(widget, "tracking_window"):
             widget._tracking()
             remove_window = True

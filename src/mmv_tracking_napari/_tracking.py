@@ -356,7 +356,12 @@ class TrackingWindow(QWidget):
         df = pd.DataFrame(tracks, columns=["ID", "Z", "Y", "X"])
         df.sort_values(["ID", "Z"], ascending=True, inplace=True)
         self.parent.tracks = df.values
-        tracks_layer.data = self.parent.tracks
+        if tracks_layer is not None:
+            tracks_layer.data = self.parent.tracks
+        else:
+            print("adding new tracks layer")
+            layer = self.viewer.add_tracks(self.parent.tracks, name = "Tracks")
+            self.parent.combobox_tracks.setCurrentText(layer.name)
 
     def _add_tracking_callback(self):
         QApplication.setOverrideCursor(Qt.CrossCursor)
@@ -416,6 +421,7 @@ class TrackingWindow(QWidget):
                     label_layer, int(event.position[0]), selected_cell
                 )
                 worker.start()
+                worker.finished.connect(self._link)
 
     @thread_worker
     def _proximity_track_cell(self, label_layer, start_slice, id):
@@ -425,7 +431,7 @@ class TrackingWindow(QWidget):
             print("Track too short")
             return
         self.btn_insert_correspondence.setText("Tracking..")
-        self._link()
+        #self._link()
 
     def _proximity_track_all(self):
         worker = self._proximity_track_all_worker()
@@ -437,7 +443,10 @@ class TrackingWindow(QWidget):
         if tracks is None:
             return
         self.parent.tracks = tracks
-        self.viewer.add_tracks(tracks, name=self.parent.combobox_tracks.currentText())
+        layername = self.parent.combobox_tracks.currentText()
+        if layername == "":
+            layername = "Tracks"
+        self.viewer.add_tracks(tracks, name=layername)
         QApplication.restoreOverrideCursor()
 
     @thread_worker
