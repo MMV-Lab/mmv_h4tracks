@@ -139,7 +139,7 @@ class TrackingWindow(QWidget):
         if not tracks_data:
             print(
                 "No tracking data for ids "
-                + str(tracks)
+                + str(ids)
                 + ", displaying all tracks instead"
             )
             tracks_layer.data = self.parent.tracks
