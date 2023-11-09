@@ -60,3 +60,22 @@ If you encounter any problems, please [file an issue] along with a detailed desc
 [tox]: https://tox.readthedocs.io/en/latest/
 [pip]: https://pypi.org/project/pip/
 [PyPI]: https://pypi.org/
+
+## Notes
+
+false positives:
+	check if cell from eval has a match > .4 IoU. If no, check if cell has second highest match >= .2 IoU. If no, then fp
+	
+false negatives:
+	check if cell from gt has a match > .4. If no, then fn 
+	check if matched cell maxIoU is higher than match. If yes, then fn
+	ckeck if matched cell top 2 maxIoU are equal. If yes, then half fn (this will apply for both cells)
+	
+split cell:
+	check if cell from eval has more than one match, and if second highest match is >= .2 IoU. If yes, then sc
+	
+added edge:
+	check if a connection in gt has both cells matched in eval & the matched cells are connected. if no, then ae
+	
+deleted edge:
+	check if a connection in eval has both cells matched in gt & the matched cells are connected. if no, then de
