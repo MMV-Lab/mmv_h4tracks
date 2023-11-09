@@ -75,10 +75,12 @@ class TrackingWindow(QWidget):
         btn_auto_track.clicked.connect(self._add_auto_track_callback)
         btn_auto_track_all = QPushButton("Automatic tracking for all cells")
         btn_auto_track_all.clicked.connect(self._proximity_track_all)
+        btn_filter_tracks = QPushButton("Filter")
+        btn_filter_tracks.clicked.connect(self._filter_tracks)
 
         # Line Edits
         self.lineedit_trajectory = QLineEdit("")
-        self.lineedit_trajectory.editingFinished.connect(self._filter_tracks)
+        #self.lineedit_trajectory.editingFinished.connect(self._filter_tracks)
 
         ### Organize objects via widgets
         content = QWidget()
@@ -86,13 +88,14 @@ class TrackingWindow(QWidget):
 
         content.layout().addWidget(label_trajectory, 3, 0)
         content.layout().addWidget(self.lineedit_trajectory, 3, 1)
-        content.layout().addWidget(btn_delete_displayed_tracks, 3, 2)
+        content.layout().addWidget(btn_filter_tracks, 3, 2)
+        content.layout().addWidget(btn_delete_displayed_tracks, 3, 3)
         content.layout().addWidget(label_remove_correspondence, 4, 0)
-        content.layout().addWidget(self.btn_remove_correspondence, 4, 1)
-        content.layout().addWidget(btn_auto_track, 4, 2)
+        content.layout().addWidget(self.btn_remove_correspondence, 4, 1, 1, 2)
+        content.layout().addWidget(btn_auto_track, 4, 3)
         content.layout().addWidget(label_insert_correspondence, 5, 0)
-        content.layout().addWidget(self.btn_insert_correspondence, 5, 1)
-        content.layout().addWidget(btn_auto_track_all, 5, 2)
+        content.layout().addWidget(self.btn_insert_correspondence, 5, 1, 1, 2)
+        content.layout().addWidget(btn_auto_track_all, 5, 3)
 
         self.layout().addWidget(content)
 
