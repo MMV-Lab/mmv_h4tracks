@@ -13,6 +13,7 @@ from qtpy.QtWidgets import (
     QGridLayout,
     QApplication,
     QMessageBox,
+    QSizePolicy
 )
 from qtpy.QtCore import Qt
 from scipy import ndimage

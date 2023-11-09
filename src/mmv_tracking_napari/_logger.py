@@ -1,4 +1,5 @@
 import sys
+from pathlib import Path
 import time
 
 from qtpy.QtWidgets import QMessageBox, QInputDialog
@@ -9,8 +10,9 @@ def setup_logging():
     """
     Sets up for print to write to the log file
     """
-    plugin_directory = __file__.removesuffix("/src/mmv_tracking_napari/_logger.py")
-    path = f"{plugin_directory}/hitl4trk.log"
+    plugin_directory = Path(__file__).parent.parent.parent.absolute()
+    print(plugin_directory)
+    path = plugin_directory / "hitl4trk.log"
     file = open(path, "w")
     sys.stdout = file
     sys.stderr = file
