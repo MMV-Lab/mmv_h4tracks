@@ -176,4 +176,8 @@ def test_renamed_layer(viewer_with_widget, index):
     combobox = widget.layer_comboboxes[index]
     widget.viewer.layers[4].name = "New"
     assert combobox.findText("New") == 5
+<<<<<<< HEAD
 
+=======
+
+>>>>>>> ca9d00ac72ec2ed8da80f9c789640adade88c432
