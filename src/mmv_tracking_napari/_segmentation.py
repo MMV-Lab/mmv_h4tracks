@@ -96,6 +96,7 @@ class SegmentationWindow(QWidget):
         self.layout().addWidget(content)
 
     def _add_remove_callback(self):
+        self._remove_on_clicks()
         QApplication.setOverrideCursor(Qt.CrossCursor)
         for layer in self.viewer.layers:
 
@@ -207,8 +208,8 @@ class SegmentationWindow(QWidget):
         raise ValueError('No matching track found')
 
     def _add_select_callback(self):
-        QApplication.setOverrideCursor(Qt.CrossCursor)
         self._remove_on_clicks()
+        QApplication.setOverrideCursor(Qt.CrossCursor)
         for layer in self.viewer.layers:
 
             @layer.mouse_drag_callbacks.append
@@ -266,8 +267,8 @@ class SegmentationWindow(QWidget):
         """
         Sets a new id on the clicked label
         """
-        QApplication.setOverrideCursor(Qt.CrossCursor)
         self._remove_on_clicks()
+        QApplication.setOverrideCursor(Qt.CrossCursor)
         for layer in self.viewer.layers:
 
             @layer.mouse_drag_callbacks.append
@@ -279,8 +280,8 @@ class SegmentationWindow(QWidget):
         print("Added callback to replace cell")
 
     def _add_merge_callback(self):
-        QApplication.setOverrideCursor(Qt.CrossCursor)
         self._remove_on_clicks()
+        QApplication.setOverrideCursor(Qt.CrossCursor)
         for layer in self.viewer.layers:
 
             @layer.mouse_drag_callbacks.append
@@ -327,6 +328,10 @@ class SegmentationWindow(QWidget):
 
         # Replace the ID with the new id
         old_id = label_layer.data[z, y, x]
+        print(old_id)
+        """if old_id == 0:
+            notify("Can't change ID of background, please make sure to select a cell!")
+            return"""
         np.place(label_layer.data[z], label_layer.data[z] == old_id, id)
 
         # Refresh the layer
