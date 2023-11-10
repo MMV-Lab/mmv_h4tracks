@@ -1,8 +1,8 @@
-import zarr
 import csv
 
 import numpy as np
-from qtpy.QtWidgets import QMessageBox, QFileDialog
+import zarr
+from qtpy.QtWidgets import QFileDialog, QMessageBox
 
 from ._logger import choice_dialog, notify
 
@@ -58,7 +58,7 @@ def save_zarr(parent, zarr_file, layers, cached_tracks):
 
     print("Saving to file")
 
-    response = 1
+    response = 1    # ?? das wird so passen mit Zeile 64, aber vlt. kannst du mir das nochmal kurz erklären
     if not np.array_equal(layers[2].data, cached_tracks):
         print("Difference between displayed and full tracks detected")
         response = choice_dialog(
@@ -72,7 +72,7 @@ def save_zarr(parent, zarr_file, layers, cached_tracks):
                 QMessageBox.Cancel,
             ],  # returns 4194304
         )
-        if response == 4194304:
+        if response == 4194304: # ?? ich nehme den return Wert mal so hin :D Aber vlt. gehen wir das trotzdem hier nochmal zusammen durch
             print("Saving cancelled")
             return
 
