@@ -1,16 +1,18 @@
 import sys
 import time
+from pathlib import Path
 
-from qtpy.QtWidgets import QMessageBox, QInputDialog
 from napari.qt.threading import thread_worker
+from qtpy.QtWidgets import QInputDialog, QMessageBox
 
 
 def setup_logging():
     """
     Sets up for print to write to the log file
     """
-    plugin_directory = __file__.removesuffix("/src/mmv_tracking_napari/_logger.py")
-    path = f"{plugin_directory}/hitl4trk.log"
+    plugin_directory = Path(__file__).parent.parent.parent.absolute()
+    print(plugin_directory)
+    path = plugin_directory / "hitl4trk.log"
     file = open(path, "w")
     sys.stdout = file
     sys.stderr = file
@@ -34,7 +36,7 @@ def notify(text):
 
 
 @thread_worker
-def notify_with_delay(text):
+def notify_with_delay(text):    # ?? when is this needed?
     time.sleep(0.2)
     notify(text)
 
@@ -61,10 +63,11 @@ def choice_dialog(text, choices):
     print("Prompting user: '{}'".format(text))
     return msg.exec()
 
+
 def layer_select(parent, layertype):
     title = "Select Layer"
     text = f"Please select the layer that has the {layertype}"
     items = []
     for layer in parent.viewer.layers:
         items.append(layer.name)
-    return QInputDialog.getItem(parent, title, text, items, editable = False)
+    return QInputDialog.getItem(parent, title, text, items, editable=False)

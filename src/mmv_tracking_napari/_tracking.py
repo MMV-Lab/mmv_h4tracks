@@ -1,26 +1,27 @@
+import multiprocessing
+#import platform
+from multiprocessing import Pool
+
+import napari
 import numpy as np
 import pandas as pd
-import multiprocessing
-from multiprocessing import Pool
-import platform
-
-from qtpy.QtWidgets import (
-    QWidget,
-    QVBoxLayout,
-    QLabel,
-    QPushButton,
-    QLineEdit,
-    QGridLayout,
-    QApplication,
-    QMessageBox,
-)
-from qtpy.QtCore import Qt
-from scipy import ndimage
 from napari.qt.threading import thread_worker
-import napari
+from qtpy.QtCore import Qt
+from qtpy.QtWidgets import (
+    QApplication,
+    QGridLayout,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QPushButton,
+#    QSizePolicy,
+    QVBoxLayout,
+    QWidget,
+)
+from scipy import ndimage
 
-from ._logger import notify, notify_with_delay, choice_dialog
 from ._grabber import grab_layer
+from ._logger import choice_dialog, notify, notify_with_delay
 
 
 class TrackingWindow(QWidget):
@@ -40,7 +41,9 @@ class TrackingWindow(QWidget):
         """
         Parameters
         ----------
-        """
+        parent : QWidget
+        Parent widget for the tracking         
+        """         # ?? hier vlt. noch ergänzen
         super().__init__()
         self.setLayout(QVBoxLayout())
         self.setWindowTitle("Tracking correction")
@@ -75,10 +78,12 @@ class TrackingWindow(QWidget):
         btn_auto_track.clicked.connect(self._add_auto_track_callback)
         btn_auto_track_all = QPushButton("Automatic tracking for all cells")
         btn_auto_track_all.clicked.connect(self._proximity_track_all)
+        btn_filter_tracks = QPushButton("Filter")
+        btn_filter_tracks.clicked.connect(self._filter_tracks)
 
         # Line Edits
         self.lineedit_trajectory = QLineEdit("")
-        self.lineedit_trajectory.editingFinished.connect(self._filter_tracks)
+        #self.lineedit_trajectory.editingFinished.connect(self._filter_tracks)  # ?? kann weg?
 
         ### Organize objects via widgets
         content = QWidget()
@@ -86,17 +91,18 @@ class TrackingWindow(QWidget):
 
         content.layout().addWidget(label_trajectory, 3, 0)
         content.layout().addWidget(self.lineedit_trajectory, 3, 1)
-        content.layout().addWidget(btn_delete_displayed_tracks, 3, 2)
+        content.layout().addWidget(btn_filter_tracks, 3, 2)
+        content.layout().addWidget(btn_delete_displayed_tracks, 3, 3)
         content.layout().addWidget(label_remove_correspondence, 4, 0)
-        content.layout().addWidget(self.btn_remove_correspondence, 4, 1)
-        content.layout().addWidget(btn_auto_track, 4, 2)
+        content.layout().addWidget(self.btn_remove_correspondence, 4, 1, 1, 2)
+        content.layout().addWidget(btn_auto_track, 4, 3)
         content.layout().addWidget(label_insert_correspondence, 5, 0)
-        content.layout().addWidget(self.btn_insert_correspondence, 5, 1)
-        content.layout().addWidget(btn_auto_track_all, 5, 2)
+        content.layout().addWidget(self.btn_insert_correspondence, 5, 1, 1, 2)
+        content.layout().addWidget(btn_auto_track_all, 5, 3)
 
         self.layout().addWidget(content)
 
-    def _filter_tracks(self):
+    def _filter_tracks(self):   # ?? hier vlt. noch Beschreibung ergänzen
         print("Filtering tracks")
         input_text = self.lineedit_trajectory.text()
         if input_text == "":
@@ -116,8 +122,8 @@ class TrackingWindow(QWidget):
                 )
                 return
 
-        # Remove values < 0 and duplicates
-        ids = filter(lambda value: value >= 0, tracks)
+        # Remove values < 0 and duplicates      # ?? lass uns mal zusammen schauen, ob wir das hier noch effizienter und übersichtlicher hinkriegen
+        ids = filter(lambda value: value >= 0, tracks)  
         ids = list(dict.fromkeys(ids))
         filtered_text = ""
         for i in range(0, len(ids)):
@@ -135,11 +141,11 @@ class TrackingWindow(QWidget):
         if ids == []:
             tracks_layer.data = self.parent.tracks
             return
-        tracks_data = [track for track in self.parent.tracks if track[0] in ids]
+        tracks_data = [track for track in self.parent.tracks if track[0] in ids]    # ?? das hier können wir problemlos nach der if Abfrage machen, oder?
         if not tracks_data:
             print(
                 "No tracking data for ids "
-                + str(tracks)
+                + str(ids)
                 + ", displaying all tracks instead"
             )
             tracks_layer.data = self.parent.tracks
