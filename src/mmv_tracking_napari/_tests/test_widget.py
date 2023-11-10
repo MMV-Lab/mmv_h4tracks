@@ -6,7 +6,7 @@ import pytest
 AMOUNT_OF_COMBOBOXES = 3
 
 # make_napari_viewer is a pytest fixture that returns a napari viewer object
-# capsys is a pytest fixture that captures stdout and stderr output streams
+# capsys is a pytest fixture that captures stdout and stderr output streams     # ?? what is this for?
 
 @pytest.fixture
 def viewer_with_widget(make_napari_viewer):
