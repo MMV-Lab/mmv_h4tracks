@@ -21,7 +21,7 @@ import copy
 import zarr
 
 from ._analysis import AnalysisWindow
-from ._logger import setup_logging, notify, layer_select
+from ._logger import setup_logging, notify
 from ._processing import ProcessingWindow
 from ._reader import open_dialog, napari_get_reader
 from ._segmentation import SegmentationWindow
