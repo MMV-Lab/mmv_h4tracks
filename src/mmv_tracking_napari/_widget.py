@@ -68,7 +68,7 @@ class MMVTracking(QWidget):
         viewer = napari.current_viewer() if viewer is None else viewer
         self.viewer = viewer
 
-        setup_logging()
+        #setup_logging()
 
         ### QObjects
 
