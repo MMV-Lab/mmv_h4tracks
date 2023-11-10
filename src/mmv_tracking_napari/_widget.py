@@ -363,7 +363,9 @@ class MMVTracking(QWidget):
         track_data = grab_layer(self.viewer, tracks_name).data
 
         dialog = QFileDialog()
-        path = f"{dialog.getSaveFileName()[0]}.zarr"
+        path = f"{dialog.getSaveFileName()[0]}"
+        if not path.endswith(".zarr"):
+            path += ".zarr"
         if path == ".zarr":
             return
         print(path)
