@@ -44,6 +44,7 @@ class TrackingWindow(QWidget):
         """
         super().__init__()
         self.setLayout(QVBoxLayout())
+        self.setWindowFlag(Qt.WindowStaysOnTopHint)
         self.setWindowTitle("Tracking correction")
         self.parent = parent
         self.viewer = parent.viewer

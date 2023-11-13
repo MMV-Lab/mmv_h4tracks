@@ -58,6 +58,7 @@ class ProcessingWindow(QWidget):
             The parent widget
         """
         super().__init__()
+        self.setWindowFlag(Qt.WindowStaysOnTopHint)
         self.setLayout(QVBoxLayout())
         self.setWindowTitle("Data processing")
         self.parent = parent
