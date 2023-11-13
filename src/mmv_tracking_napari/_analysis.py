@@ -2,7 +2,7 @@ import numpy as np
 import multiprocessing
 from multiprocessing import Pool
 from scipy import ndimage
-import platform
+# import platform   ?? needed?
 
 from qtpy.QtWidgets import (
     QWidget,
@@ -146,17 +146,30 @@ class AnalysisWindow(QWidget):
         self.layout().addWidget(content)
 
     def _calculate_speed(self, tracks):
+        """
+        Calculates the speed of each track
+
+        Parameters
+        ----------
+        tracks : ??     # nd array
+            ??          # (N,4) shape array, which follows napari's trackslayer format (ID, z, y, x)
+
+        Returns
+        -------
+        nd array
+            # ??  (N,3) shape array, which contains the ID, average speed and standard deviation of speed
+        """        
         for unique_id in np.unique(tracks[:, 0]):
             track = np.delete(tracks, np.where(tracks[:, 0] != unique_id), 0)
-            distance = []
+            accumulated_distance = []
             for i in range(0, len(track) - 1):
-                distance.append(
+                accumulated_distance.append(
                     np.hypot(
                         track[i, 2] - track[i + 1, 2], track[i, 3] - track[i + 1, 3]
                     )
                 )
-            average = np.around(np.average(distance), 3)
-            std_deviation = np.around(np.std(distance), 3)
+            average = np.around(np.average(accumulated_distance), 3)
+            std_deviation = np.around(np.std(accumulated_distance), 3)
             try:
                 speeds = np.append(speeds, [[unique_id, average, std_deviation]], 0)
             except UnboundLocalError:
@@ -164,9 +177,23 @@ class AnalysisWindow(QWidget):
         return speeds
 
     def _calculate_size(self, tracks, segmentation):
-        unique_ids = np.unique(tracks[:, 0])
+        """
+        Calculates the size of each tracked cell
+
+        Parameters
+        ----------
+        tracks : ??     # nd array
+            ??          # (N,4) shape array, which follows napari's trackslayer format (ID, z, y, x)
+        segmentation : ??   # nd array
+            ??              # (z,y,x) shape array, which follows napari's labelslayer format
+
+        Returns
+        -------
+        nd array
+            # ??  (N,3) shape array, which contains the ID, average speed and standard deviation of speed
+        """           
         track_and_segmentation = []
-        for unique_id in unique_ids:
+        for unique_id in np.unique(tracks[:, 0]):
             track_and_segmentation.append(
                 [tracks[np.where(tracks[:, 0] == unique_id)], segmentation]
             )
