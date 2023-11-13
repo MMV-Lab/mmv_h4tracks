@@ -37,6 +37,7 @@ class SegmentationWindow(QWidget):
             The Napari viewer instance
         """
         super().__init__()
+        self.setWindowFlag(Qt.WindowStaysOnTopHint)
         self.setLayout(QVBoxLayout())
         self.setWindowTitle("Segmentation correction")
         self.parent = parent

@@ -17,6 +17,7 @@ from qtpy.QtWidgets import (
     QTableWidget,
     QSizePolicy,
 )
+from qtpy.QtCore import Qt
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from napari.qt.threading import thread_worker
@@ -45,6 +46,7 @@ class AnalysisWindow(QWidget):
         ----------
         """
         super().__init__()
+        self.setWindowFlag(Qt.WindowStaysOnTopHint)
         self.parent = parent
         self.viewer = parent.viewer
         self.setLayout(QVBoxLayout())
