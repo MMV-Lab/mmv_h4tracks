@@ -16,6 +16,7 @@ from qtpy.QtWidgets import (
 )
 from qtpy.QtCore import Qt
 
+from pathlib import Path
 import numpy as np
 import copy
 import zarr
@@ -75,6 +76,7 @@ class MMVTracking(QWidget):
         # Labels
         title = QLabel("<font color='green'>HITL4Trk</font>")
         title.setMaximumHeight(100)
+        self.loaded_file_name = QLabel()
         computation_mode = QLabel("Computation mode")
         computation_mode.setMaximumHeight(20)
         label_image = QLabel("Image:")
@@ -139,7 +141,8 @@ class MMVTracking(QWidget):
         widget.layout().addWidget(computation_mode, 1, 0, 1, -1)
         widget.layout().addWidget(self.rb_eco, 2, 0)
         widget.layout().addWidget(rb_heavy, 2, 1)
-        widget.layout().addWidget(invisi_line, 3, 0, 1, -1)
+        widget.layout().addWidget(self.loaded_file_name, 3, 0,1,2)
+        widget.layout().addWidget(invisi_line, 3, 2, 1, -1)
         widget.layout().addWidget(btn_load, 4, 0)
         widget.layout().addWidget(btn_save, 4, 1)
         widget.layout().addWidget(btn_save_as, 4, 2)
@@ -311,6 +314,7 @@ class MMVTracking(QWidget):
         self.combobox_image.setCurrentText("Raw Image")
         self.combobox_segmentation.setCurrentText("Segmentation Data")
         self.combobox_tracks.setCurrentText("Tracks")
+        self.loaded_file_name.setText(Path(filepath).name)
         QApplication.restoreOverrideCursor()
 
     def _save(self):
