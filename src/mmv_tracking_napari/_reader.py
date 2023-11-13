@@ -1,3 +1,4 @@
+"""Module providing functionality to for reading data from disk"""
 import zarr
 from qtpy.QtWidgets import QFileDialog
 
@@ -26,10 +27,10 @@ def open_dialog(parent, filetype="*.zarr", directory=""):
     filetype_name = filetype[2:].capitalize()
     print("Showing dialog")
     filepath = dialog.getExistingDirectory(
-        parent, "Select {}-File".format(filetype_name), directory=directory
+        parent, f"Select {filetype_name}-File", directory=directory
     )
     print("Dialog has been closed")
-    print("Selected {} as path".format(filepath))
+    print(f"Selected {filepath} as path")
     return filepath
 
 
@@ -48,13 +49,13 @@ def napari_get_reader(path):
         If the path is a recognized format, return a function that accepts the
         same path list or list of paths, and returns a list of layer data tuples.
     """
-    print("Got {} as path".format(path))
+    print(f"Got {path} as path")
     if isinstance(path, list):
         # reader plugins may be handed single path, or a list of paths.
         # if it is a list, it is assumed to be an image stack...
         # so we are only going to look at the first file.
         path = path[0]
-        print("Selected {} as path from list".format(path))
+        print(f"Selected {path} as path from list")
 
     # if we know we cannot read the file, we immediately return None.
     if not path.endswith(".zarr"):

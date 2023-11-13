@@ -32,11 +32,11 @@ def save_dialog(parent, filetype="*.zarr", directory=""):
     print("Showing dialog")
     filepath = dialog.getSaveFileName(
         parent,
-        "Select location for {}-File to be created".format(filetype_name),
+        f"Select location for {filetype_name}-File to be created",
         directory,
     )
     print("Dialog has been closed")
-    print("Selected {} as path".format(filepath))
+    print(f"Selected {filepath} as path")
     return filepath
 
 
@@ -69,8 +69,8 @@ def save_zarr(parent, zarr_file, layers, cached_tracks):
             [
                 ("Save Selected", QMessageBox.YesRole),  # returns 0
                 ("Save All", QMessageBox.NoRole),  # returns 1
-                QMessageBox.Cancel,
-            ],  # returns 4194304
+                QMessageBox.Cancel,  # returns 4194304
+            ],
         )
         if response == 4194304: # ?? ich nehme den return Wert mal so hin :D Aber vlt. gehen wir das trotzdem hier nochmal zusammen durch
             print("Saving cancelled")
@@ -113,6 +113,16 @@ def save_zarr(parent, zarr_file, layers, cached_tracks):
 
 
 def save_csv(file, data):
+    """
+    Save data to a csv file
+
+    Parameters
+    ----------
+    file : str
+        Path of the csv file to write to
+    data : list
+        CSV data to write to disk
+    """
     csvfile = open(file[0], "w", newline="")
     writer = csv.writer(csvfile)
     [writer.writerow(row) for row in data]
