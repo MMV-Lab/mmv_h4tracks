@@ -36,7 +36,7 @@ def notify(text):
 
 
 @thread_worker
-def notify_with_delay(text):    # ?? when is this needed?
+def notify_with_delay(text):
     """
     Shows a notification dialog after a brief delay
 
@@ -48,8 +48,8 @@ def notify_with_delay(text):    # ?? when is this needed?
     text : str
         The text displayed as the notification
     """
-    time.sleep(0.2)             # !! it is used when a user clicking on a layer opens a messagebox
-    notify(text)                # !! and prevents the layer from sticking to the cursor
+    time.sleep(0.2)
+    notify(text)
 
 
 def choice_dialog(text, choices):

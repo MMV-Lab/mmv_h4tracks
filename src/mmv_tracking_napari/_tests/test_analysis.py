@@ -1,17 +1,21 @@
 """Module providing tests for the analysis widget"""
-#import os
+# import os
 from pathlib import Path
 
 import numpy as np
 import pytest
-#import tifffile
-from aicsimageio import AICSImage   # !! imports hinzufügen ist okay, aber dann müssen die auch in die
-                                    # !! requirements
+
+# import tifffile
+from aicsimageio import (
+    AICSImage,
+)  # !! imports hinzufügen ist okay, aber dann müssen die auch in die
+
+# !! requirements
 from mmv_tracking_napari import MMVTracking
 
 # this tests if the analysis returns the proper values
 PATH = Path(__file__).parent / "data"
-#PATH = f"{os.path.dirname(__file__)}/data"
+# PATH = f"{os.path.dirname(__file__)}/data"
 
 
 @pytest.fixture
@@ -36,7 +40,7 @@ def set_widget_up(make_napari_viewer):
         print(file.stem)
         segmentation = AICSImage(file).get_image_data("ZYX")
         name = file.stem
-        viewer.add_labels(segmentation, name = name)
+        viewer.add_labels(segmentation, name=name)
     """for file in os.listdir(f"{PATH}/segmentation"):
         segmentation = AICSImage(f"{PATH}/segmentation/{file}").get_image_data("ZYX")
         name = Path(file).stem
@@ -46,14 +50,13 @@ def set_widget_up(make_napari_viewer):
         print(file.stem)
         tracks = np.load(file)
         name = file.stem
-        viewer.add_tracks(tracks, name = name)
+        viewer.add_tracks(tracks, name=name)
     """for file in os.listdir(f"{PATH}/tracks"):
         tracks = np.load(PATH + "/tracks/" + file)
         name = Path(file).stem
         #name = os.path.basename(file)
         viewer.add_tracks(tracks, name=name)"""
     my_widget.combobox_segmentation.setCurrentIndex(
-
         my_widget.combobox_segmentation.findText(SEGMENTATION_GT)
     )
     yield my_widget
@@ -205,6 +208,7 @@ def test_segmentation_evaluation(get_widget, score, area, frames):
                 assert window.get_dice(gt, seg) == 6 / 7
             elif score == "f1":
                 assert window.get_f1(gt, seg) == 6 / 7
+
 
 @pytest.mark.eval
 @pytest.mark.eval_tracking
