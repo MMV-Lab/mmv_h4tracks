@@ -400,6 +400,9 @@ class AnalysisWindow(QWidget):
         save_csv(file, data)
 
     def _filter_tracks_by_parameters(self, tracks, direction):
+        #[[id, x, y, direction, distance]]
+        #[[id, accumulated_distance, len(track)]]
+        distances = self._calculate_accumulated_distance(tracks)
         if self.lineedit_movement.text() == "":
             min_movement = 0
             movement_mask = np.unique(tracks[:, 0])
@@ -416,7 +419,7 @@ class AnalysisWindow(QWidget):
                     )
                     raise ValueError
                 movement_mask = direction[
-                    np.where(direction[:, 4] >= min_movement)[0], 0
+                    np.where(distances[:, 1] >= min_movement)[0], 0
                 ]
 
         if self.lineedit_track_duration.text() == "":
@@ -504,7 +507,7 @@ class AnalysisWindow(QWidget):
         rows.append([None])
         rows.append(
             [
-                "Movement Threshold: {} pixels/frame".format(str(min_movement)),
+                "Movement Threshold: {} pixels".format(str(min_movement)),
                 "Duration Threshold: {} frames".format(str(min_duration)),
             ]
         )
