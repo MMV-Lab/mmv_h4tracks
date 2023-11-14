@@ -485,20 +485,24 @@ class AnalysisWindow(QWidget):
         )
         save_csv(file, data)
 
-    def _filter_tracks_by_parameters(self, tracks, direction):  # ?? siehe oben: ist es korrekt, dass wir hier direction brauchen? Können wir das hier auf die accumulated distance umstellen
-        """
-        ??
+    # def _filter_tracks_by_parameters(self, tracks, direction):  # ?? siehe oben: ist es korrekt, dass wir hier direction brauchen? Können wir das hier auf die accumulated distance umstellen
+    #     """
+    #     ??
 
-        Parameters
-        ----------
-        ?? : ??     
-            ??       
+    #     Parameters
+    #     ----------
+    #     ?? : ??     
+    #         ??       
 
-        Returns
-        -------
-        ??: ??
-            ??      
-        """        
+    #     Returns
+    #     -------
+    #     ??: ??
+    #         ??      
+    #     """        
+    def _filter_tracks_by_parameters(self, tracks, direction):
+        #[[id, x, y, direction, distance]]
+        #[[id, accumulated_distance, len(track)]]
+        distances = self._calculate_accumulated_distance(tracks)
         if self.lineedit_movement.text() == "":
             min_movement = 0
             movement_mask = np.unique(tracks[:, 0])
@@ -514,9 +518,12 @@ class AnalysisWindow(QWidget):
                         "Please use an integer instead of a float for movement minimum"
                     )
                     raise ValueError
-                movement_mask = direction[  # ?? siehe oben: hier die in der direction gespeicherte distance zu nutzen ist verwirrend.
-                    np.where(direction[:, 4] >= min_movement)[0], 0 # ?? können wir vielleicht einfach die accumulated distance übergeben und dann hier aufrufen?
-                ]                                                   # ?? oder hatte das mit der euclidean distance Performancegründe? Aber in jedem Fall: direction[:,4] für die distance ist verwirrend
+                # movement_mask = direction[  # ?? siehe oben: hier die in der direction gespeicherte distance zu nutzen ist verwirrend.
+                #     np.where(direction[:, 4] >= min_movement)[0], 0 # ?? können wir vielleicht einfach die accumulated distance übergeben und dann hier aufrufen?
+                # ]                                                   # ?? oder hatte das mit der euclidean distance Performancegründe? Aber in jedem Fall: direction[:,4] für die distance ist verwirrend
+                movement_mask = direction[
+                    np.where(distances[:, 1] >= min_movement)[0], 0
+                ]
 
         if self.lineedit_track_duration.text() == "":
             min_duration = 0
@@ -617,7 +624,7 @@ class AnalysisWindow(QWidget):
         rows.append([None])
         rows.append(
             [
-                "Movement Threshold: {} pixels/frame".format(str(min_movement)),
+                "Movement Threshold: {} pixels".format(str(min_movement)),
                 "Duration Threshold: {} frames".format(str(min_duration)),
             ]
         )

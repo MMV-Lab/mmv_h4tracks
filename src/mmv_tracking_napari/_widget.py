@@ -20,6 +20,9 @@ from pathlib import Path
 import numpy as np
 import copy
 import zarr
+from napari.layers.image.image import Image
+from napari.layers.labels.labels import Labels
+from napari.layers.tracks.tracks import Tracks
 
 from ._analysis import AnalysisWindow
 from ._logger import setup_logging, notify
@@ -170,42 +173,105 @@ class MMVTracking(QWidget):
         self.viewer.layers.events.inserted.connect(self.add_entry_to_comboboxes)
         self.viewer.layers.events.removed.connect(self.remove_entry_from_comboboxes)
         for layer in self.viewer.layers:
+            if isinstance(layer, Image):
+                self.layer_comboboxes[0].addItem(layer.name)
+            elif isinstance(layer, Labels):
+                self.layer_comboboxes[1].addItem(layer.name)
+            elif isinstance(layer, Tracks):
+                self.layer_comboboxes[2].addItem(layer.name)
+
             layer.events.name.connect(
                 self.rename_entry_in_comboboxes
             )  # doesn't contain index
         self.viewer.layers.events.moving.connect(self.reorder_entry_in_comboboxes)
 
     def add_entry_to_comboboxes(self, event):
-        for combobox in self.layer_comboboxes:
-            combobox.addItem(event.value.name)
+        if isinstance(event.value, Image):
+            self.layer_comboboxes[0].addItem(event.value.name)
+        elif isinstance(event.value, Labels):
+            self.layer_comboboxes[1].addItem(event.value.name)
+        elif isinstance(event.value, Tracks):
+            self.layer_comboboxes[2].addItem(event.value.name)
+        else:
+            return
+
         event.value.events.name.connect(
             self.rename_entry_in_comboboxes
         )  # contains index
 
     def remove_entry_from_comboboxes(self, event):
-        for combobox in self.layer_comboboxes:
-            combobox.removeItem(event.index + 1)
+        if isinstance(event.value, Image):
+            combobox = self.layer_comboboxes[0]
+        elif isinstance(event.value, Labels):
+            combobox = self.layer_comboboxes[1]
+        elif isinstance(event.value, Tracks):
+            combobox = self.layer_comboboxes[2]
+        else:
+            return
+        index = combobox.findText(event.value.name)
+        combobox.removeItem(index)
 
     def rename_entry_in_comboboxes(self, event):
         if not hasattr(event, "index"):
             event.index = self.viewer.layers.index(event.source.name)
-        for combobox in self.layer_comboboxes:
-            index = combobox.currentIndex()
-            combobox.removeItem(event.index + 1)
-            combobox.insertItem(event.index + 1, event.source.name)
-            combobox.setCurrentIndex(index)
+        layer = self.viewer.layers[event.index]
+        if isinstance(layer, Image):
+            combobox = self.layer_comboboxes[0]
+        elif isinstance(layer, Labels):
+            combobox = self.layer_comboboxes[1]
+        elif isinstance(layer, Tracks):
+            combobox = self.layer_comboboxes[2]
+        else:
+            return
+        current_index = combobox.currentIndex()
+        entries = [
+            self.viewer.layers[i].name
+            for i in range(len(self.viewer.layers))
+            if isinstance(self.viewer.layers[i], layer.__class__)
+        ]
+        combobox.clear()
+        combobox.addItem("")
+        combobox.addItems(entries)
+        combobox.setCurrentIndex(current_index)
 
     def reorder_entry_in_comboboxes(self, event):
-        for combobox in self.layer_comboboxes:
-            current_item = combobox.currentText()
-            item = combobox.itemText(event.index + 1)
-            combobox.removeItem(event.index + 1)
-            new_index = event.new_index
-            if event.index > new_index:
-                new_index += 1
-            combobox.insertItem(new_index, item)
-            index = combobox.findText(current_item)
-            combobox.setCurrentIndex(index)
+        if event.index < event.new_index:
+            target_index = event.new_index - 1
+            low_index, high_index = event.index, target_index
+        else:
+            target_index = event.new_index
+            low_index, high_index = event.new_index + 1, event.index + 1
+
+        layer = self.viewer.layers[target_index]
+        if isinstance(layer, Image):
+            combobox = self.layer_comboboxes[0]
+            layertype = Image
+        elif isinstance(layer, Labels):
+            layertype = Labels
+            combobox = self.layer_comboboxes[1]
+        elif isinstance(layer, Tracks):
+            layertype = Tracks
+            combobox = self.layer_comboboxes[2]
+        else:
+            return
+
+        change = 0
+        for layer in self.viewer.layers[low_index:high_index]:
+            if isinstance(layer, layertype):
+                change += 1
+        if change == 0:
+            return
+
+        current_index = combobox.findText(layer.name)
+        if event.index < event.new_index:
+            new_index = current_index + change
+        else:
+            new_index = current_index - change
+        current_item = combobox.currentText()
+        combobox.removeItem(current_index)
+        combobox.insertItem(new_index, layer.name)
+        index = combobox.findText(current_item)
+        combobox.setCurrentIndex(index)
 
     """def apply_on_clicks(self, event):
         for on_click in self.on_clicks:
