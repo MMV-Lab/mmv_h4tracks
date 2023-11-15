@@ -244,7 +244,7 @@ def test_false_positives(set_widget_up, layername, expected_value):
 @pytest.mark.eval_tracking
 @pytest.mark.unit
 @pytest.mark.parametrize(
-    "layername, expected_value, GT",
+    "layername, expected_value, gt",
     [
         ("false_negative", 1, "GT"),
         ("false_negative_1", 5, "GT"),

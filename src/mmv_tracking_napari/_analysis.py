@@ -1,8 +1,7 @@
-import numpy as np
 import multiprocessing
 from multiprocessing import Pool
+import numpy as np
 from scipy import ndimage
-# import platform   ?? needed?
 
 from qtpy.QtWidgets import (
     QWidget,
@@ -23,6 +22,7 @@ from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from napari.qt.threading import thread_worker
 import napari
 
+from mmv_tracking_napari import IOU_THRESHOLD
 from ._grabber import grab_layer
 from ._logger import notify
 from ._selector import Selector
@@ -207,7 +207,7 @@ class AnalysisWindow(QWidget):
         print("Running on {} processes max".format(AMOUNT_OF_PROCESSES))
 
         with Pool(AMOUNT_OF_PROCESSES) as p:
-            sizes = p.starmap(func, track_and_segmentation)
+            sizes = p.starmap(calculate_size_single_track, track_and_segmentation)
 
         return np.array(sizes)
 
@@ -242,12 +242,11 @@ class AnalysisWindow(QWidget):
                     direction += 180
             if direction >= 360:
                 direction -= 360
-            distance = np.around(np.sqrt(np.square(x) + np.square(y)), 3)   # ?? das hier ist die euclidean_distance. Brauchen wir die Kombination aus direction und eucl. distance zwangsläufig 
-            direction = np.around(direction, 3)                             # ?? oder ist das nur ein "Komfortgewinn" für uns an dieser Stelle?
-            try:                                                            # ?? Falls nur ein Komfortgewinn, sollten wir das hier raus nehmen, das hat in _filter_tracks_by_parameters für mich für Verwirrung gesorgt
-                retval = np.append(retval, [[unique_id, x, y, direction, distance]], 0)     # ?? Und zusätzlich stelle wir in _filter_tracks_by_parameters am besten auf die accumulated distance um
+            direction = np.around(direction, 3)
+            try:
+                retval = np.append(retval, [[unique_id, x, y, direction]], 0)
             except UnboundLocalError:
-                retval = np.array([[unique_id, x, y, direction, distance]])
+                retval = np.array([[unique_id, x, y, direction]])
         return retval
 
     def _calculate_euclidean_distance(self, tracks):
@@ -341,20 +340,24 @@ class AnalysisWindow(QWidget):
         title = ret["Name"]
         results = ret["Results"]
 
-        data = axes.scatter(                    # ?? VSC says data is not accessed, can we remove this?
+        axes.scatter(
             results[:, 1], results[:, 2], c=np.array([[0, 0.240802676, 0.70703125, 1]])
         )
 
+        xabs_max = abs(max(axes.get_xlim(), key = abs))
+        yabs_max = abs(max(axes.get_ylim(), key = abs))
+        abs_max = max(xabs_max, yabs_max)
+        axes.set_xlim(xmin = -abs_max, xmax = abs_max)
+        axes.set_ylim(ymin = -abs_max, ymax = abs_max)
         axes.set_title(title, {"fontsize": 18, "color": "white"})
-        if not title == "Direction":
-            axes.set_xlabel(ret["x_label"])
-            axes.set_ylabel(ret["y_label"])
+        axes.set_xlabel(ret["x_label"])
+        axes.set_ylabel(ret["y_label"])
 
         canvas = FigureCanvas(fig)
         self.parent.plot_window = QWidget()
         self.parent.plot_window.setLayout(QVBoxLayout())
         self.parent.plot_window.layout().addWidget(QLabel(ret["Description"]))
-        self.selector = Selector(self, axes, results)  # TODO: fix selector?        ?? I think we can remove this comment now, right?
+        self.selector = Selector(self, axes, results)
 
         self.parent.plot_window.layout().addWidget(canvas)
         btn_apply = QPushButton("Apply")
@@ -416,6 +419,7 @@ class AnalysisWindow(QWidget):
             print("Plotting direction")
             retval.update({"Description": "Scatterplot: Travel direction & Distance"})
             retval.update({"Results": self._calculate_direction(tracks_layer.data)})
+            retval.update({"x_label": "Δx", "y_label": "Δy"})
         elif metric == "Euclidean distance":
             print("Plotting euclidean distance")
             retval.update({"Description": "Scatterplot x vs y"})
@@ -472,7 +476,7 @@ class AnalysisWindow(QWidget):
                 filtered_mask,
                 min_movement,
                 min_duration,
-            ) = self._filter_tracks_by_parameters(tracks, direction)    # ?? siehe nachfolgende Kommentare in _filter_tracks_by_parameters
+            ) = self._filter_tracks_by_parameters(tracks)
         except ValueError:
             return
 
@@ -485,23 +489,7 @@ class AnalysisWindow(QWidget):
         )
         save_csv(file, data)
 
-    # def _filter_tracks_by_parameters(self, tracks, direction):  # ?? siehe oben: ist es korrekt, dass wir hier direction brauchen? Können wir das hier auf die accumulated distance umstellen
-    #     """
-    #     ??
-
-    #     Parameters
-    #     ----------
-    #     ?? : ??     
-    #         ??       
-
-    #     Returns
-    #     -------
-    #     ??: ??
-    #         ??      
-    #     """        
-    def _filter_tracks_by_parameters(self, tracks, direction):
-        #[[id, x, y, direction, distance]]
-        #[[id, accumulated_distance, len(track)]]
+    def _filter_tracks_by_parameters(self, tracks):
         distances = self._calculate_accumulated_distance(tracks)
         if self.lineedit_movement.text() == "":
             min_movement = 0
@@ -518,10 +506,7 @@ class AnalysisWindow(QWidget):
                         "Please use an integer instead of a float for movement minimum"
                     )
                     raise ValueError
-                # movement_mask = direction[  # ?? siehe oben: hier die in der direction gespeicherte distance zu nutzen ist verwirrend.
-                #     np.where(direction[:, 4] >= min_movement)[0], 0 # ?? können wir vielleicht einfach die accumulated distance übergeben und dann hier aufrufen?
-                # ]                                                   # ?? oder hatte das mit der euclidean distance Performancegründe? Aber in jedem Fall: direction[:,4] für die distance ist verwirrend
-                movement_mask = direction[
+                movement_mask = distances[
                     np.where(distances[:, 1] >= min_movement)[0], 0
                 ]
 
@@ -535,7 +520,7 @@ class AnalysisWindow(QWidget):
                 notify("Please use an integer instead of text for duration minimum")
                 raise ValueError
             else:
-                if min_duration != int(self.lineedit_track_duration.text()):  # ?? if min_duration != float: "please use integer", müssen wir das float hier durch int ersetzen?
+                if min_duration != int(self.lineedit_track_duration.text()):
                     notify(
                         "Please use an integer instead of a float for duration minimum"
                     )
@@ -740,15 +725,13 @@ class AnalysisWindow(QWidget):
                 [
                     "Average direction [°]",
                     "Standard deviation of direction [°]",
-                    "Average distance [# pixels]",
                 ]
             )
-            individual_metrics.extend(["Direction [°]", "Distance [# pixels]"])
+            individual_metrics.extend(["Direction [°]"])
             all_values.extend(
                 [
                     np.around(np.average(self.direction[:, 3]), 3),
                     np.around(np.std(self.direction[:, 3]), 3),
-                    np.around(np.average(self.direction[:, 4]), 3),
                 ]
             )
             valid_values.extend(
@@ -767,16 +750,6 @@ class AnalysisWindow(QWidget):
                         np.std(
                             [
                                 self.direction[i, 3]
-                                for i in range(len(self.direction))
-                                if self.direction[i, 0] in filtered_mask
-                            ]
-                        ),
-                        3,
-                    ),
-                    np.around(
-                        np.average(
-                            [
-                                self.direction[i, 4]
                                 for i in range(len(self.direction))
                                 if self.direction[i, 0] in filtered_mask
                             ]
@@ -902,12 +875,12 @@ class AnalysisWindow(QWidget):
             if "Size" in metrics:
                 value.extend([metrics["Size"][id][1], metrics["Size"][id][2]])
             if "Direction" in metrics:
-                value.extend([metrics["Direction"][id][3], metrics["Direction"][id][4]])    # ?? können wir vereinheitlichen, dass in den Metriken immer zuerst IDs, average, std deviation stehen?
-            if "Euclidean distance" in metrics:                                             # ?? dann hätten wir hier nicht manchmal 1+2, 3+4 oder 1+3
+                value.extend([metrics["Direction"][id][3]])     # using index 3 as 1 and 2 are solely used for plotting
+            if "Euclidean distance" in metrics:
                 value.extend(
                     [
                         metrics["Euclidean distance"][id][1],
-                        metrics["Euclidean distance"][id][3],
+                        metrics["Euclidean distance"][id][3],   # using index 3 as 2 is solely used for plotting
                     ]
                 )
             if "Accumulated distance" in metrics:
@@ -1039,7 +1012,6 @@ class AnalysisWindow(QWidget):
         """
         Evaluates manipulated tracks, compares them to ground truth and calculates fault value
         """ 
-                                                                    # ?? vlt. kannst du dir hier noch einen schöneren Satz als meinen aus den Fingern saugen
         automatic_tracks = self.parent.initial_layers[1]
         try:
             corrected_tracks = grab_layer(
@@ -1106,7 +1078,7 @@ class AnalysisWindow(QWidget):
             segmentations.append([gt_seg[i], eval_seg[i]])
 
         with Pool(AMOUNT_OF_PROCESSES) as p:
-            for result in p.starmap(get_false_positives_layer, segmentations):
+            for result in p.starmap(get_false_positives_slice, segmentations):
                 fp += result
         print(f"False Positives: {fp}")
         return fp
@@ -1126,7 +1098,7 @@ class AnalysisWindow(QWidget):
             segmentations.append([gt_seg[i], eval_seg[i]])
 
         with Pool(AMOUNT_OF_PROCESSES) as p:
-            for result in p.starmap(get_false_negatives_layer, segmentations):
+            for result in p.starmap(get_false_negatives_slice, segmentations):
                 fn += result
         print(f"False Negatives: {fn}")
         return fn
@@ -1151,30 +1123,29 @@ class AnalysisWindow(QWidget):
         print(f"Split Cells: {sc}")
         return sc
 
-    def get_added_edges(self, gt_seg, eval_seg, gt_tracks, eval_tracks):    # ?? kannst du hier vlt. noch 2-3 kurze Kommentare einfügen, was die einzelnen Schritte machen? Nichts wildes
+    def get_added_edges(self, gt_seg, eval_seg, gt_tracks, eval_tracks):
         # calculates amount of added edges for given segmentation and tracks
         self.adjust_track_centroids()
         ae = 0
         if np.array_equal(gt_tracks, eval_tracks):
             return ae
         connections = []
-        # TODO
+        # find all the connections between 2 adjacent frames in ground truth
         for i in range(len(gt_tracks) - 1):
             if gt_tracks[i][0] == gt_tracks[i + 1][0]:
                 connections.append((gt_tracks[i][1:4], gt_tracks[i + 1][1:4]))
 
-        # TODO
+        # check if connection also exists in eval
         for connection in connections:
             gt_id1 = get_id_from_track(eval_seg, connection[0])
             gt_id2 = get_id_from_track(eval_seg, connection[1])
             id1 = get_match_cell(gt_seg, eval_seg, gt_id1, connection[0][0])
             id2 = get_match_cell(gt_seg, eval_seg, gt_id2, connection[1][0])
             if id1 == 0 or id2 == 0:
-                print("AE case 1")
                 ae += 1
                 continue
-            # TODO
-            # explain what centroid is what
+            # calculate centroids of the candidate cells in eval
+            # centroid1 is in earlier frame, centroid2 is in later frame
             centroid1 = ndimage.center_of_mass(
                 eval_seg[connection[0][0]], labels=eval_seg[connection[0][0]], index=id1
             )
@@ -1191,9 +1162,8 @@ class AnalysisWindow(QWidget):
                 int(np.rint(centroid2[0])),
                 int(np.rint(centroid2[1])),
             ]
-            # TODO
+            # check if the centroids are connected
             if not is_connected(eval_tracks, centroid1, centroid2):
-                print(f"AE case 2, {centroid1} and {centroid2}")
                 ae += 1
         print(f"Added Edges: {ae}")
         return ae
@@ -1244,7 +1214,8 @@ class AnalysisWindow(QWidget):
         self.results_window = ResultsWindow(title, results, frames)
 
 
-def get_specific_intersection(slice1, id1, slice2, id2):    #?? vlt. hier eine mini Erläuterung, was specific heißt ("returns the intersection of the same cell in gt_seg and eval_seg")
+def get_specific_intersection(slice1, id1, slice2, id2):
+    #Intersection of the given cells in the corresponding slices
     return np.sum((slice1 == id1) & (slice2 == id2))
 
 
@@ -1263,10 +1234,10 @@ def get_id_from_track(label_layer, track):
     return label_layer[z, y, x]
 
 
-def get_match_cell(base_layer, compare_layer, base_id, slice_id):   # ?? vlt. kurze Erläuterung, was jetzt base und compare konkret sind, vlt. machen wir das einheitlich mit den Funktionen oben? (slic1, slice2)
+def get_match_cell(base_layer, compare_layer, base_id, slice_id):
+    # base_layer is layer that has cell, compare_layer is layer that is searched for cell
     # return id of matched cell
     # check for highest iou (above threshold)
-    IOU_THRESHOLD = 0.4                             # here you can set your own threshold
     base_slice = base_layer[slice_id]
     compare_slice = compare_layer[slice_id]
     indices_of_id = np.where(base_slice == base_id)
@@ -1289,7 +1260,8 @@ def get_match_cell(base_layer, compare_layer, base_id, slice_id):   # ?? vlt. ku
     return int(ious[np.where(ious[:, 1] == max_iou), 0][0][0])
 
 
-def is_connected(tracks, centroid1, centroid2): # ?? was ist centroid1, was ist centroid2
+def is_connected(tracks, centroid1, centroid2):
+    # centroid1 is in earlier frame, centroid2 is in later frame
     for i in range(len(tracks) - 1):
         # if (
         #     centroid1[0] == tracks[i, 1]
@@ -1306,7 +1278,7 @@ def is_connected(tracks, centroid1, centroid2): # ?? was ist centroid1, was ist 
     return False
 
 
-def func(track, segmentation):  # ?? was ist func?
+def calculate_size_single_track(track, segmentation):
     id = track[0, 0]
     sizes = []
     for line in track:
@@ -1318,7 +1290,8 @@ def func(track, segmentation):  # ?? was ist func?
     return [id, average, std_deviation]
 
 
-def get_false_positives_layer(gt_slice, eval_slice):    # ?? können wir hier noch einen Kommentar einfügen, der die Funktion genau abgrenzt zu get_false_positives?
+def get_false_positives_slice(gt_slice, eval_slice):
+    # calculates false positives for the given pair of slices
     fp = 0
     if np.array_equal(gt_slice, eval_slice):
         print("layers are equal")
@@ -1351,7 +1324,8 @@ def get_false_positives_layer(gt_slice, eval_slice):    # ?? können wir hier no
     return fp
 
 
-def get_false_negatives_layer(gt_slice, eval_slice):    # ?? hier auch?
+def get_false_negatives_slice(gt_slice, eval_slice):
+    # calculates false negatives for the given pair of slices
     fn = 0
     if np.array_equal(gt_slice, eval_slice):
         return fn
