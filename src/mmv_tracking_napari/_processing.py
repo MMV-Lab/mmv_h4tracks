@@ -423,6 +423,65 @@ class ProcessingWindow(QWidget):
         np.set_printoptions(threshold=sys.maxsize)
         print(self.viewer.layers[self.viewer.layers.index("Tracks")].data)
         QApplication.restoreOverrideCursor()
+        """
+        Replaces Track ID 0 with new Track ID
+        Changes Segmentation IDs to corresponding Track IDs
+        """
+        import multiprocessing
+        if self.rb_eco.isChecked():
+            self.AMOUNT_OF_THREADS = np.maximum(1,int(multiprocessing.cpu_count() * 0.4))
+        else:
+            self.AMOUNT_OF_THREADS = np.maximum(1,int(multiprocessing.cpu_count() * 0.8))
+        try:
+            label_layer = self.viewer.layers[self.viewer.layers.index("Segmentation Data")]
+        except ValueError:
+            message("No label layer found!")
+            return
+        self.btn_adjust_seg_ids.setEnabled(False)
+        self.rb_eco.setEnabled(False)
+        self.rb_heavy.setEnabled(False)
+        
+        self.done = ThreadSafeCounter(0) 
+        self.new_id = 0
+        self.completed = ThreadSafeCounter(0)
+        next_slice = SliceCounter()
+        
+        self.threads = [QThread() for _ in range(self.AMOUNT_OF_THREADS)]
+        
+        for thread in self.threads:
+            thread.finished.connect(thread.deleteLater)
+            
+        self.tracks_worker = AdjustTracksWorker(self,self.tracks)
+        self.tracks_worker.moveToThread(self.threads[0])
+        self.threads[0].started.connect(self.tracks_worker.run)
+        self.tracks_worker.progress.connect(self._update_progress)
+        self.tracks_worker.tracks_ready.connect(self._replace_tracks)
+        for thread in self.threads[1:self.AMOUNT_OF_THREADS]:
+            self.tracks_worker.finished.connect(thread.start)
+        self.tracks_worker.status.connect(self._set_description)
+        self.tracks_worker.finished.connect(self.tracks_worker.deleteLater)
+        
+        self.seg_workers = [AdjustSegWorker(self, label_layer, self.tracks, next_slice, self.completed) for _ in range(self.AMOUNT_OF_THREADS)]
+        for i in range(0,self.AMOUNT_OF_THREADS):
+            self.seg_workers[i].moveToThread(self.threads[i])
+            
+        self.tracks_worker.finished.connect(self.seg_workers[0].run)
+        for i in range(1,self.AMOUNT_OF_THREADS):
+            self.threads[i].started.connect(self.seg_workers[i].run)
+        
+        for seg_worker in self.seg_workers:
+            seg_worker.update_progress.connect(self._multithread_progress)
+            seg_worker.status.connect(self._multithread_description)
+            seg_worker.finished.connect(seg_worker.deleteLater)
+            
+        for i in range(0,self.AMOUNT_OF_THREADS):
+            self.seg_workers[i].finished.connect(self.threads[i].quit)
+            
+        for thread in self.threads:
+            thread.finished.connect(self._enable_adjust_button)
+            
+        self.threads[0].start()
+        print("(>\'-\')>")        
 
 def segment_slice(slice, parameters):
     """
