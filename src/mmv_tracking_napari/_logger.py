@@ -38,6 +38,7 @@ def notify(text):
 @thread_worker
 def notify_with_delay(text):
     time.sleep(0.2)
+    return text
     notify(text)
 
 
