@@ -104,6 +104,7 @@ class AnalysisWindow(QWidget):
         checkbox_direction = QCheckBox("Direction")
         checkbox_euclidean_distance = QCheckBox("Euclidean distance")
         checkbox_accumulated_distance = QCheckBox("Accumulated distance")
+        checkbox_velocity = QCheckBox("Velocity")
 
         self.checkboxes = [
             checkbox_speed,
@@ -111,6 +112,7 @@ class AnalysisWindow(QWidget):
             checkbox_direction,
             checkbox_euclidean_distance,
             checkbox_accumulated_distance,
+            checkbox_velocity,
         ]
 
         # Line Edits
@@ -133,11 +135,12 @@ class AnalysisWindow(QWidget):
         content.layout().addWidget(self.lineedit_track_duration, 8, 1)
         content.layout().addWidget(label_export, 9, 0)
         content.layout().addWidget(checkbox_speed, 10, 0)
-        content.layout().addWidget(checkbox_size, 10, 1)
-        content.layout().addWidget(checkbox_direction, 10, 2)
+        content.layout().addWidget(checkbox_velocity, 10, 1)
+        content.layout().addWidget(checkbox_size, 10, 2)
         content.layout().addWidget(checkbox_euclidean_distance, 11, 0)
         content.layout().addWidget(checkbox_accumulated_distance, 11, 1)
-        content.layout().addWidget(btn_export, 11, 2)
+        content.layout().addWidget(checkbox_direction, 11, 2)
+        content.layout().addWidget(btn_export, 10, 3,2,1)
         content.layout().addWidget(line2, 12, 0, 1, -1)
         content.layout().addWidget(label_evaluation, 13, 0)
         content.layout().addWidget(label_eval_range, 14, 0)
@@ -268,16 +271,27 @@ class AnalysisWindow(QWidget):
             x = track[-1, 3] - track[0, 3]
             y = track[0, 2] - track[-1, 2]
             euclidean_distance = np.around(np.sqrt(np.square(x) + np.square(y)), 3)
-            directed_speed = np.around(euclidean_distance / len(track), 3)
             try:
                 euclidean_distances = np.append(
-                    euclidean_distances, [[id, euclidean_distance, len(track), directed_speed]], 0
+                    euclidean_distances, [[id, euclidean_distance, len(track)]], 0
                 )
             except UnboundLocalError:
                 euclidean_distances = np.array(
-                    [[id, euclidean_distance, len(track), directed_speed]]
+                    [[id, euclidean_distance, len(track)]]
                 )
         return euclidean_distances
+    
+    def _calculate_velocity(self, tracks):
+        euclidean_distances = self._calculate_euclidean_distance(tracks)
+        for id in np.unique(tracks[:, 0]):
+            euclidean_distance = np.delete(euclidean_distances, np.where(euclidean_distances[:,0] != id),0)
+            track = np.delete(tracks, np.where(tracks[:, 0] != id), 0)
+            directed_speed = np.around(euclidean_distance[0,1] / len(track), 3)
+            try:
+                directed_speeds = np.append(directed_speeds, [[id, directed_speed]], 0)
+            except UnboundLocalError:
+                directed_speeds = np.array([[id, directed_speed]])
+        return directed_speeds
 
     def _calculate_accumulated_distance(self, tracks):
         """
@@ -764,22 +778,15 @@ class AnalysisWindow(QWidget):
             euclidean_distance = self._calculate_euclidean_distance(tracks)
             metrics.extend(
                 [
-                    "Average euclidean distance [# pixels]",
-                    "Average velocity [# pixels/frame]",
+                    "Average euclidean distance [# pixels]"
                 ]
             )
             individual_metrics.extend(
-                ["Euclidean distance [# pixels]", "Velocity [# pixels/frame]"]
+                ["Euclidean distance [# pixels]"]
             )
             all_values.extend(
                 [
                     np.around(np.average(euclidean_distance[:, 1]), 3),
-                    np.around(
-                        np.average(
-                            euclidean_distance[:, 1] / len(np.unique(tracks[:, 0]))
-                        ),
-                        3,
-                    ),
                 ]
             )
             valid_values.extend(
@@ -794,19 +801,29 @@ class AnalysisWindow(QWidget):
                         ),
                         3,
                     ),
-                    np.around(
-                        np.average(
-                            [
-                                euclidean_distance[i, 1] / duration[i, 1]
-                                for i in range(len(euclidean_distance))
-                                if euclidean_distance[i, 0] in filtered_mask
-                            ]
-                        ),
-                        3,
-                    ),
                 ]
             )
             metrics_dict.update({"Euclidean distance": euclidean_distance})
+            
+        if "Velocity" in selected_metrics:
+            velocity = self._calculate_velocity(tracks)
+            metrics.extend(["Average velocity [#pixels/frame]",
+                    "Standard deviation of velocity [# pixels/frame]"])
+            individual_metrics.extend(["Velocity [# pixels/frame]"])
+            all_values.extend([np.around(np.average(velocity[:, 1]),3),
+                               np.around(np.std(velocity[:,1]),3)])
+            valid_values.extend([np.around(np.average([velocity[i, 1] for i in range(len(velocity)) if velocity[i, 0] in filtered_mask]),3),
+                    np.around(
+                        np.std(
+                            [
+                                velocity[i, 1]
+                                for i in range(len(velocity))
+                                if velocity[i, 0] in filtered_mask
+                            ]
+                        ),
+                        3,
+                    ),])
+            metrics_dict.update({"Velocity": velocity})
 
         if "Accumulated distance" in selected_metrics:
             accumulated_distance = self._calculate_accumulated_distance(tracks)
@@ -883,6 +900,8 @@ class AnalysisWindow(QWidget):
                         metrics["Euclidean distance"][id][3],   # using index 3 as 2 is solely used for plotting
                     ]
                 )
+            if "Velocity" in metrics:
+                value.append(metrics["Velocity"][id][1])
             if "Accumulated distance" in metrics:
                 value.append(metrics["Accumulated distance"][id][1])                   
             if "Directness" in metrics:
