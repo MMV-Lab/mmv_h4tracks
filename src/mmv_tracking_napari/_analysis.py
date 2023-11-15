@@ -535,7 +535,7 @@ class AnalysisWindow(QWidget):
                 notify("Please use an integer instead of text for duration minimum")
                 raise ValueError
             else:
-                if min_duration != float(self.lineedit_track_duration.text()):  # ?? if min_duration != float: "please use integer", müssen wir das float hier durch int ersetzen?
+                if min_duration != int(self.lineedit_track_duration.text()):  # ?? if min_duration != float: "please use integer", müssen wir das float hier durch int ersetzen?
                     notify(
                         "Please use an integer instead of a float for duration minimum"
                     )
@@ -1018,7 +1018,6 @@ class AnalysisWindow(QWidget):
         except AttributeError:
             notify("Please make sure the label layer exists!")
             return
-        tracks_old = tracks_layer.data    # ?? this is not accessed, can we remove this?
         tracks = tracks_layer.data
         for row_trackslayer in tracks:
             _, z, y, x = row_trackslayer
@@ -1036,7 +1035,7 @@ class AnalysisWindow(QWidget):
 
         tracks_layer.data = tracks
 
-    def call_evaluate_tracking(self):   # ?? sollen wir hier vlt. direkt die richtigen variablennamen verwenden?
+    def call_evaluate_tracking(self):
         """
         Evaluates manipulated tracks, compares them to ground truth and calculates fault value
         """ 
@@ -1159,10 +1158,12 @@ class AnalysisWindow(QWidget):
         if np.array_equal(gt_tracks, eval_tracks):
             return ae
         connections = []
+        # TODO
         for i in range(len(gt_tracks) - 1):
             if gt_tracks[i][0] == gt_tracks[i + 1][0]:
                 connections.append((gt_tracks[i][1:4], gt_tracks[i + 1][1:4]))
 
+        # TODO
         for connection in connections:
             gt_id1 = get_id_from_track(eval_seg, connection[0])
             gt_id2 = get_id_from_track(eval_seg, connection[1])
@@ -1172,6 +1173,8 @@ class AnalysisWindow(QWidget):
                 print("AE case 1")
                 ae += 1
                 continue
+            # TODO
+            # explain what centroid is what
             centroid1 = ndimage.center_of_mass(
                 eval_seg[connection[0][0]], labels=eval_seg[connection[0][0]], index=id1
             )
@@ -1188,6 +1191,7 @@ class AnalysisWindow(QWidget):
                 int(np.rint(centroid2[0])),
                 int(np.rint(centroid2[1])),
             ]
+            # TODO
             if not is_connected(eval_tracks, centroid1, centroid2):
                 print(f"AE case 2, {centroid1} and {centroid2}")
                 ae += 1
@@ -1206,14 +1210,15 @@ class AnalysisWindow(QWidget):
                 connections.append((eval_tracks[i][1:4], eval_tracks[i + 1][1:4]))
 
         for connection in connections:
+            # explain what eval_id is what
             eval_id1 = get_id_from_track(gt_seg, connection[0])
             eval_id2 = get_id_from_track(gt_seg, connection[1])
             id1 = get_match_cell(eval_seg, gt_seg, eval_id1, connection[0][0])
             id2 = get_match_cell(eval_seg, gt_seg, eval_id2, connection[1][0])
             if id1 == 0 or id2 == 0:
-                print("DE case 1")  # ?? was ist case 1?
                 de += 1
                 continue
+            # explain what centroid is what
             centroid1 = ndimage.center_of_mass(
                 gt_seg[connection[0][0]], labels=gt_seg[connection[0][0]], index=id1
             )
@@ -1231,7 +1236,6 @@ class AnalysisWindow(QWidget):
                 int(np.rint(centroid2[1])),
             ]
             if not is_connected(gt_tracks, centroid1, centroid2):
-                print(f"DE case 2, {centroid1} and {centroid2}")
                 de += 1
         print(f"Deleted Edges: {de}")
         return de
