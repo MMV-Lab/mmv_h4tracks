@@ -1,9 +1,9 @@
 import sys
-from pathlib import Path
 import time
+from pathlib import Path
 
-from qtpy.QtWidgets import QMessageBox, QInputDialog
 from napari.qt.threading import thread_worker
+from qtpy.QtWidgets import QInputDialog, QMessageBox
 
 
 def setup_logging():
@@ -31,12 +31,23 @@ def notify(text):
     msg = QMessageBox()
     msg.setWindowTitle("napari")
     msg.setText(text)
-    print("Notifying user: '{}'".format(text))
+    print(f"Notifying user: '{text}'")
     msg.exec()
 
 
 @thread_worker
 def notify_with_delay(text):
+    """
+    Shows a notification dialog after a brief delay
+
+    This is used to ensure the mouse release event is sent to the viewer
+    before the message is displayed
+
+    Parameters
+    ----------
+    text : str
+        The text displayed as the notification
+    """
     time.sleep(0.2)
     notify(text)
 
@@ -60,13 +71,5 @@ def choice_dialog(text, choices):
             msg.addButton(choice[0], choice[1])
         else:
             msg.addButton(choice)
-    print("Prompting user: '{}'".format(text))
+    print(f"Prompting user: '{text}'")
     return msg.exec()
-
-def layer_select(parent, layertype):
-    title = "Select Layer"
-    text = f"Please select the layer that has the {layertype}"
-    items = []
-    for layer in parent.viewer.layers:
-        items.append(layer.name)
-    return QInputDialog.getItem(parent, title, text, items, editable = False)
