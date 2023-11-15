@@ -184,7 +184,7 @@ class AnalysisWindow(QWidget):
 
         return np.array(sizes)
 
-    def _calculate_direction(self, tracks):
+    def _calculate_direction(self, tracks): # solve redundancy of x, y and direction?
         for id in np.unique(tracks[:, 0]):
             track = np.delete(tracks, np.where(tracks[:, 0] != id), 0)
             x = track[-1, 3] - track[0, 3]
@@ -294,11 +294,11 @@ class AnalysisWindow(QWidget):
         Create dictionary holding metric data and results
         """
         try:
-            tracks_layer = grab_layer(
+            tracks_layer = grab_layer( # TODO
                 self.parent.viewer, self.parent.combobox_tracks.currentText()
             )
         except ValueError:
-            notify("Please make sure to select the correct tracks layer!")
+            notify("Please make sure to select the correct tracks layer!") # TODO
             return
         retval = {"Name": metric}
         if metric == "Speed":
@@ -307,15 +307,15 @@ class AnalysisWindow(QWidget):
                 {"Description": "Scatterplot Standard Deviation vs Average: Speed"}
             )
             retval.update({"x_label": "Average", "y_label": "Standard Deviation"})
-            retval.update({"Results": self._calculate_speed(tracks_layer.data)})
+            retval.update({"Results": self._calculate_speed(tracks_layer.data)}) # TODO
         elif metric == "Size":
             print("Plotting size")
             try:
-                segmentation_layer = grab_layer(
+                segmentation_layer = grab_layer( # TODO
                     self.viewer, self.parent.combobox_segmentation.currentText()
                 )
             except ValueError:
-                notify("Please make sure to select the correct segmentation!")
+                notify("Please make sure to select the correct segmentation!") # TODO
                 return
             retval.update(
                 {"Description": "Scatterplot Standard Deviation vs Average: Size"}
@@ -323,7 +323,7 @@ class AnalysisWindow(QWidget):
             retval.update({"x_label": "Average", "y_label": "Standard Deviation"})
             retval.update(
                 {
-                    "Results": self._calculate_size(
+                    "Results": self._calculate_size( # TODO
                         tracks_layer.data, segmentation_layer.data
                     )
                 }
@@ -331,20 +331,20 @@ class AnalysisWindow(QWidget):
         elif metric == "Direction":
             print("Plotting direction")
             retval.update({"Description": "Scatterplot: Travel direction & Distance"})
-            retval.update({"Results": self._calculate_direction(tracks_layer.data)})
+            retval.update({"Results": self._calculate_direction(tracks_layer.data)}) # TODO
         elif metric == "Euclidean distance":
             print("Plotting euclidean distance")
             retval.update({"Description": "Scatterplot x vs y"})
             retval.update({"x_label": "x", "y_label": "y"})
             retval.update(
-                {"Results": self._calculate_euclidean_distance(tracks_layer.data)}
+                {"Results": self._calculate_euclidean_distance(tracks_layer.data)} # TODO
             )
         elif metric == "Accumulated distance":
             print("Plotting accumulated distance")
             retval.update({"Description": "Scatterplot x vs y"})
             retval.update({"x_label": "x", "y_label": "y"})
             retval.update(
-                {"Results": self._calculate_accumulated_distance(tracks_layer.data)}
+                {"Results": self._calculate_accumulated_distance(tracks_layer.data)} # TODO
             )
         else:
             raise ValueError("No defined behaviour for given metric.")
@@ -374,13 +374,13 @@ class AnalysisWindow(QWidget):
     @thread_worker
     def _export(self, file, metrics):
         try:
-            tracks = grab_layer(
+            tracks = grab_layer( # TODO
                 self.parent.viewer, self.parent.combobox_tracks.currentText()
             ).data
         except AttributeError:
-            notify("Please make sure to select the correct tracks layer!")
+            notify("Please make sure to select the correct tracks layer!") # TODO
             return
-        direction = self._calculate_direction(tracks)
+        direction = self._calculate_direction(tracks) # TODO
         self.direction = direction
 
         try:
@@ -388,7 +388,7 @@ class AnalysisWindow(QWidget):
                 filtered_mask,
                 min_movement,
                 min_duration,
-            ) = self._filter_tracks_by_parameters(tracks, direction)
+            ) = self._filter_tracks_by_parameters(tracks, direction) # TODO
         except ValueError:
             return
 
@@ -396,10 +396,10 @@ class AnalysisWindow(QWidget):
             [[i, np.count_nonzero(tracks[:, 0] == i)] for i in np.unique(tracks[:, 0])]
         )
 
-        data = self._compose_csv_data(
+        data = self._compose_csv_data( # TODO
             tracks, duration, filtered_mask, min_movement, min_duration, metrics
         )
-        save_csv(file, data)
+        save_csv(file, data) # TODO
 
     def _filter_tracks_by_parameters(self, tracks, direction):
         #[[id, x, y, direction, distance]]
