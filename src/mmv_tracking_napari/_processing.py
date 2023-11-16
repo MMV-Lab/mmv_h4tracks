@@ -1,28 +1,28 @@
-import os
-import numpy as np
 import multiprocessing
-from multiprocessing import Pool
+import os
 import platform
+from multiprocessing import Pool
 
 import napari
+import numpy as np
+from cellpose import models
+from napari.qt.threading import thread_worker
+from qtpy.QtCore import Qt
 from qtpy.QtWidgets import (
-    QWidget,
-    QLabel,
-    QVBoxLayout,
-    QPushButton,
+    QApplication,
     QComboBox,
     QGridLayout,
-    QApplication,
+    QLabel,
     QMessageBox,
+    QPushButton,
     QSizePolicy,
+    QVBoxLayout,
+    QWidget,
 )
-from qtpy.QtCore import Qt
-from napari.qt.threading import thread_worker
-from scipy import ndimage, spatial, optimize
-from cellpose import models
+from scipy import ndimage, optimize, spatial
 
-from ._logger import notify, choice_dialog
 from ._grabber import grab_layer
+from ._logger import choice_dialog, notify
 
 
 class ProcessingWindow(QWidget):
@@ -46,7 +46,7 @@ class ProcessingWindow(QWidget):
         Replaces track ID 0 & adjusts segmentation IDs to match track IDs
     """
 
-    dock = None
+    dock = None  # ?? ich vermute, kluge Menschen wissen, was das hier macht. Braucht keinen Kommentar, aber interessieren würde es mich trotzdem
 
     def __init__(self, parent):
         """
@@ -65,7 +65,7 @@ class ProcessingWindow(QWidget):
         self.viewer = parent.viewer
         ProcessingWindow.dock = self
         try:
-            self.setStyleSheet(napari.qt.get_stylesheet(theme = "dark"))
+            self.setStyleSheet(napari.qt.get_stylesheet(theme="dark"))
         except TypeError:
             pass
 
@@ -81,7 +81,7 @@ class ProcessingWindow(QWidget):
         btn_track = QPushButton("Run Tracking")
         btn_adjust_seg_ids = QPushButton("Harmonize segmentation colors")
         btn_adjust_seg_ids.setToolTip("WARNING: This will take a while")
-        
+
         self.btn_segment.setEnabled(False)
         self.btn_preview_segment.setEnabled(False)
 
@@ -94,8 +94,10 @@ class ProcessingWindow(QWidget):
         self.combobox_segmentation = QComboBox()
         self.combobox_segmentation.addItem("select model")
         self.read_models()
-        self.combobox_segmentation.currentTextChanged.connect(self.toggle_segmentation_buttons)
-        
+        self.combobox_segmentation.currentTextChanged.connect(
+            self.toggle_segmentation_buttons
+        )
+
         # Horizontal lines
         line = QWidget()
         line.setFixedHeight(4)
@@ -105,7 +107,7 @@ class ProcessingWindow(QWidget):
         ### Organize objects via widgets
         content = QWidget()
         content.setLayout(QVBoxLayout())
-        
+
         content.layout().addWidget(label_segmentation)
         content.layout().addWidget(self.combobox_segmentation)
         content.layout().addWidget(self.btn_preview_segment)
@@ -116,17 +118,29 @@ class ProcessingWindow(QWidget):
         content.layout().addWidget(btn_adjust_seg_ids)
 
         self.layout().addWidget(content)
-        
-    def toggle_segmentation_buttons(self, text):
+
+    def toggle_segmentation_buttons(self, text):  # ?? copilot doc
+        """
+        Toggles the segmentation buttons based on the selected model.
+
+        Args:
+            text (str): The selected model. # ?? sieht schon falsch aus hier
+
+        Returns:
+            None
+        """
         if text == "select model":
             self.btn_segment.setEnabled(False)
             self.btn_preview_segment.setEnabled(False)
         else:
             self.btn_segment.setEnabled(True)
             self.btn_preview_segment.setEnabled(True)
-        
-    def read_models(self):
-        path = os.path.join(os.path.dirname(os.path.abspath(__file__)),"models")
+
+    def read_models(self):  # cpoilot doc
+        """
+        Reads the available models from the 'models' directory and adds them to the segmentation combobox.
+        """
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models")
         for file in os.listdir(path):
             self.combobox_segmentation.addItem(file)
 
@@ -148,7 +162,9 @@ class ProcessingWindow(QWidget):
         print("Added segmentation to viewer")
 
     @napari.Viewer.bind_key("Shift-s")
-    def _hotkey_run_segmentation(self):
+    def _hotkey_run_segmentation(
+        self,
+    ):  # ?? interpretiere ich richtig, dass hier die Segmentierung über nen Hotkey ausgelöst wird? Falls ja: Den können wir entfernen, oder?
         ProcessingWindow.dock._run_segmentation()
 
     def _run_segmentation(self):
@@ -187,19 +203,21 @@ class ProcessingWindow(QWidget):
         QApplication.setOverrideCursor(Qt.WaitCursor)
 
         try:
-            data = grab_layer(self.viewer, self.parent.combobox_image.currentText()).data
+            data = grab_layer(
+                self.viewer, self.parent.combobox_image.currentText()
+            ).data
         except AttributeError:
             print("Image layer not found in viewer")
             QApplication.restoreOverrideCursor()
             notify("No image layer found!")
             return
-        
+
         if data is None:
             print("Image layer not selected")
             QApplication.restoreOverrideCursor()
             notify("Please select the image layer!")
             return
-        
+
         if demo:
             data = data[0:5]
 
@@ -271,9 +289,11 @@ class ProcessingWindow(QWidget):
         """
         # check if tracks are usable
         tracks, layername = params
-        tracks_layer = grab_layer(self.viewer, self.parent.combobox_tracks.currentText())
+        tracks_layer = grab_layer(
+            self.viewer, self.parent.combobox_tracks.currentText()
+        )
         if tracks_layer is None:
-            self.viewer.add_tracks(tracks, name = layername)
+            self.viewer.add_tracks(tracks, name=layername)
         else:
             tracks_layer.data = tracks
         self.parent.combobox_tracks.setCurrentText(layername)
@@ -299,13 +319,15 @@ class ProcessingWindow(QWidget):
 
         # get segmentation data
         try:
-            data = grab_layer(self.viewer, self.parent.combobox_segmentation.currentText()).data
+            data = grab_layer(
+                self.viewer, self.parent.combobox_segmentation.currentText()
+            ).data
         except AttributeError:
             print("Segmentation layer not found in viewer")
             QApplication.restoreOverrideCursor()
             notify("No segmentation layer found!")
             return
-        
+
         if data is None:
             print("Segmentation layer not selected")
             QApplication.restoreOverrideCursor()
@@ -315,7 +337,9 @@ class ProcessingWindow(QWidget):
         tracks_name = "Tracks"
         # check for tracks layer
         try:
-            tracks_layer = grab_layer(self.viewer, self.parent.combobox_tracks.currentText())
+            tracks_layer = grab_layer(
+                self.viewer, self.parent.combobox_tracks.currentText()
+            )
         except ValueError:
             pass
         else:
@@ -406,7 +430,7 @@ class ProcessingWindow(QWidget):
                 next_id += 1
 
         tracks = tracks.astype(int)
-        #np.save("tracks.npy", tracks) # TODO: why is this here?
+        # np.save("tracks.npy", tracks) # TODO: why is this here?
 
         QApplication.restoreOverrideCursor()
         return tracks, tracks_name
@@ -428,60 +452,71 @@ class ProcessingWindow(QWidget):
         Changes Segmentation IDs to corresponding Track IDs
         """
         import multiprocessing
+
         if self.rb_eco.isChecked():
-            self.AMOUNT_OF_THREADS = np.maximum(1,int(multiprocessing.cpu_count() * 0.4))
+            self.AMOUNT_OF_THREADS = np.maximum(
+                1, int(multiprocessing.cpu_count() * 0.4)
+            )
         else:
-            self.AMOUNT_OF_THREADS = np.maximum(1,int(multiprocessing.cpu_count() * 0.8))
+            self.AMOUNT_OF_THREADS = np.maximum(
+                1, int(multiprocessing.cpu_count() * 0.8)
+            )
         try:
-            label_layer = self.viewer.layers[self.viewer.layers.index("Segmentation Data")]
+            label_layer = self.viewer.layers[
+                self.viewer.layers.index("Segmentation Data")
+            ]
         except ValueError:
             message("No label layer found!")
             return
         self.btn_adjust_seg_ids.setEnabled(False)
         self.rb_eco.setEnabled(False)
         self.rb_heavy.setEnabled(False)
-        
-        self.done = ThreadSafeCounter(0) 
+
+        self.done = ThreadSafeCounter(0)
         self.new_id = 0
         self.completed = ThreadSafeCounter(0)
         next_slice = SliceCounter()
-        
+
         self.threads = [QThread() for _ in range(self.AMOUNT_OF_THREADS)]
-        
+
         for thread in self.threads:
             thread.finished.connect(thread.deleteLater)
-            
-        self.tracks_worker = AdjustTracksWorker(self,self.tracks)
+
+        self.tracks_worker = AdjustTracksWorker(self, self.tracks)
         self.tracks_worker.moveToThread(self.threads[0])
         self.threads[0].started.connect(self.tracks_worker.run)
         self.tracks_worker.progress.connect(self._update_progress)
         self.tracks_worker.tracks_ready.connect(self._replace_tracks)
-        for thread in self.threads[1:self.AMOUNT_OF_THREADS]:
+        for thread in self.threads[1 : self.AMOUNT_OF_THREADS]:
             self.tracks_worker.finished.connect(thread.start)
         self.tracks_worker.status.connect(self._set_description)
         self.tracks_worker.finished.connect(self.tracks_worker.deleteLater)
-        
-        self.seg_workers = [AdjustSegWorker(self, label_layer, self.tracks, next_slice, self.completed) for _ in range(self.AMOUNT_OF_THREADS)]
-        for i in range(0,self.AMOUNT_OF_THREADS):
+
+        self.seg_workers = [
+            AdjustSegWorker(self, label_layer, self.tracks, next_slice, self.completed)
+            for _ in range(self.AMOUNT_OF_THREADS)
+        ]
+        for i in range(0, self.AMOUNT_OF_THREADS):
             self.seg_workers[i].moveToThread(self.threads[i])
-            
+
         self.tracks_worker.finished.connect(self.seg_workers[0].run)
-        for i in range(1,self.AMOUNT_OF_THREADS):
+        for i in range(1, self.AMOUNT_OF_THREADS):
             self.threads[i].started.connect(self.seg_workers[i].run)
-        
+
         for seg_worker in self.seg_workers:
             seg_worker.update_progress.connect(self._multithread_progress)
             seg_worker.status.connect(self._multithread_description)
             seg_worker.finished.connect(seg_worker.deleteLater)
-            
-        for i in range(0,self.AMOUNT_OF_THREADS):
+
+        for i in range(0, self.AMOUNT_OF_THREADS):
             self.seg_workers[i].finished.connect(self.threads[i].quit)
-            
+
         for thread in self.threads:
             thread.finished.connect(self._enable_adjust_button)
-            
+
         self.threads[0].start()
-        print("(>\'-\')>")        
+        print("(>'-')>")
+
 
 def segment_slice(slice, parameters):
     """
@@ -497,9 +532,7 @@ def segment_slice(slice, parameters):
     Returns
     -------
     """
-    model = models.CellposeModel(
-        gpu=False, pretrained_model=parameters["model_path"]
-    )
+    model = models.CellposeModel(gpu=False, pretrained_model=parameters["model_path"])
     mask = model.eval(
         slice,
         channels=[parameters["chan"], parameters["chan2"]],
@@ -509,17 +542,32 @@ def segment_slice(slice, parameters):
     )[0]
     return mask
 
+
 # calculate centroids
-def calculate_centroids(slice):
+def calculate_centroids(slice):  # ?? copilot
+    """
+    Calculate the centroids of objects in a 2D slice.
+
+    Parameters
+    ----------
+    slice : numpy.ndarray
+        A 2D numpy array representing the slice.
+
+    Returns
+    -------
+    tuple
+        A tuple containing two numpy arrays: the centroids and the labels.
+    """
     labels = np.unique(slice)[1:]
     centroids = ndimage.center_of_mass(slice, labels=slice, index=labels)
 
     return (centroids, labels)
 
-def match_centroids(slice_pair):
+
+def match_centroids(slice_pair):  # ?? Konstanten raus
     APPROX_INF = 65535
     MAX_MATCHING_DIST = 45
-    
+
     num_cells_parent = len(slice_pair[0][0])
     num_cells_child = len(slice_pair[1][0])
 
@@ -534,19 +582,12 @@ def match_centroids(slice_pair):
     cost_mat_aug = (
         MAX_MATCHING_DIST
         * 1.2
-        * np.ones(
-            (num_cells_parent, num_cells_child + num_cells_parent), dtype=float
-        )
+        * np.ones((num_cells_parent, num_cells_child + num_cells_parent), dtype=float)
     )
     cost_mat_aug[:num_cells_parent, :num_cells_child] = cost_mat[:, :]
 
     # solve the optimization problem
 
-    if (
-        sum(sum(1 * np.isnan(cost_mat))) > 0
-    ):  # check if there is at least one np.nan in cost_mat
-        print("TODO: Remove this (Justin)")
-        return
     row_ind, col_ind = optimize.linear_sum_assignment(cost_mat_aug)
 
     matched_pairs = []
@@ -565,8 +606,6 @@ def match_centroids(slice_pair):
         except:
             continue
 
-        matched_pairs.append(
-            ([parent_centroid, parent_id], [child_centroid, child_id])
-        )
+        matched_pairs.append(([parent_centroid, parent_id], [child_centroid, child_id]))
 
     return matched_pairs
