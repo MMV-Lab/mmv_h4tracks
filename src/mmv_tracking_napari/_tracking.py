@@ -20,7 +20,7 @@ from scipy import ndimage
 from napari.qt.threading import thread_worker
 import napari
 
-from ._logger import notify, notify_with_delay, choice_dialog
+from ._logger import notify, notify_with_delay, choice_dialog, handle_exception
 from ._grabber import grab_layer
 
 
@@ -442,7 +442,8 @@ class TrackingWindow(QWidget):
         worker = self._proximity_track_all_worker()
         QApplication.setOverrideCursor(Qt.WaitCursor)
         worker.returned.connect(self._restore_tracks)
-        worker.start()
+        #worker.errored.connect(self.handle_exception)
+        #worker.start()
 
     def _restore_tracks(self, tracks):
         if tracks is None:
@@ -455,16 +456,13 @@ class TrackingWindow(QWidget):
         self.parent.combobox_tracks.setCurrentText(layer.name)
         QApplication.restoreOverrideCursor()
 
-    @thread_worker
+    @thread_worker(connect={"errored": handle_exception})
     def _proximity_track_all_worker(self):
         self._reset()
         self.parent.tracks = np.empty((1, 4), dtype=np.int8)
         label_layer = grab_layer(
             self.viewer, self.parent.combobox_segmentation.currentText()
         )
-        if label_layer is None:
-            notify("Please make sure the label layer exists!")
-            return
 
         if self.parent.rb_eco.isChecked():
             AMOUNT_OF_PROCESSES = np.maximum(1, int(multiprocessing.cpu_count() * 0.4))

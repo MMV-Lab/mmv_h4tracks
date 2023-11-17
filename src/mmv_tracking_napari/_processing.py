@@ -21,7 +21,7 @@ from napari.qt.threading import thread_worker
 from scipy import ndimage, spatial, optimize
 from cellpose import models
 
-from ._logger import notify, choice_dialog
+from ._logger import notify, choice_dialog, handle_exception
 from ._grabber import grab_layer
 
 
@@ -159,7 +159,8 @@ class ProcessingWindow(QWidget):
 
         worker = self._segment_image()
         worker.returned.connect(self._add_segmentation_to_viewer)
-        worker.start()
+        #worker.errored.connect(handle_exception)
+        #worker.start()
 
     def _run_demo_segmentation(self):
         """
@@ -169,9 +170,10 @@ class ProcessingWindow(QWidget):
 
         worker = self._segment_image(True)
         worker.returned.connect(self._add_segmentation_to_viewer)
-        worker.start()
+        #worker.errored.connect(handle_exception)
+        #worker.start()
 
-    @thread_worker
+    @thread_worker(connect={"errored": handle_exception})
     def _segment_image(self, demo=False):
         """
         Run segmentation on the raw image data
@@ -186,31 +188,17 @@ class ProcessingWindow(QWidget):
         print("Running segmentation")
         QApplication.setOverrideCursor(Qt.WaitCursor)
 
-        try:
-            data = grab_layer(self.viewer, self.parent.combobox_image.currentText()).data
-        except AttributeError:
-            print("Image layer not found in viewer")
-            QApplication.restoreOverrideCursor()
-            notify("No image layer found!")
-            return
+        data = grab_layer(self.viewer, self.parent.combobox_image.currentText()).data
         
         if data is None:
-            print("Image layer not selected")
-            QApplication.restoreOverrideCursor()
-            notify("Please select the image layer!")
-            return
+            raise ValueError("No layer selected")
         
         if demo:
             data = data[0:5]
 
         selected_model = self.combobox_segmentation.currentText()
 
-        try:
-            parameters = self._get_parameters(selected_model)
-        except UnboundLocalError:
-            QApplication.restoreOverrideCursor()
-            notify("Please select a different model")
-            return
+        parameters = self._get_parameters(selected_model)
 
         # set process limit
         if self.parent.rb_eco.isChecked():
@@ -285,11 +273,22 @@ class ProcessingWindow(QWidget):
         """
         print("Calling tracking")
 
+        def on_yielded(value):
+            worker.pause()
+            if value == "Replace tracks layer":
+                ret = choice_dialog(
+                        "Tracks layer found. Do you want to replace it?",
+                        [QMessageBox.Yes, QMessageBox.No],
+                    )
+            worker.send(ret)
+            worker.resume()
         worker = self._track_segmentation()
         worker.returned.connect(self._add_tracks_to_viewer)
-        worker.start()
+        #worker.errored.connect(handle_exception)
+        worker.yielded.connect(on_yielded)
+        #worker.start()
 
-    @thread_worker
+    @thread_worker(connect={"errored": handle_exception})
     def _track_segmentation(self):
         """
         Run tracking on the segmented data
@@ -298,19 +297,10 @@ class ProcessingWindow(QWidget):
         QApplication.setOverrideCursor(Qt.WaitCursor)
 
         # get segmentation data
-        try:
-            data = grab_layer(self.viewer, self.parent.combobox_segmentation.currentText()).data
-        except AttributeError:
-            print("Segmentation layer not found in viewer")
-            QApplication.restoreOverrideCursor()
-            notify("No segmentation layer found!")
-            return
+        data = grab_layer(self.viewer, self.parent.combobox_segmentation.currentText()).data
         
         if data is None:
-            print("Segmentation layer not selected")
-            QApplication.restoreOverrideCursor()
-            notify("Please select the segmentation layer!")
-            return
+            raise ValueError('No layer selected')
 
         tracks_name = "Tracks"
         # check for tracks layer
@@ -319,17 +309,13 @@ class ProcessingWindow(QWidget):
         except ValueError:
             pass
         else:
-            if tracks_layer is not None:
+            QApplication.restoreOverrideCursor()
+            ret = yield "Replace tracks layer"
+            QApplication.setOverrideCursor(Qt.WaitCursor)
+            if ret == 65536:
                 QApplication.restoreOverrideCursor()
-                ret = choice_dialog(
-                    "Tracks layer found. Do you want to replace it?",
-                    [QMessageBox.Yes, QMessageBox.No],
-                )
-                QApplication.setOverrideCursor(Qt.WaitCursor)
-                if ret == 65536:
-                    QApplication.restoreOverrideCursor()
-                    return
-                tracks_name = tracks_layer.name
+                return
+            tracks_name = tracks_layer.name
 
         # set process limit
         if self.parent.rb_eco.isChecked():
@@ -415,7 +401,7 @@ class ProcessingWindow(QWidget):
         """
         Replaces track ID 0. Also adjusts segmentation IDs to match track IDs
         """
-        raise NotImplementedError
+        raise NotImplementedError("Not implemented yet!")
         print("Adjusting segmentation IDs")
         QApplication.setOverrideCursor(Qt.WaitCursor)
         import sys
