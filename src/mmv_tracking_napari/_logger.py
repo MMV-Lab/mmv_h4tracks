@@ -2,7 +2,7 @@ import sys
 from pathlib import Path
 import time
 
-from qtpy.QtWidgets import QMessageBox, QInputDialog
+from qtpy.QtWidgets import QMessageBox, QInputDialog, QApplication
 from napari.qt.threading import thread_worker
 
 
@@ -64,10 +64,16 @@ def choice_dialog(text, choices):
     print("Prompting user: '{}'".format(text))
     return msg.exec()
 
+
 def layer_select(parent, layertype):
     title = "Select Layer"
     text = f"Please select the layer that has the {layertype}"
     items = []
     for layer in parent.viewer.layers:
         items.append(layer.name)
-    return QInputDialog.getItem(parent, title, text, items, editable = False)
+    return QInputDialog.getItem(parent, title, text, items, editable=False)
+
+
+def handle_exception(exception):
+    print(exception)
+    QApplication.restoreOverrideCursor()
