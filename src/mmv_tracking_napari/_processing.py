@@ -380,7 +380,7 @@ class ProcessingWindow(QWidget):
         for i in range(len(matches)):
             visited.append([0] * len(matches[i]))
 
-        for i in range(len(visited)):
+        for i in range(len(visited)):           # ?? hier wären Kommentare hilfreich
             for j in range(len(visited[i])):
                 if visited[i][j]:
                     continue
@@ -430,12 +430,13 @@ class ProcessingWindow(QWidget):
                 next_id += 1
 
         tracks = tracks.astype(int)
-        # np.save("tracks.npy", tracks) # TODO: why is this here?
+        # np.save("tracks.npy", tracks) # TODO: why is this here?   # ?? Also für das originale Tracking haben wir das gespeichert und in einem anderen Skript eingelesen
+                                                                    # ich vermute, das ist einfach ein Überbleibsel davon und kann weg oder?
 
         QApplication.restoreOverrideCursor()
         return tracks, tracks_name
 
-    def _adjust_ids(self):
+    def _adjust_ids(self):  # ?? ich weiß, ist noch zu tun, aber ich vermute stark, dass dann Kommentare hilfreich sein werden :D
         """
         Replaces track ID 0. Also adjusts segmentation IDs to match track IDs
         """
@@ -518,7 +519,10 @@ class ProcessingWindow(QWidget):
         print("(>'-')>")
 
 
-def segment_slice(slice, parameters):
+def segment_slice(slice, parameters):   # ?? Der parameter slice ist nen array oder?
+                                        # Hier sollten wir nochmal schauen. Können wir mit cellpose.core.use_gpu() überprüfen, ob eine GPU verfügbar ist? (Auch wenn das nicht immer zu funktionieren schien)
+                                        # Und falls ja, können wir vlt. für die GPU-Variante für model.eval über die einzelnen Slices loopen, damit wir nicht jedes mal models.Cellposemodel(...) neu aufrufen müssen?
+                                        # Ich vermute, der verpflichtende models.CellposeModel Aufruf pro Slice lässt sich für die multi-processing CPU Variante aber nicht schön umgehen oder?
     """
     Calculate segmentation for a single slice
 
@@ -533,18 +537,19 @@ def segment_slice(slice, parameters):
     -------
     """
     model = models.CellposeModel(gpu=False, pretrained_model=parameters["model_path"])
-    mask = model.eval(
+    mask, _, _ = model.eval(
         slice,
         channels=[parameters["chan"], parameters["chan2"]],
         diameter=parameters["diameter"],
         flow_threshold=parameters["flow_threshold"],
         cellprob_threshold=parameters["cellprob_threshold"],
-    )[0]
+    )
     return mask
 
 
 # calculate centroids
-def calculate_centroids(slice):  # ?? copilot
+def calculate_centroids(slice):  # ?? copilot   # ?? Vlt. können wir hier im Namen klar machen, dass es nicht alle Centroids sind. Ich habe da aber grad nichts passendes parat
+                                                # Falls du da auch keine gute Idee hast, können wir das aber auch einfach so lassen, ist nur ne mini Anmerkung
     """
     Calculate the centroids of objects in a 2D slice.
 
@@ -564,15 +569,36 @@ def calculate_centroids(slice):  # ?? copilot
     return (centroids, labels)
 
 
-def match_centroids(slice_pair):  # ?? Konstanten raus
+def match_centroids(slice_pair):    # ?? copilot docs; Konstanten raus; Was mir generell noch auffällt: Wäre es "optisch ansprechender", wenn wir die Funktion hier vor 
+                                    # _track_segmentation definieren würden, da match_centroids dort aufgerufen wird? Wäre das "best practice" oder ist sowas egal?
+                                    # und slice_pair sollten wir sehr gut kommentieren, da es nicht offensichtlich ist, was das ist bzw. was da drin steckt
+    """
+    Match centroids between two slices and return the matched pairs.
+
+    Args:
+        slice_pair (tuple): A tuple containing two slices, each represented by a tuple
+                            containing the centroids and IDs of cells in that slice.
+
+    Returns:
+        list: A list of matched pairs, where each pair consists of the centroid and ID
+              of a cell in the parent slice and the centroid and ID of the corresponding
+              cell in the child slice.
+    """
     APPROX_INF = 65535
     MAX_MATCHING_DIST = 45
 
-    num_cells_parent = len(slice_pair[0][0])
-    num_cells_child = len(slice_pair[1][0])
+    parent_centroids = slice_pair[0][0]         # ?? ich hab das hier mal nach vorne gezogen und alle folgenden Aufrufe von slice_pair auf die Variablen hier umgestellt
+    parent_ids = slice_pair[0][1]
+    child_centroids = slice_pair[1][0]
+    child_ids = slice_pair[1][1]    
+
+    num_cells_parent = len(parent_centroids)
+    num_cells_child = len(child_centroids)
+
+
 
     # calculate distance between each pair of cells
-    cost_mat = spatial.distance.cdist(slice_pair[0][0], slice_pair[1][0])
+    cost_mat = spatial.distance.cdist(parent_centroids, child_centroids)
 
     # if the distance is too far, change to approx. Inf.
     cost_mat[cost_mat > MAX_MATCHING_DIST] = APPROX_INF
@@ -587,15 +613,11 @@ def match_centroids(slice_pair):  # ?? Konstanten raus
     cost_mat_aug[:num_cells_parent, :num_cells_child] = cost_mat[:, :]
 
     # solve the optimization problem
-
     row_ind, col_ind = optimize.linear_sum_assignment(cost_mat_aug)
 
     matched_pairs = []
 
-    parent_centroids = slice_pair[0][0]
-    parent_ids = slice_pair[0][1]
-    child_centroids = slice_pair[1][0]
-    child_ids = slice_pair[1][1]
+
 
     for i in range(len(row_ind)):
         parent_centroid = np.around(parent_centroids[row_ind[i]])
