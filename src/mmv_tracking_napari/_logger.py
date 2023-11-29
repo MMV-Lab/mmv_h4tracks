@@ -75,5 +75,6 @@ def layer_select(parent, layertype):
 
 
 def handle_exception(exception):
-    print(exception)
+    notify(str(exception))
+    #print(exception)
     QApplication.restoreOverrideCursor()
