@@ -139,12 +139,8 @@ class ProcessingWindow(QWidget):
         mask : array
             the segmentation data to add to the viewer
         """
-        try:
-            self.viewer.add_labels(mask, name="calculated segmentation")
-        except Exception as e:
-            print(f"ran into some error: {e}")
-            return
-        self.parent.combobox_segmentation.setCurrentText("calculated segmentation")
+        labels = self.viewer.add_labels(mask, name="calculated segmentation")
+        self.parent.combobox_segmentation.setCurrentText(labels.name)
         print("Added segmentation to viewer")
 
     @napari.Viewer.bind_key("Shift-s")
@@ -188,10 +184,11 @@ class ProcessingWindow(QWidget):
         print("Running segmentation")
         QApplication.setOverrideCursor(Qt.WaitCursor)
 
-        data = grab_layer(self.viewer, self.parent.combobox_image.currentText()).data
-        
-        if data is None:
-            raise ValueError("No layer selected")
+        try:
+            data = grab_layer(self.viewer, self.parent.combobox_image.currentText()).data
+        except ValueError as exc:
+            handle_exception(exc)
+            return
         
         if demo:
             data = data[0:5]
@@ -259,9 +256,14 @@ class ProcessingWindow(QWidget):
         """
         # check if tracks are usable
         tracks, layername = params
-        tracks_layer = grab_layer(self.viewer, self.parent.combobox_tracks.currentText())
-        if tracks_layer is None:
-            self.viewer.add_tracks(tracks, name = layername)
+        try:
+            tracks_layer = grab_layer(self.viewer, self.parent.combobox_tracks.currentText())
+        except ValueError as exc:
+            if str(exc) == "Layer name can not be blank":
+                self.viewer.add_tracks(tracks, name = layername)
+            else:
+                handle_exception(exc)
+                return
         else:
             tracks_layer.data = tracks
         self.parent.combobox_tracks.setCurrentText(layername)
@@ -297,17 +299,17 @@ class ProcessingWindow(QWidget):
         QApplication.setOverrideCursor(Qt.WaitCursor)
 
         # get segmentation data
-        data = grab_layer(self.viewer, self.parent.combobox_segmentation.currentText()).data
-        
-        if data is None:
-            raise ValueError('No layer selected')
+        try:
+            data = grab_layer(self.viewer, self.parent.combobox_segmentation.currentText()).data
+        except ValueError as exc:
+            handle_exception(exc)
+            return
 
-        tracks_name = "Tracks"
         # check for tracks layer
         try:
             tracks_layer = grab_layer(self.viewer, self.parent.combobox_tracks.currentText())
         except ValueError:
-            pass
+            tracks_name = "Tracks"
         else:
             QApplication.restoreOverrideCursor()
             ret = yield "Replace tracks layer"

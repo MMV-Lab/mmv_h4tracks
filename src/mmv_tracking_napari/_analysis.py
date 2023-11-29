@@ -24,8 +24,8 @@ from napari.qt.threading import thread_worker
 import napari
 
 from ._grabber import grab_layer
-from mmv_tracking_napari._logger import notify
-from ._logger import  handle_exception
+from mmv_tracking_napari._logger import notify, handle_exception
+#from ._logger import  handle_exception
 from ._selector import Selector
 from ._writer import save_csv
 
@@ -763,8 +763,8 @@ class AnalysisWindow(QWidget):
             gt_seg = grab_layer(
                 self.viewer, self.parent.combobox_segmentation.currentText()
             ).data
-        except AttributeError:
-            notify("Please make sure the label layer exists!")
+        except ValueError as exc:
+            handle_exception(exc)
             return
         eval_seg = self.parent.initial_layers[0]
         results, frames = self.evaluate_segmentation(gt_seg, eval_seg)
@@ -840,15 +840,15 @@ class AnalysisWindow(QWidget):
             tracks_layer = grab_layer(
                 self.parent.viewer, self.parent.combobox_tracks.currentText()
             )
-        except ValueError:
-            notify("Please make sure to select the correct tracks layer!")
+        except ValueError as exc:
+            handle_exception(exc)
             return
         try:
             segmentation = grab_layer(
                 self.viewer, self.parent.combobox_segmentation.currentText()
             ).data
-        except AttributeError:
-            notify("Please make sure the label layer exists!")
+        except ValueError as exc:
+            handle_exception(exc)
             return
         tracks_old = tracks_layer.data
         tracks = tracks_layer.data
@@ -874,16 +874,16 @@ class AnalysisWindow(QWidget):
             corrected_tracks = grab_layer(
                 self.parent.viewer, self.parent.combobox_tracks.currentText()
             ).data
-        except AttributeError:
-            notify("Please make sure to select the correct tracks layer!")
+        except ValueError as exc:
+            handle_exception(exc)
             return
         automatic_segmentation = self.parent.initial_layers[0]
         try:
             corrected_segmentation = grab_layer(
                 self.viewer, self.parent.combobox_segmentation.currentText()
             ).data
-        except AttributeError:
-            notify("Please make sure the label layer exists!")
+        except ValueError as exc:
+            handle_exception(exc)
             return
         fault_value = self.evaluate_tracking(
             gt_seg=corrected_segmentation,
