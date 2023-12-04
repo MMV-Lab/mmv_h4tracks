@@ -13,9 +13,10 @@ def setup_logging():
     plugin_directory = Path(__file__).parent.parent.parent.absolute()
     print(plugin_directory)
     path = plugin_directory / "hitl4trk.log"
-    file = open(path, "w")
-    sys.stdout = file
-    sys.stderr = file
+    with open(path, "w", encoding="utf-8") as file:
+        #file = open(path, "w")
+        sys.stdout = file
+        sys.stderr = file
     print("Logging initialized")
 
 
@@ -34,13 +35,10 @@ def notify(text):
     print("Notifying user: '{}'".format(text))
     msg.exec()
 
-
 @thread_worker
 def notify_with_delay(text):
     time.sleep(0.2)
-    return text
     notify(text)
-
 
 def choice_dialog(text, choices):
     """
@@ -76,5 +74,4 @@ def layer_select(parent, layertype):
 
 def handle_exception(exception):
     notify(str(exception))
-    #print(exception)
     QApplication.restoreOverrideCursor()
