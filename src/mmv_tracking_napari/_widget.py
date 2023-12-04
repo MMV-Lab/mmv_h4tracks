@@ -25,7 +25,7 @@ from napari.layers.labels.labels import Labels
 from napari.layers.tracks.tracks import Tracks
 
 from ._analysis import AnalysisWindow
-from ._logger import setup_logging, notify, layer_select
+from ._logger import setup_logging, notify
 from ._processing import ProcessingWindow
 from ._reader import open_dialog, napari_get_reader
 from ._segmentation import SegmentationWindow
@@ -60,6 +60,7 @@ class MMVTracking(QWidget):
     analysis()
         Opens a window to do analysis
     """
+    dock = None
 
     def __init__(self, viewer: napari.Viewer = None, parent=None):
         """
@@ -71,6 +72,7 @@ class MMVTracking(QWidget):
         super().__init__(parent=parent)
         viewer = napari.current_viewer() if viewer is None else viewer
         self.viewer = viewer
+        MMVTracking.dock = self
 
         #setup_logging()
 
@@ -488,3 +490,43 @@ class MMVTracking(QWidget):
         print("Opening analysis window")
         if not hide:
             self.analysis_window.show()
+
+    @napari.Viewer.bind_key("Shift-r")
+    def _hotkey_remove_label(self):
+        if hasattr(MMVTracking.dock, "segmentation_window"):
+            MMVTracking.dock.segmentation_window._add_remove_callback()
+
+    @napari.Viewer.bind_key("Shift-l")
+    def _hotkey_load_label(self):
+        if hasattr(MMVTracking.dock, "segmentation_window"):
+            MMVTracking.dock.segmentation_window._set_label_id()
+
+    @napari.Viewer.bind_key("Shift-c")
+    def _hotkey_separate_label(self):
+        if hasattr(MMVTracking.dock, "segmentation_window"):
+            MMVTracking.dock.segmentation_window._add_replace_callback()
+
+    @napari.Viewer.bind_key("Shift-m")
+    def _hotkey_merge_label(self):
+        if hasattr(MMVTracking.dock, "segmentation_window"):
+            MMVTracking.dock.segmentation_window._add_merge_callback()
+
+    @napari.Viewer.bind_key("Shift-p")
+    def _hotkey_select_label(self):
+        if hasattr(MMVTracking.dock, "segmentation_window"):
+            MMVTracking.dock.segmentation_window._add_select_callback()
+
+    @napari.Viewer.bind_key("Shift-u")
+    def _hotkey_unlink_track(self):
+        if hasattr(MMVTracking.dock, "tracking_window"):
+            MMVTracking.dock.tracking_window._unlink()
+
+    @napari.Viewer.bind_key("l")
+    def _hotkey_link_track(self):
+        if hasattr(MMVTracking.dock, "tracking_window"):
+            MMVTracking.dock.tracking_window._link()
+
+    @napari.Viewer.bind_key("Shift-t")
+    def _hotkey_track_single(self):
+        if hasattr(MMVTracking.dock, "tracking_window"):
+            MMVTracking.dock.tracking_window._add_auto_track_callback()

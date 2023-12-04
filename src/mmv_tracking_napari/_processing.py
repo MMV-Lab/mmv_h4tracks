@@ -1,31 +1,31 @@
-import os
-import numpy as np
 import multiprocessing
-from multiprocessing import Pool
+import os
 import platform
 import time
 from threading import Event
 
 import napari
+import numpy as np
+from cellpose import models, core
+from napari.qt.threading import thread_worker
+from qtpy.QtCore import Qt
 from qtpy.QtWidgets import (
-    QWidget,
-    QLabel,
-    QVBoxLayout,
-    QPushButton,
+    QApplication,
     QComboBox,
     QGridLayout,
-    QApplication,
+    QLabel,
     QMessageBox,
+    QPushButton,
     QSizePolicy,
+    QVBoxLayout,
+    QWidget,
 )
-from qtpy.QtCore import Qt
-from napari.qt.threading import thread_worker
-from scipy import ndimage, spatial, optimize
-from cellpose import models
+from scipy import ndimage, optimize, spatial
+import torch
 
+from mmv_tracking_napari import APPROX_INF, MAX_MATCHING_DIST
 from ._logger import notify, choice_dialog, handle_exception
 from ._grabber import grab_layer
-
 
 class ProcessingWindow(QWidget):
     """
@@ -48,8 +48,8 @@ class ProcessingWindow(QWidget):
         Replaces track ID 0 & adjusts segmentation IDs to match track IDs
     """
 
-    dock = None
-
+    dock = None  # ?? ich vermute, kluge Menschen wissen, was das hier macht. Braucht keinen Kommentar, aber interessieren würde es mich trotzdem
+                 # !! Attribut für selbstverweis. Wird für hotkeys benutzt
     def __init__(self, parent):
         """
         Parameters
@@ -123,6 +123,15 @@ class ProcessingWindow(QWidget):
         self.layout().addWidget(content)
 
     def toggle_segmentation_buttons(self, text):
+        """
+        Toggles the segmentation buttons if a valid model is selected.
+
+        Args:
+            text (str): Selected model from the combobox.
+
+        Returns:
+            None
+        """
         if text == "select model":
             self.btn_segment.setEnabled(False)
             self.btn_preview_segment.setEnabled(False)
@@ -131,6 +140,9 @@ class ProcessingWindow(QWidget):
             self.btn_preview_segment.setEnabled(True)
 
     def read_models(self):
+        """
+        Reads the available models from the 'models' directory and adds them to the segmentation combobox.
+        """
         path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models")
         for file in os.listdir(path):
             self.combobox_segmentation.addItem(file)
@@ -147,10 +159,6 @@ class ProcessingWindow(QWidget):
         labels = self.viewer.add_labels(mask, name="calculated segmentation")
         self.parent.combobox_segmentation.setCurrentText(labels.name)
         print("Added segmentation to viewer")
-
-    @napari.Viewer.bind_key("Shift-s")
-    def _hotkey_run_segmentation(self):
-        ProcessingWindow.dock._run_segmentation()
 
     def _run_segmentation(self):
         """
@@ -204,21 +212,38 @@ class ProcessingWindow(QWidget):
 
         parameters = self._get_parameters(selected_model)
 
-        # set process limit
-        if self.parent.rb_eco.isChecked():
-            AMOUNT_OF_PROCESSES = np.maximum(1, int(multiprocessing.cpu_count() * 0.4))
+        if core.use_gpu():
+            print("can gpu")
+            model = models.CellposeModel(gpu=True, pretrained_model=parameters["model_path"])
+            mask = []
+            for layer_slice in data:
+                layer_mask, _, _ = model.eval(
+                    layer_slice,
+                    channels = [parameters["chan"], parameters["chan2"]],
+                    diameter = parameters["diameter"],
+                    flow_threshold = parameters["flow_threshold"],
+                    cellprob_threshold = parameters["cellprob_threshold"],
+                )
+                mask.append(layer_mask)
+            mask = np.array(mask)
         else:
-            AMOUNT_OF_PROCESSES = np.maximum(1, int(multiprocessing.cpu_count() * 0.8))
-        print("Running on {} processes max".format(AMOUNT_OF_PROCESSES))
+            print("can't gpu")
 
-        data_with_parameters = []
-        for slice in data:
-            data_with_parameters.append((slice, parameters))
+            # set process limit
+            if self.parent.rb_eco.isChecked():
+                AMOUNT_OF_PROCESSES = np.maximum(1, int(multiprocessing.cpu_count() * 0.4))
+            else:
+                AMOUNT_OF_PROCESSES = np.maximum(1, int(multiprocessing.cpu_count() * 0.8))
+            print("Running on {} processes max".format(AMOUNT_OF_PROCESSES))
 
-        with Pool(AMOUNT_OF_PROCESSES) as p:
-            mask = p.starmap(segment_slice, data_with_parameters)
-            mask = np.asarray(mask)
-            print("Done calculating segmentation")
+
+            data_with_parameters = [(layer_slice, parameters) for layer_slice in data]
+            
+            with Pool(AMOUNT_OF_PROCESSES) as p:
+                mask = p.starmap(segment_slice_cpu, data_with_parameters)
+                mask = np.asarray(mask)
+                print("Done calculating segmentation")
+
 
         QApplication.restoreOverrideCursor()
         return mask
@@ -302,13 +327,8 @@ class ProcessingWindow(QWidget):
 
     @thread_worker(connect={"errored": handle_exception})
     def _track_segmentation(self):
-        """
-        Run tracking on the segmented data
-        """
         print("Running tracking")
         QApplication.setOverrideCursor(Qt.WaitCursor)
-
-        # get segmentation data
         try:
             data = grab_layer(
                 self.viewer, self.parent.combobox_segmentation.currentText()
@@ -316,8 +336,33 @@ class ProcessingWindow(QWidget):
         except ValueError as exc:
             handle_exception(exc)
             return
+        
+        if data is None:
+            QApplication.restoreOverrideCursor()
+            notify("Please select the segmentation layer!")
+            return
 
-        # check for tracks layer
+        tracks_name = self._check_for_tracks_layer()
+        
+        AMOUNT_OF_PROCESSES = self._calculate_processes_limit()
+        print(f"Running on {AMOUNT_OF_PROCESSES} processes max")
+
+        extended_centroids = self._calculate_centroids_parallel(data)
+        matches = self._match_centroids_parallel(extended_centroids)
+
+        tracks = self._process_matches(matches)
+
+        QApplication.restoreOverrideCursor()
+        return tracks, tracks_name
+        
+    def _get_segmentation_data(self):
+        try:
+            return grab_layer(self.viewer, self.parent.combobox_segmentation.currentText()).data
+        except ValueError as exc:
+            raise ValueError("Segmentation layer not found in viewer") from exc
+        
+    def _check_for_tracks_layer(self):
+        tracks_name = "Tracks"
         try:
             tracks_layer = grab_layer(
                 self.viewer, self.parent.combobox_tracks.currentText()
@@ -338,87 +383,79 @@ class ProcessingWindow(QWidget):
                 return
             tracks_name = tracks_layer.name
 
-        # set process limit
+    def _calculate_processes_limit(self):
         if self.parent.rb_eco.isChecked():
-            AMOUNT_OF_PROCESSES = np.maximum(1, int(multiprocessing.cpu_count() * 0.4))
+            return max(1, int(multiprocessing.cpu_count() * 0.4))
         else:
-            AMOUNT_OF_PROCESSES = np.maximum(1, int(multiprocessing.cpu_count() * 0.8))
-        print("Running on {} processes max".format(AMOUNT_OF_PROCESSES))
+            return max(1, int(multiprocessing.cpu_count() * 0.8))
 
-        with Pool(AMOUNT_OF_PROCESSES) as p:
-            extended_centroids = p.map(calculate_centroids, data)
+    def _calculate_centroids_parallel(self, data):
+        with Pool(self._calculate_processes_limit()) as p:
+            return p.map(calculate_centroids, data)
 
-        # calculate connections between centroids of adjacent slices
+    def _match_centroids_parallel(self, extended_centroids):
+        slice_pairs = [(extended_centroids[i-1], extended_centroids[i]) for i in range(1, len(extended_centroids))]
+        with Pool(self._calculate_processes_limit()) as p:
+            return p.map(match_centroids, (slice_pairs))
 
-        slice_pairs = []
-        for i in range(1, len(data)):
-            slice_pairs.append((extended_centroids[i - 1], extended_centroids[i]))
-
-        with Pool(AMOUNT_OF_PROCESSES) as p:
-            matches = p.map(match_centroids, slice_pairs)
-
+    def _process_matches(self, matches):
+        # Initialize variables to store tracks, unique ID and visited cells
         tracks = np.array([])
         next_id = 0
-        visited = []
-        for i in range(len(matches)):
-            visited.append([0] * len(matches[i]))
+        visited = [[0] * len(matches[i]) for i in range(len(matches))]
 
-        for i in range(len(visited)):
-            for j in range(len(visited[i])):
-                if visited[i][j]:
-                    continue
-                entry = [
-                    next_id,
-                    i,
-                    int(matches[i][j][0][0][0]),
-                    int(matches[i][j][0][0][1]),
-                ]
-                try:
-                    tracks = np.append(tracks, np.array([entry]), axis=0)
-                except:
-                    tracks = np.array([entry])
-                entry = [
-                    next_id,
-                    i + 1,
-                    int(matches[i][j][1][0][0]),
-                    int(matches[i][j][1][0][1]),
-                ]
+        # Helper function to append entry to tracks
+        def process_entry(entry, tracks):
+            try:
                 tracks = np.append(tracks, np.array([entry]), axis=0)
-                visited[i][j] = 1
-                label = matches[i][j][1][1]
+            except ValueError:
+                tracks = np.array([entry])
+            return tracks
 
-                slice = i + 1
-                while True:
-                    if slice >= len(matches):
-                        break
-                    labels = []
-                    for k in range(len(matches[slice])):
-                        labels.append(matches[slice][k][0][1])
-                        visited[slice][k] = 1
+        # Create an iterator to traverse through all slices and cells
+        iterator = iter(((i, j) for i in range(len(visited)) for j in range(len(visited[i]))))
 
-                    if not label in labels:
-                        break
-                    match_number = labels.index(label)
-                    entry = [
-                        next_id,
-                        slice + 1,
-                        matches[slice][match_number][1][0][0],
-                        matches[slice][match_number][1][0][1],
-                    ]
-                    tracks = np.append(tracks, np.array([entry]), axis=0)
-                    label = matches[slice][match_number][1][1]
+        # Iterate through slices and cells
+        for slice_id, cell_id in iterator:
+            if visited[slice_id][cell_id]:
+                continue
 
-                    slice += 1
+            # Extract centroid information for parent and child cells
+            entry = [next_id, slice_id, int(matches[slice_id][cell_id]["parent"]["centroid"][0]), int(matches[slice_id][cell_id]["parent"]["centroid"][1])]
+            tracks = process_entry(entry, tracks)
 
-                next_id += 1
+            entry = [next_id, slice_id + 1, int(matches[slice_id][cell_id]["child"]["centroid"][0]), int(matches[slice_id][cell_id]["child"]["centroid"][1])]
+            tracks = process_entry(entry, tracks)
 
-        tracks = tracks.astype(int)
-        # np.save("tracks.npy", tracks) # TODO: why is this here?
+            if next_id == 14 or next_id == 56:
+                print(f"relevant id: {next_id}")
 
-        QApplication.restoreOverrideCursor()
-        return tracks, tracks_name
+            visited[slice_id][cell_id] = 1
+            label = matches[slice_id][cell_id]["child"]["id"]
 
-    def _adjust_ids(self):
+            # Iterate through subsequent slices to complete the track
+            while True:
+                if slice_id + 1 >= len(matches):
+                    break
+                labels = [matches[slice_id + 1][matched_cell]["parent"]["id"] for matched_cell in range(len(matches[slice_id + 1]))]
+
+                if not label in labels:
+                    break
+
+                match_number = labels.index(label)
+                visited[slice_id + 1][match_number] = 1
+                entry = [next_id, slice_id + 2, int(matches[slice_id + 1][match_number]["child"]["centroid"][0]),
+                                                    int(matches[slice_id + 1][match_number]["child"]["centroid"][1])]
+                tracks = process_entry(entry, tracks)
+                label = matches[slice_id + 1][match_number]["child"]["id"]
+
+                slice_id += 1
+            
+            next_id += 1
+
+        return tracks.astype(int)
+
+    def _adjust_ids(self):  # ?? ich weiß, ist noch zu tun, aber ich vermute stark, dass dann Kommentare hilfreich sein werden :D
         """
         Replaces track ID 0. Also adjusts segmentation IDs to match track IDs
         """
@@ -431,14 +468,13 @@ class ProcessingWindow(QWidget):
         print(self.viewer.layers[self.viewer.layers.index("Tracks")].data)
         QApplication.restoreOverrideCursor()
 
-
 def segment_slice(slice, parameters):
     """
     Calculate segmentation for a single slice
 
     Parameters
     ----------
-    slice : napari
+    layer_slice : 2darray
         the slice of raw image data to calculate segmentation for
     parameters : dict
         the parameters for the segmentation model
@@ -447,33 +483,65 @@ def segment_slice(slice, parameters):
     -------
     """
     model = models.CellposeModel(gpu=False, pretrained_model=parameters["model_path"])
-    mask = model.eval(
-        slice,
+    mask, _, _ = model.eval(
+        layer_slice,
         channels=[parameters["chan"], parameters["chan2"]],
         diameter=parameters["diameter"],
         flow_threshold=parameters["flow_threshold"],
         cellprob_threshold=parameters["cellprob_threshold"],
-    )[0]
+    )
     return mask
 
 
 # calculate centroids
-def calculate_centroids(slice):
-    labels = np.unique(slice)[1:]
-    centroids = ndimage.center_of_mass(slice, labels=slice, index=labels)
+def calculate_centroids(label_slice):
+    """
+    Calculate the centroids of objects in a 2D slice.
+
+    Parameters
+    ----------
+    label_slice : numpy.ndarray
+        A 2D numpy array representing the slice.
+
+    Returns
+    -------
+    tuple
+        A tuple containing two numpy arrays: the centroids and the labels.
+    """
+    labels = np.unique(label_slice)[1:]
+    centroids = ndimage.center_of_mass(label_slice, labels=label_slice, index=labels)
 
     return (centroids, labels)
 
 
-def match_centroids(slice_pair):
-    APPROX_INF = 65535
-    MAX_MATCHING_DIST = 45
+def match_centroids(slice_pair):    # ?? copilot docs; Konstanten raus; Was mir generell noch auffällt: Wäre es "optisch ansprechender", wenn wir die Funktion hier vor 
+                                    # _track_segmentation definieren würden, da match_centroids dort aufgerufen wird? Wäre das "best practice" oder ist sowas egal?
+                                    # und slice_pair sollten wir sehr gut kommentieren, da es nicht offensichtlich ist, was das ist bzw. was da drin steckt
+    """                             # !! ich definiere helfer generell eher nach den eigentlichen funktionen. wie genau willst du slice_pair kommentieren?
+    Match centroids between two slices and return the matched pairs.
 
-    num_cells_parent = len(slice_pair[0][0])
-    num_cells_child = len(slice_pair[1][0])
+    Args:
+        slice_pair (tuple): A tuple containing two slices, each represented by a tuple
+                            containing the centroids and IDs of cells in that slice.
+
+    Returns:
+        list: A list of matched pairs, where each pair consists of the centroid and ID
+              of a cell in the parent slice and the centroid and ID of the corresponding
+              cell in the child slice.
+    """
+
+    parent_centroids = slice_pair[0][0]         # ?? ich hab das hier mal nach vorne gezogen und alle folgenden Aufrufe von slice_pair auf die Variablen hier umgestellt
+    parent_ids = slice_pair[0][1]               # !! (y)
+    child_centroids = slice_pair[1][0]
+    child_ids = slice_pair[1][1]    
+
+    num_cells_parent = len(parent_centroids)
+    num_cells_child = len(child_centroids)
+
+
 
     # calculate distance between each pair of cells
-    cost_mat = spatial.distance.cdist(slice_pair[0][0], slice_pair[1][0])
+    cost_mat = spatial.distance.cdist(parent_centroids, child_centroids)
 
     # if the distance is too far, change to approx. Inf.
     cost_mat[cost_mat > MAX_MATCHING_DIST] = APPROX_INF
@@ -488,20 +556,11 @@ def match_centroids(slice_pair):
     cost_mat_aug[:num_cells_parent, :num_cells_child] = cost_mat[:, :]
 
     # solve the optimization problem
-
-    if (
-        sum(sum(1 * np.isnan(cost_mat))) > 0
-    ):  # check if there is at least one np.nan in cost_mat
-        print("TODO: Remove this (Justin)")
-        return
     row_ind, col_ind = optimize.linear_sum_assignment(cost_mat_aug)
 
     matched_pairs = []
 
-    parent_centroids = slice_pair[0][0]
-    parent_ids = slice_pair[0][1]
-    child_centroids = slice_pair[1][0]
-    child_ids = slice_pair[1][1]
+
 
     for i in range(len(row_ind)):
         parent_centroid = np.around(parent_centroids[row_ind[i]])
@@ -512,6 +571,6 @@ def match_centroids(slice_pair):
         except:
             continue
 
-        matched_pairs.append(([parent_centroid, parent_id], [child_centroid, child_id]))
-
+        matched_pairs.append({"parent": {"centroid": parent_centroid, "id": parent_id}, "child": {"centroid": child_centroid, "id": child_id}})
+        
     return matched_pairs
