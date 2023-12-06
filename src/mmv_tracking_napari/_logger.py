@@ -73,3 +73,8 @@ def choice_dialog(text, choices):
             msg.addButton(choice)
     print(f"Prompting user: '{text}'")
     return msg.exec()
+
+def handle_exception(exception):
+    notify(str(exception))
+    #print(exception)
+    QApplication.restoreOverrideCursor()

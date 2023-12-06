@@ -3,6 +3,7 @@ import os
 import platform
 import time
 from threading import Event
+from multiprocessing import Pool
 
 import napari
 import numpy as np
@@ -468,7 +469,7 @@ class ProcessingWindow(QWidget):
         print(self.viewer.layers[self.viewer.layers.index("Tracks")].data)
         QApplication.restoreOverrideCursor()
 
-def segment_slice(slice, parameters):
+def segment_slice_cpu(layer_slice, parameters):
     """
     Calculate segmentation for a single slice
 
