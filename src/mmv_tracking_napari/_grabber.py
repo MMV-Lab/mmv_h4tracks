@@ -15,8 +15,8 @@ def grab_layer(viewer, layer_name):
         returns layer if it is found, throws ValueError otherwise
     """
     if layer_name == "":
-        return None
+        raise ValueError("Layer name can not be blank")
     try:
         return viewer.layers[viewer.layers.index(layer_name)]
-    except ValueError:
-        raise ValueError("Layer named {} does not exist".format(layer_name))
+    except ValueError as exc:
+        raise ValueError(f"Layer named '{layer_name}' does not exist") from exc
