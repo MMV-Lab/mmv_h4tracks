@@ -3,6 +3,8 @@ import numpy as np
 import multiprocessing
 from multiprocessing import Pool
 import platform
+import time
+from threading import Event
 
 import napari
 from qtpy.QtWidgets import (
@@ -21,7 +23,7 @@ from napari.qt.threading import thread_worker
 from scipy import ndimage, spatial, optimize
 from cellpose import models
 
-from ._logger import notify, choice_dialog
+from ._logger import notify, choice_dialog, handle_exception
 from ._grabber import grab_layer
 
 
@@ -64,8 +66,9 @@ class ProcessingWindow(QWidget):
         self.parent = parent
         self.viewer = parent.viewer
         ProcessingWindow.dock = self
+        self.choice_event = Event()
         try:
-            self.setStyleSheet(napari.qt.get_stylesheet(theme = "dark"))
+            self.setStyleSheet(napari.qt.get_stylesheet(theme="dark"))
         except TypeError:
             pass
 
@@ -81,7 +84,7 @@ class ProcessingWindow(QWidget):
         btn_track = QPushButton("Run Tracking")
         btn_adjust_seg_ids = QPushButton("Harmonize segmentation colors")
         btn_adjust_seg_ids.setToolTip("WARNING: This will take a while")
-        
+
         self.btn_segment.setEnabled(False)
         self.btn_preview_segment.setEnabled(False)
 
@@ -94,8 +97,10 @@ class ProcessingWindow(QWidget):
         self.combobox_segmentation = QComboBox()
         self.combobox_segmentation.addItem("select model")
         self.read_models()
-        self.combobox_segmentation.currentTextChanged.connect(self.toggle_segmentation_buttons)
-        
+        self.combobox_segmentation.currentTextChanged.connect(
+            self.toggle_segmentation_buttons
+        )
+
         # Horizontal lines
         line = QWidget()
         line.setFixedHeight(4)
@@ -105,7 +110,7 @@ class ProcessingWindow(QWidget):
         ### Organize objects via widgets
         content = QWidget()
         content.setLayout(QVBoxLayout())
-        
+
         content.layout().addWidget(label_segmentation)
         content.layout().addWidget(self.combobox_segmentation)
         content.layout().addWidget(self.btn_preview_segment)
@@ -116,7 +121,7 @@ class ProcessingWindow(QWidget):
         content.layout().addWidget(btn_adjust_seg_ids)
 
         self.layout().addWidget(content)
-        
+
     def toggle_segmentation_buttons(self, text):
         if text == "select model":
             self.btn_segment.setEnabled(False)
@@ -124,9 +129,9 @@ class ProcessingWindow(QWidget):
         else:
             self.btn_segment.setEnabled(True)
             self.btn_preview_segment.setEnabled(True)
-        
+
     def read_models(self):
-        path = os.path.join(os.path.dirname(os.path.abspath(__file__)),"models")
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models")
         for file in os.listdir(path):
             self.combobox_segmentation.addItem(file)
 
@@ -139,12 +144,8 @@ class ProcessingWindow(QWidget):
         mask : array
             the segmentation data to add to the viewer
         """
-        try:
-            self.viewer.add_labels(mask, name="calculated segmentation")
-        except Exception as e:
-            print(f"ran into some error: {e}")
-            return
-        self.parent.combobox_segmentation.setCurrentText("calculated segmentation")
+        labels = self.viewer.add_labels(mask, name="calculated segmentation")
+        self.parent.combobox_segmentation.setCurrentText(labels.name)
         print("Added segmentation to viewer")
 
     @napari.Viewer.bind_key("Shift-s")
@@ -159,7 +160,8 @@ class ProcessingWindow(QWidget):
 
         worker = self._segment_image()
         worker.returned.connect(self._add_segmentation_to_viewer)
-        worker.start()
+        # worker.errored.connect(handle_exception)
+        # worker.start()
 
     def _run_demo_segmentation(self):
         """
@@ -169,9 +171,10 @@ class ProcessingWindow(QWidget):
 
         worker = self._segment_image(True)
         worker.returned.connect(self._add_segmentation_to_viewer)
-        worker.start()
+        # worker.errored.connect(handle_exception)
+        # worker.start()
 
-    @thread_worker
+    @thread_worker(connect={"errored": handle_exception})
     def _segment_image(self, demo=False):
         """
         Run segmentation on the raw image data
@@ -187,30 +190,19 @@ class ProcessingWindow(QWidget):
         QApplication.setOverrideCursor(Qt.WaitCursor)
 
         try:
-            data = grab_layer(self.viewer, self.parent.combobox_image.currentText()).data
-        except AttributeError:
-            print("Image layer not found in viewer")
-            QApplication.restoreOverrideCursor()
-            notify("No image layer found!")
+            data = grab_layer(
+                self.viewer, self.parent.combobox_image.currentText()
+            ).data
+        except ValueError as exc:
+            handle_exception(exc)
             return
-        
-        if data is None:
-            print("Image layer not selected")
-            QApplication.restoreOverrideCursor()
-            notify("Please select the image layer!")
-            return
-        
+
         if demo:
             data = data[0:5]
 
         selected_model = self.combobox_segmentation.currentText()
 
-        try:
-            parameters = self._get_parameters(selected_model)
-        except UnboundLocalError:
-            QApplication.restoreOverrideCursor()
-            notify("Please select a different model")
-            return
+        parameters = self._get_parameters(selected_model)
 
         # set process limit
         if self.parent.rb_eco.isChecked():
@@ -271,9 +263,16 @@ class ProcessingWindow(QWidget):
         """
         # check if tracks are usable
         tracks, layername = params
-        tracks_layer = grab_layer(self.viewer, self.parent.combobox_tracks.currentText())
-        if tracks_layer is None:
-            self.viewer.add_tracks(tracks, name = layername)
+        try:
+            tracks_layer = grab_layer(
+                self.viewer, self.parent.combobox_tracks.currentText()
+            )
+        except ValueError as exc:
+            if str(exc) == "Layer name can not be blank":
+                self.viewer.add_tracks(tracks, name=layername)
+            else:
+                handle_exception(exc)
+                return
         else:
             tracks_layer.data = tracks
         self.parent.combobox_tracks.setCurrentText(layername)
@@ -285,11 +284,23 @@ class ProcessingWindow(QWidget):
         """
         print("Calling tracking")
 
+        def on_yielded(value):
+            if value == "Replace tracks layer":
+                ret = choice_dialog(
+                    "Tracks layer found. Do you want to replace it?",
+                    [QMessageBox.Yes, QMessageBox.No],
+                )
+                if ret == 16384:
+                    self.ret = ret
+                    self.choice_event.set()
+                else:
+                    worker.quit()
+
         worker = self._track_segmentation()
         worker.returned.connect(self._add_tracks_to_viewer)
-        worker.start()
+        worker.yielded.connect(on_yielded)
 
-    @thread_worker
+    @thread_worker(connect={"errored": handle_exception})
     def _track_segmentation(self):
         """
         Run tracking on the segmented data
@@ -299,37 +310,33 @@ class ProcessingWindow(QWidget):
 
         # get segmentation data
         try:
-            data = grab_layer(self.viewer, self.parent.combobox_segmentation.currentText()).data
-        except AttributeError:
-            print("Segmentation layer not found in viewer")
-            QApplication.restoreOverrideCursor()
-            notify("No segmentation layer found!")
-            return
-        
-        if data is None:
-            print("Segmentation layer not selected")
-            QApplication.restoreOverrideCursor()
-            notify("Please select the segmentation layer!")
+            data = grab_layer(
+                self.viewer, self.parent.combobox_segmentation.currentText()
+            ).data
+        except ValueError as exc:
+            handle_exception(exc)
             return
 
-        tracks_name = "Tracks"
         # check for tracks layer
         try:
-            tracks_layer = grab_layer(self.viewer, self.parent.combobox_tracks.currentText())
+            tracks_layer = grab_layer(
+                self.viewer, self.parent.combobox_tracks.currentText()
+            )
         except ValueError:
-            pass
+            tracks_name = "Tracks"
         else:
-            if tracks_layer is not None:
+            QApplication.restoreOverrideCursor()
+            yield "Replace tracks layer"
+            self.choice_event.wait()
+            self.choice_event.clear()
+            ret = self.ret
+            del self.ret
+            print(ret)
+            QApplication.setOverrideCursor(Qt.WaitCursor)
+            if ret == 65536:
                 QApplication.restoreOverrideCursor()
-                ret = choice_dialog(
-                    "Tracks layer found. Do you want to replace it?",
-                    [QMessageBox.Yes, QMessageBox.No],
-                )
-                QApplication.setOverrideCursor(Qt.WaitCursor)
-                if ret == 65536:
-                    QApplication.restoreOverrideCursor()
-                    return
-                tracks_name = tracks_layer.name
+                return
+            tracks_name = tracks_layer.name
 
         # set process limit
         if self.parent.rb_eco.isChecked():
@@ -406,7 +413,7 @@ class ProcessingWindow(QWidget):
                 next_id += 1
 
         tracks = tracks.astype(int)
-        #np.save("tracks.npy", tracks) # TODO: why is this here?
+        # np.save("tracks.npy", tracks) # TODO: why is this here?
 
         QApplication.restoreOverrideCursor()
         return tracks, tracks_name
@@ -415,7 +422,7 @@ class ProcessingWindow(QWidget):
         """
         Replaces track ID 0. Also adjusts segmentation IDs to match track IDs
         """
-        raise NotImplementedError
+        raise NotImplementedError("Not implemented yet!")
         print("Adjusting segmentation IDs")
         QApplication.setOverrideCursor(Qt.WaitCursor)
         import sys
@@ -423,6 +430,7 @@ class ProcessingWindow(QWidget):
         np.set_printoptions(threshold=sys.maxsize)
         print(self.viewer.layers[self.viewer.layers.index("Tracks")].data)
         QApplication.restoreOverrideCursor()
+
 
 def segment_slice(slice, parameters):
     """
@@ -438,9 +446,7 @@ def segment_slice(slice, parameters):
     Returns
     -------
     """
-    model = models.CellposeModel(
-        gpu=False, pretrained_model=parameters["model_path"]
-    )
+    model = models.CellposeModel(gpu=False, pretrained_model=parameters["model_path"])
     mask = model.eval(
         slice,
         channels=[parameters["chan"], parameters["chan2"]],
@@ -450,6 +456,7 @@ def segment_slice(slice, parameters):
     )[0]
     return mask
 
+
 # calculate centroids
 def calculate_centroids(slice):
     labels = np.unique(slice)[1:]
@@ -457,10 +464,11 @@ def calculate_centroids(slice):
 
     return (centroids, labels)
 
+
 def match_centroids(slice_pair):
     APPROX_INF = 65535
     MAX_MATCHING_DIST = 45
-    
+
     num_cells_parent = len(slice_pair[0][0])
     num_cells_child = len(slice_pair[1][0])
 
@@ -475,9 +483,7 @@ def match_centroids(slice_pair):
     cost_mat_aug = (
         MAX_MATCHING_DIST
         * 1.2
-        * np.ones(
-            (num_cells_parent, num_cells_child + num_cells_parent), dtype=float
-        )
+        * np.ones((num_cells_parent, num_cells_child + num_cells_parent), dtype=float)
     )
     cost_mat_aug[:num_cells_parent, :num_cells_child] = cost_mat[:, :]
 
@@ -506,8 +512,6 @@ def match_centroids(slice_pair):
         except:
             continue
 
-        matched_pairs.append(
-            ([parent_centroid, parent_id], [child_centroid, child_id])
-        )
+        matched_pairs.append(([parent_centroid, parent_id], [child_centroid, child_id]))
 
     return matched_pairs
