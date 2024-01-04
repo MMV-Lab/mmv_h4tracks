@@ -412,9 +412,12 @@ class TrackingWindow(QWidget):
                     label_layer.data[z], labels=label_layer.data[z], index=selected_id
                 )
                 cell = [z, int(np.rint(centroid[0])), int(np.rint(centroid[1]))]
-                self.track_cells.append(cell)
-                self.track_cells.sort()
-                print("Added cell {} to list for track cells".format(cell))
+                if not cell in self.track_cells:
+                    self.track_cells.append(cell)
+                    self.track_cells.sort()
+                    print("Added cell {} to list for track cells".format(cell))
+                else:
+                    print(f"Skipping duplicate for {cell}")
 
         print("Added callback to record track cells")
 
