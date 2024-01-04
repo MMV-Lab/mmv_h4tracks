@@ -2,8 +2,8 @@ import sys
 import time
 from pathlib import Path
 
+from qtpy.QtWidgets import QMessageBox, QInputDialog, QApplication
 from napari.qt.threading import thread_worker
-from qtpy.QtWidgets import QInputDialog, QMessageBox
 
 
 def setup_logging():
@@ -13,9 +13,10 @@ def setup_logging():
     plugin_directory = Path(__file__).parent.parent.parent.absolute()
     print(plugin_directory)
     path = plugin_directory / "hitl4trk.log"
-    file = open(path, "w")
-    sys.stdout = file
-    sys.stderr = file
+    with open(path, "w", encoding="utf-8") as file:
+        #file = open(path, "w")
+        sys.stdout = file
+        sys.stderr = file
     print("Logging initialized")
 
 
@@ -34,7 +35,6 @@ def notify(text):
     print(f"Notifying user: '{text}'")
     msg.exec()
 
-
 @thread_worker
 def notify_with_delay(text):
     """
@@ -50,7 +50,6 @@ def notify_with_delay(text):
     """
     time.sleep(0.2)
     notify(text)
-
 
 def choice_dialog(text, choices):
     """
@@ -73,3 +72,8 @@ def choice_dialog(text, choices):
             msg.addButton(choice)
     print(f"Prompting user: '{text}'")
     return msg.exec()
+
+
+def handle_exception(exception):
+    notify(str(exception))
+    QApplication.restoreOverrideCursor()

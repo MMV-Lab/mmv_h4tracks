@@ -2,6 +2,7 @@ import multiprocessing
 from multiprocessing import Pool
 import numpy as np
 from scipy import ndimage
+import platform
 
 from qtpy.QtWidgets import (
     QWidget,
@@ -24,7 +25,7 @@ import napari
 
 from mmv_tracking_napari import IOU_THRESHOLD
 from ._grabber import grab_layer
-from ._logger import notify
+from mmv_tracking_napari._logger import notify, handle_exception
 from ._selector import Selector
 from ._writer import save_csv
 
@@ -380,10 +381,10 @@ class AnalysisWindow(QWidget):
         print("Showing plot window")
         self.parent.plot_window.show()
 
-    @thread_worker
+    @thread_worker(connect={"errored": handle_exception})
     def _sort_plot_data(self, metric):
         """
-        ??
+        Create dictionary holding metric data and results
         Parameters
         ----------
         metric : ??     
@@ -394,13 +395,9 @@ class AnalysisWindow(QWidget):
         retval: ??
             ??      
         """
-        try:
-            tracks_layer = grab_layer(
-                self.parent.viewer, self.parent.combobox_tracks.currentText()
-            )
-        except ValueError:
-            notify("Please make sure to select the correct tracks layer!")
-            return
+        tracks_layer = grab_layer(
+            self.parent.viewer, self.parent.combobox_tracks.currentText()
+        )
         retval = {"Name": metric}
         if metric == "Speed":
             print("Plotting speed")
@@ -411,13 +408,9 @@ class AnalysisWindow(QWidget):
             retval.update({"Results": self._calculate_speed(tracks_layer.data)})
         elif metric == "Size":
             print("Plotting size")
-            try:
-                segmentation_layer = grab_layer(
-                    self.viewer, self.parent.combobox_segmentation.currentText()
-                )
-            except ValueError:
-                notify("Please make sure to select the correct segmentation!")
-                return
+            segmentation_layer = grab_layer(
+                self.viewer, self.parent.combobox_segmentation.currentText()
+            )
             retval.update(
                 {"Description": "Scatterplot Standard Deviation vs Average: Size"}
             )
@@ -473,26 +466,19 @@ class AnalysisWindow(QWidget):
         worker = self._export(file, selected_metrics)
         worker.start()
 
-    @thread_worker
+    @thread_worker(connect={"errored": handle_exception})
     def _export(self, file, metrics):
-        try:
-            tracks = grab_layer(
-                self.parent.viewer, self.parent.combobox_tracks.currentText()
-            ).data
-        except AttributeError:
-            notify("Please make sure to select the correct tracks layer!")
-            return
+        tracks = grab_layer(
+            self.parent.viewer, self.parent.combobox_tracks.currentText()
+        ).data
         direction = self._calculate_direction(tracks)
         self.direction = direction
 
-        try:
-            (
-                filtered_mask,
-                min_movement,
-                min_duration,
-            ) = self._filter_tracks_by_parameters(tracks)
-        except ValueError:
-            return
+        (
+            filtered_mask,
+            min_movement,
+            min_duration,
+        ) = self._filter_tracks_by_parameters(tracks)
 
         duration = np.array(
             [[i, np.count_nonzero(tracks[:, 0] == i)] for i in np.unique(tracks[:, 0])]
@@ -511,18 +497,11 @@ class AnalysisWindow(QWidget):
         else:
             try:
                 min_movement = int(self.lineedit_movement.text())
-            except ValueError:
-                notify("Please use an integer instead of text for movement minimum")
-                raise ValueError
-            else:
-                if min_movement != float(self.lineedit_movement.text()):
-                    notify(
-                        "Please use an integer instead of a float for movement minimum"
-                    )
-                    raise ValueError
-                movement_mask = distances[
-                    np.where(distances[:, 1] >= min_movement)[0], 0
-                ]
+            except ValueError as exc:
+                raise ValueError("Movement minimum can't be converted to int") from exc
+            movement_mask = distances[
+                np.where(distances[:, 1] >= min_movement)[0], 0
+            ]
 
         if self.lineedit_track_duration.text() == "":
             min_duration = 0
@@ -530,19 +509,12 @@ class AnalysisWindow(QWidget):
         else:
             try:
                 min_duration = int(self.lineedit_track_duration.text())
-            except ValueError:
-                notify("Please use an integer instead of text for duration minimum")
-                raise ValueError
-            else:
-                if min_duration != int(self.lineedit_track_duration.text()):
-                    notify(
-                        "Please use an integer instead of a float for duration minimum"
-                    )
-                    raise ValueError
-                indices = np.where(
-                    np.unique(tracks[:, 0], return_counts=True)[1] >= min_duration
-                )
-                duration_mask = np.unique(tracks[:, 0])[indices]
+            except ValueError as exc:
+                raise ValueError("Minimum duration can't be converted to int") from exc
+            indices = np.where(
+                np.unique(tracks[:, 0], return_counts=True)[1] >= min_duration
+            )
+            duration_mask = np.unique(tracks[:, 0])[indices]
 
         return np.intersect1d(movement_mask, duration_mask), min_movement, min_duration
 
@@ -691,13 +663,9 @@ class AnalysisWindow(QWidget):
             metrics_dict.update({"Speed": speed})
 
         if "Size" in selected_metrics:
-            try:
-                segmentation = grab_layer(
-                    self.viewer, self.parent.combobox_segmentation.currentText()
-                ).data
-            except AttributeError:
-                notify("Please make sure the label layer exists!")
-                return
+            segmentation = grab_layer(
+                self.viewer, self.parent.combobox_segmentation.currentText()
+            ).data
             size = self._calculate_size(tracks, segmentation)
             metrics.extend(
                 ["Average size [# pixels]", "Standard deviation of size [# pixels]"]
@@ -903,7 +871,7 @@ class AnalysisWindow(QWidget):
             if "Velocity" in metrics:
                 value.append(metrics["Velocity"][id][1])
             if "Accumulated distance" in metrics:
-                value.append(metrics["Accumulated distance"][id][1])                   
+                value.append(metrics["Accumulated distance"][id][1])
             if "Directness" in metrics:
                 value.append(metrics["Directness"][id][1])
 
@@ -919,9 +887,8 @@ class AnalysisWindow(QWidget):
             gt_seg = grab_layer(
                 self.viewer, self.parent.combobox_segmentation.currentText()
             ).data
-        except AttributeError:
-            notify("Please make sure the label layer exists!")
-            return
+        except ValueError as exc:
+            handle_exception(exc)
         eval_seg = self.parent.initial_layers[0]
         results, frames = self.evaluate_segmentation(gt_seg, eval_seg)
         self._display_evaluation_result("Evaluation of Segmentation", results, frames)
@@ -1000,16 +967,14 @@ class AnalysisWindow(QWidget):
             tracks_layer = grab_layer(
                 self.parent.viewer, self.parent.combobox_tracks.currentText()
             )
-        except ValueError:
-            notify("Please make sure to select the correct tracks layer!")
-            return
+        except ValueError as exc:
+            handle_exception(exc)
         try:
             segmentation = grab_layer(
                 self.viewer, self.parent.combobox_segmentation.currentText()
             ).data
-        except AttributeError:
-            notify("Please make sure the label layer exists!")
-            return
+        except ValueError as exc:
+            handle_exception(exc)
         tracks = tracks_layer.data
         for row_trackslayer in tracks:
             _, z, y, x = row_trackslayer
@@ -1036,17 +1001,15 @@ class AnalysisWindow(QWidget):
             corrected_tracks = grab_layer(
                 self.parent.viewer, self.parent.combobox_tracks.currentText()
             ).data
-        except AttributeError:
-            notify("Please make sure to select the correct tracks layer!")
-            return
+        except ValueError as exc:
+            handle_exception(exc)
         automatic_segmentation = self.parent.initial_layers[0]
         try:
             corrected_segmentation = grab_layer(
                 self.viewer, self.parent.combobox_segmentation.currentText()
             ).data
-        except AttributeError:
-            notify("Please make sure the label layer exists!")
-            return
+        except ValueError as exc:
+            handle_exception(exc)
         fault_value = self.evaluate_tracking(
             gt_seg=corrected_segmentation,
             eval_seg=automatic_segmentation,
@@ -1288,7 +1251,7 @@ def is_connected(tracks, centroid1, centroid2):
         #     and centroid1[2] == tracks[i, 3]
         # ):
         if all(centroid1[j] == tracks[i, j+1] for j in range(3)):   # ?? muss ich noch testen, aber vlt. sparen wir hier so ein bisschen was ein
-            # return (
+            # return (                                              # sieht schonmal sehr cool aus, falls es funktioniert
             #     centroid2[0] == tracks[i + 1, 1]
             #     and centroid2[1] == tracks[i + 1, 2]
             #     and centroid2[2] == tracks[i + 1, 3]

@@ -21,6 +21,7 @@ from qtpy.QtWidgets import (
 )
 from scipy import ndimage, optimize, spatial
 
+from ._logger import notify, choice_dialog, handle_exception
 from ._grabber import grab_layer
 from ._logger import choice_dialog, notify
 
@@ -64,6 +65,7 @@ class ProcessingWindow(QWidget):
         self.parent = parent
         self.viewer = parent.viewer
         ProcessingWindow.dock = self
+        self.choice_event = Event()
         try:
             self.setStyleSheet(napari.qt.get_stylesheet(theme="dark"))
         except TypeError:
@@ -153,12 +155,8 @@ class ProcessingWindow(QWidget):
         mask : array
             the segmentation data to add to the viewer
         """
-        try:
-            self.viewer.add_labels(mask, name="calculated segmentation")
-        except Exception as e:
-            print(f"ran into some error: {e}")
-            return
-        self.parent.combobox_segmentation.setCurrentText("calculated segmentation")
+        labels = self.viewer.add_labels(mask, name="calculated segmentation")
+        self.parent.combobox_segmentation.setCurrentText(labels.name)
         print("Added segmentation to viewer")
 
     @napari.Viewer.bind_key("Shift-s")
@@ -175,7 +173,8 @@ class ProcessingWindow(QWidget):
 
         worker = self._segment_image()
         worker.returned.connect(self._add_segmentation_to_viewer)
-        worker.start()
+        # worker.errored.connect(handle_exception)
+        # worker.start()
 
     def _run_demo_segmentation(self):
         """
@@ -185,9 +184,10 @@ class ProcessingWindow(QWidget):
 
         worker = self._segment_image(True)
         worker.returned.connect(self._add_segmentation_to_viewer)
-        worker.start()
+        # worker.errored.connect(handle_exception)
+        # worker.start()
 
-    @thread_worker
+    @thread_worker(connect={"errored": handle_exception})
     def _segment_image(self, demo=False):
         """
         Run segmentation on the raw image data
@@ -206,16 +206,8 @@ class ProcessingWindow(QWidget):
             data = grab_layer(
                 self.viewer, self.parent.combobox_image.currentText()
             ).data
-        except AttributeError:
-            print("Image layer not found in viewer")
-            QApplication.restoreOverrideCursor()
-            notify("No image layer found!")
-            return
-
-        if data is None:
-            print("Image layer not selected")
-            QApplication.restoreOverrideCursor()
-            notify("Please select the image layer!")
+        except ValueError as exc:
+            handle_exception(exc)
             return
 
         if demo:
@@ -223,12 +215,7 @@ class ProcessingWindow(QWidget):
 
         selected_model = self.combobox_segmentation.currentText()
 
-        try:
-            parameters = self._get_parameters(selected_model)
-        except UnboundLocalError:
-            QApplication.restoreOverrideCursor()
-            notify("Please select a different model")
-            return
+        parameters = self._get_parameters(selected_model)
 
         # set process limit
         if self.parent.rb_eco.isChecked():
@@ -289,11 +276,16 @@ class ProcessingWindow(QWidget):
         """
         # check if tracks are usable
         tracks, layername = params
-        tracks_layer = grab_layer(
-            self.viewer, self.parent.combobox_tracks.currentText()
-        )
-        if tracks_layer is None:
-            self.viewer.add_tracks(tracks, name=layername)
+        try:
+            tracks_layer = grab_layer(
+                self.viewer, self.parent.combobox_tracks.currentText()
+            )
+        except ValueError as exc:
+            if str(exc) == "Layer name can not be blank":
+                self.viewer.add_tracks(tracks, name=layername)
+            else:
+                handle_exception(exc)
+                return
         else:
             tracks_layer.data = tracks
         self.parent.combobox_tracks.setCurrentText(layername)
@@ -305,11 +297,23 @@ class ProcessingWindow(QWidget):
         """
         print("Calling tracking")
 
+        def on_yielded(value):
+            if value == "Replace tracks layer":
+                ret = choice_dialog(
+                    "Tracks layer found. Do you want to replace it?",
+                    [QMessageBox.Yes, QMessageBox.No],
+                )
+                if ret == 16384:
+                    self.ret = ret
+                    self.choice_event.set()
+                else:
+                    worker.quit()
+
         worker = self._track_segmentation()
         worker.returned.connect(self._add_tracks_to_viewer)
-        worker.start()
+        worker.yielded.connect(on_yielded)
 
-    @thread_worker
+    @thread_worker(connect={"errored": handle_exception})
     def _track_segmentation(self):
         """
         Run tracking on the segmented data
@@ -322,38 +326,30 @@ class ProcessingWindow(QWidget):
             data = grab_layer(
                 self.viewer, self.parent.combobox_segmentation.currentText()
             ).data
-        except AttributeError:
-            print("Segmentation layer not found in viewer")
-            QApplication.restoreOverrideCursor()
-            notify("No segmentation layer found!")
+        except ValueError as exc:
+            handle_exception(exc)
             return
 
-        if data is None:
-            print("Segmentation layer not selected")
-            QApplication.restoreOverrideCursor()
-            notify("Please select the segmentation layer!")
-            return
-
-        tracks_name = "Tracks"
         # check for tracks layer
         try:
             tracks_layer = grab_layer(
                 self.viewer, self.parent.combobox_tracks.currentText()
             )
         except ValueError:
-            pass
+            tracks_name = "Tracks"
         else:
-            if tracks_layer is not None:
+            QApplication.restoreOverrideCursor()
+            yield "Replace tracks layer"
+            self.choice_event.wait()
+            self.choice_event.clear()
+            ret = self.ret
+            del self.ret
+            print(ret)
+            QApplication.setOverrideCursor(Qt.WaitCursor)
+            if ret == 65536:
                 QApplication.restoreOverrideCursor()
-                ret = choice_dialog(
-                    "Tracks layer found. Do you want to replace it?",
-                    [QMessageBox.Yes, QMessageBox.No],
-                )
-                QApplication.setOverrideCursor(Qt.WaitCursor)
-                if ret == 65536:
-                    QApplication.restoreOverrideCursor()
-                    return
-                tracks_name = tracks_layer.name
+                return
+            tracks_name = tracks_layer.name
 
         # set process limit
         if self.parent.rb_eco.isChecked():
@@ -440,7 +436,7 @@ class ProcessingWindow(QWidget):
         """
         Replaces track ID 0. Also adjusts segmentation IDs to match track IDs
         """
-        raise NotImplementedError
+        raise NotImplementedError("Not implemented yet!")
         print("Adjusting segmentation IDs")
         QApplication.setOverrideCursor(Qt.WaitCursor)
         import sys
@@ -448,81 +444,9 @@ class ProcessingWindow(QWidget):
         np.set_printoptions(threshold=sys.maxsize)
         print(self.viewer.layers[self.viewer.layers.index("Tracks")].data)
         QApplication.restoreOverrideCursor()
-        """
-        Replaces Track ID 0 with new Track ID
-        Changes Segmentation IDs to corresponding Track IDs
-        """
-        import multiprocessing
-
-        if self.rb_eco.isChecked():
-            self.AMOUNT_OF_THREADS = np.maximum(
-                1, int(multiprocessing.cpu_count() * 0.4)
-            )
-        else:
-            self.AMOUNT_OF_THREADS = np.maximum(
-                1, int(multiprocessing.cpu_count() * 0.8)
-            )
-        try:
-            label_layer = self.viewer.layers[
-                self.viewer.layers.index("Segmentation Data")
-            ]
-        except ValueError:
-            message("No label layer found!")
-            return
-        self.btn_adjust_seg_ids.setEnabled(False)
-        self.rb_eco.setEnabled(False)
-        self.rb_heavy.setEnabled(False)
-
-        self.done = ThreadSafeCounter(0)
-        self.new_id = 0
-        self.completed = ThreadSafeCounter(0)
-        next_slice = SliceCounter()
-
-        self.threads = [QThread() for _ in range(self.AMOUNT_OF_THREADS)]
-
-        for thread in self.threads:
-            thread.finished.connect(thread.deleteLater)
-
-        self.tracks_worker = AdjustTracksWorker(self, self.tracks)
-        self.tracks_worker.moveToThread(self.threads[0])
-        self.threads[0].started.connect(self.tracks_worker.run)
-        self.tracks_worker.progress.connect(self._update_progress)
-        self.tracks_worker.tracks_ready.connect(self._replace_tracks)
-        for thread in self.threads[1 : self.AMOUNT_OF_THREADS]:
-            self.tracks_worker.finished.connect(thread.start)
-        self.tracks_worker.status.connect(self._set_description)
-        self.tracks_worker.finished.connect(self.tracks_worker.deleteLater)
-
-        self.seg_workers = [
-            AdjustSegWorker(self, label_layer, self.tracks, next_slice, self.completed)
-            for _ in range(self.AMOUNT_OF_THREADS)
-        ]
-        for i in range(0, self.AMOUNT_OF_THREADS):
-            self.seg_workers[i].moveToThread(self.threads[i])
-
-        self.tracks_worker.finished.connect(self.seg_workers[0].run)
-        for i in range(1, self.AMOUNT_OF_THREADS):
-            self.threads[i].started.connect(self.seg_workers[i].run)
-
-        for seg_worker in self.seg_workers:
-            seg_worker.update_progress.connect(self._multithread_progress)
-            seg_worker.status.connect(self._multithread_description)
-            seg_worker.finished.connect(seg_worker.deleteLater)
-
-        for i in range(0, self.AMOUNT_OF_THREADS):
-            self.seg_workers[i].finished.connect(self.threads[i].quit)
-
-        for thread in self.threads:
-            thread.finished.connect(self._enable_adjust_button)
-
-        self.threads[0].start()
-        print("(>'-')>")
 
 
-def segment_slice(slice, parameters):   # ?? Der parameter slice ist nen array oder?
-                                        # Hier sollten wir nochmal schauen. Können wir mit cellpose.core.use_gpu() überprüfen, ob eine GPU verfügbar ist? (Auch wenn das nicht immer zu funktionieren schien)
-                                        # Und falls ja, können wir vlt. für die GPU-Variante für model.eval über die einzelnen Slices loopen, damit wir nicht jedes mal models.Cellposemodel(...) neu aufrufen müssen?
-                                        # Ich vermute, der verpflichtende models.CellposeModel Aufruf pro Slice lässt sich für die multi-processing CPU Variante aber nicht schön umgehen oder?
+def segment_slice(slice, parameters):
     """
     Calculate segmentation for a single slice
 
