@@ -361,9 +361,8 @@ class AnalysisWindow(QWidget):
 
         xabs_max = abs(max(axes.get_xlim(), key = abs))
         yabs_max = abs(max(axes.get_ylim(), key = abs))
-        abs_max = max(xabs_max, yabs_max)
-        axes.set_xlim(xmin = -abs_max, xmax = abs_max)
-        axes.set_ylim(ymin = -abs_max, ymax = abs_max)
+        axes.set_xlim(xmin = -xabs_max, xmax = xabs_max)
+        axes.set_ylim(ymin = -yabs_max, ymax = yabs_max)
         axes.set_title(title, {"fontsize": 18, "color": "white"})
         axes.set_xlabel(ret["x_label"])
         axes.set_ylabel(ret["y_label"])
