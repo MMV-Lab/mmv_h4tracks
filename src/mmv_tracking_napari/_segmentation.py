@@ -274,7 +274,7 @@ class SegmentationWindow(QWidget):
 
             @layer.mouse_drag_callbacks.append
             def _replace_label(layer, event):
-                self._replace_label(event)
+                self._fill_label(event)
                 self._remove_on_clicks()
                 print("Replace cell callback is removed")
 
@@ -337,6 +337,30 @@ class SegmentationWindow(QWidget):
 
         # Refresh the layer
         label_layer.refresh()
+
+        # set the label layer as currently selected layer
+        self.viewer.layers.select_all()
+        self.viewer.layers.selection.select_only(label_layer)
+    
+    def _fill_label(self, event):
+        """
+        Replaces the label at the given position with a new ID.
+        Only affects pixels directly connected to the selected one
+        """
+        label_layer = grab_layer(self.viewer, self.parent.combobox_segmentation.currentText())
+        if label_layer is None:
+            print("Tried to replace label but no label layer found")
+            notify("Please make sure the label layer exists!")
+            return
+
+        x = int(round(event.position[2]))
+        y = int(round(event.position[1]))
+        z = int(round(event.position[0]))
+
+        id = self._get_free_label_id(label_layer)
+        
+        # Replace the ID with the new id
+        label_layer.fill(coord=(z,y,x), new_label=id, refresh=True)
 
         # set the label layer as currently selected layer
         self.viewer.layers.select_all()
