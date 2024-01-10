@@ -2,6 +2,7 @@ import multiprocessing
 import os
 import platform
 from multiprocessing import Pool, Manager
+from threading import Event
 
 import napari
 import numpy as np
