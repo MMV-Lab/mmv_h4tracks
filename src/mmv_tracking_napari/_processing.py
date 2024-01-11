@@ -75,7 +75,7 @@ class ProcessingWindow(QWidget):
         try:
             self.setStyleSheet(napari.qt.get_stylesheet(theme="dark"))
         except TypeError:
-            pass
+            self.setStyleSheet(napari.qt.get_stylesheet(theme_id="dark"))
 
         self.custom_models: dict
 

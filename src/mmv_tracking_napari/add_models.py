@@ -9,6 +9,7 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 from qtpy.QtCore import Qt
+import napari
 
 SHOW_OPTIONS_TEXT = "Show advanced options"
 HIDE_OPTIONS_TEXT = "Hide advanced options"
@@ -22,6 +23,10 @@ class ModelWindow(QWidget):
         self.setWindowTitle("Custom Model")
         self.parent = parent
         self.mode_path: str
+        try:
+            self.setStyleSheet(napari.qt.get_stylesheet(theme="dark"))
+        except TypeError:
+            self.setStyleSheet(napari.qt.get_stylesheet(theme_id="dark"))
 
         ## QObjects
         # Labels
@@ -108,16 +113,18 @@ class ModelWindow(QWidget):
         self.advanced_options.layout().addWidget(label_rescale, 12, 0)
         self.advanced_options.layout().addWidget(self.lineedit_rescale, 12, 1)
 
+        self.advanced_options.hide()
+
         # Add elements to layout
         self.layout().addWidget(label_name, 0, 0, 1, 3)
-        self.layout().addWidget(self.lineedit_name, 0, 4, 1, 3)
+        self.layout().addWidget(self.lineedit_name, 0, 3, 1, 3)
         self.layout().addWidget(label_file, 1, 0, 1, 2)
         self.layout().addWidget(btn_file, 1, 2, 1, 2)
         self.layout().addWidget(self.label_selected_file, 1, 4, 1, 2)
         self.layout().addWidget(label_diameter, 2, 0, 1, 3)
         self.layout().addWidget(self.lineedit_diameter, 2, 3, 1, 3)
         self.layout().addWidget(label_channels, 3, 0, 1, 3)
-        self.layout().addWidget(self.lineedit_channels, 3, 0, 1, 3)
+        self.layout().addWidget(self.lineedit_channels, 3, 3, 1, 3)
         self.layout().addWidget(self.btn_advanced_options, 4, 0, 1, 3)
         self.layout().addWidget(self.advanced_options, 5, 0, 1, -1)
         self.layout().addWidget(btn_add_model, 6, 0, 1, 2)
@@ -208,6 +215,7 @@ class ModelWindow(QWidget):
         else:
             self.btn_advanced_options.setText(SHOW_OPTIONS_TEXT)
             self.advanced_options.hide()
+            self.adjustSize()
             # self.hide_advanced_options()
 
     def cancel(self):
