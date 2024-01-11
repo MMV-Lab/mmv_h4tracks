@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 from qtpy.QtWidgets import (
     QCheckBox,
     QFileDialog,
