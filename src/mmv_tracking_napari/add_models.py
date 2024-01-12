@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
+import shutil
 from qtpy.QtWidgets import (
+    QApplication,
     QCheckBox,
     QFileDialog,
     QGridLayout,
@@ -46,9 +48,9 @@ class ModelWindow(QWidget):
         self.advanced_options.append(label_z_axis)
         label_tile_overlap = QLabel("tile_overlap")
         self.advanced_options.append(label_tile_overlap)
-        label_flow_threshold = QLabel("flow-threshold")
+        label_flow_threshold = QLabel("flow_threshold")
         self.advanced_options.append(label_flow_threshold)
-        label_cellprob_threshold = QLabel("cellprob-threshold")
+        label_cellprob_threshold = QLabel("cellprob_threshold")
         self.advanced_options.append(label_cellprob_threshold)
         label_min_size = QLabel("min_size")
         self.advanced_options.append(label_min_size)
@@ -192,9 +194,10 @@ class ModelWindow(QWidget):
         if retval[0] == "":
             return
         self.model_path = retval[0]
-        self.label_selected_file.setText(self.model_path)
+        self.lineedit_file.setText(self.model_path)
 
     def add_model(self):
+        QApplication.setOverrideCursor(Qt.WaitCursor)
         params = {
             "diameter": float(self.lineedit_diameter.text()),
             "channels": [int(i) for i in self.lineedit_channels.text().split(",")],
@@ -257,11 +260,17 @@ class ModelWindow(QWidget):
         if rescale != "":
             params["rescale"] = float(rescale)
 
-        model_entry = {"filename": self.model_path, "params": params}
+        model_entry = {"filename": Path(self.model_path).name, "params": params}
         self.parent.custom_models[self.lineedit_name.text()] = model_entry
         with open(Path(__file__).parent / "custom_models.json", "w") as file:
             json.dump(self.parent.custom_models, file)
+
+        old_path = Path(self.model_path)
+        new_path = Path(__file__).parent / "models" / "custom_models" / old_path.name
+        shutil.copy(old_path, new_path)
+
         self.parent.read_models()
+        QApplication.restoreOverrideCursor()
         self.close()
 
     def toggle_advanced_options(self):
