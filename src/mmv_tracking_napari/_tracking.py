@@ -57,7 +57,7 @@ class TrackingWindow(QWidget):
         try:
             self.setStyleSheet(napari.qt.get_stylesheet(theme="dark"))
         except TypeError:
-            pass
+            self.setStyleSheet(napari.qt.get_stylesheet(theme_id="dark"))
 
         ### QObjects
 
