@@ -114,37 +114,6 @@ class ModelWindow(QWidget):
         self.checkbox_interp.setChecked(True)
         self.advanced_options.append(self.checkbox_interp)
 
-        # Widget
-        # self.advanced_options = QWidget()
-        # self.advanced_options.setLayout(QGridLayout())
-        # self.advanced_options.layout().addWidget(label_batch_size, 0, 0)
-        # self.advanced_options.layout().addWidget(self.lineedit_batch_size, 0, 1)
-        # self.advanced_options.layout().addWidget(label_channel_axis, 1, 0)
-        # self.advanced_options.layout().addWidget(self.lineedit_channel_axis, 1, 1)
-        # self.advanced_options.layout().addWidget(label_z_axis, 2, 0)
-        # self.advanced_options.layout().addWidget(self.lineedit_z_axis, 2, 1)
-        # self.advanced_options.layout().addWidget(label_tile_overlap, 6, 0)
-        # self.advanced_options.layout().addWidget(self.lineedit_tile_overlap, 6, 1)
-        # self.advanced_options.layout().addWidget(label_flow_threshold, 8, 0)
-        # self.advanced_options.layout().addWidget(self.lineedit_flow_threshold, 8, 1)
-        # self.advanced_options.layout().addWidget(label_cellprob_threshold, 9, 0)
-        # self.advanced_options.layout().addWidget(self.lineedit_cellprob_threshold, 9, 1)
-        # self.advanced_options.layout().addWidget(label_min_size, 10, 0)
-        # self.advanced_options.layout().addWidget(self.lineedit_min_size, 10, 1)
-        # self.advanced_options.layout().addWidget(label_stitch_threshold, 11, 0)
-        # self.advanced_options.layout().addWidget(self.lineedit_stitch_threshold, 11, 1)
-        # self.advanced_options.layout().addWidget(label_rescale, 12, 0)
-        # self.advanced_options.layout().addWidget(self.lineedit_rescale, 12, 1)
-        # self.advanced_options.layout().addWidget(self.checkbox_invert, 3, 0)
-        # self.advanced_options.layout().addWidget(self.checkbox_normalize, 3, 1)
-        # self.advanced_options.layout().addWidget(self.checkbox_net_avg, 4, 0)
-        # self.advanced_options.layout().addWidget(self.checkbox_augment, 4, 1)
-        # self.advanced_options.layout().addWidget(self.checkbox_tile, 5, 0, 1, -1)
-        # self.advanced_options.layout().addWidget(self.checkbox_resample, 7, 0)
-        # self.advanced_options.layout().addWidget(self.checkbox_interp, 7, 1)
-
-        # self.advanced_options.hide()
-
         # Add elements to layout
         self.layout().addWidget(label_name, 0, 0, 1, 2)
         self.layout().addWidget(self.lineedit_name, 0, 2, 1, -1)
@@ -183,7 +152,6 @@ class ModelWindow(QWidget):
         self.layout().addWidget(self.checkbox_resample, 16, 2, 1, -1)
         self.layout().addWidget(self.checkbox_interp, 17, 0, 1, 2)
 
-        # self.layout().addWidget(self.advanced_options, 5, 0, 1, -1)
         self.layout().addWidget(btn_add_model, 18, 0, 1, 3)
         self.layout().addWidget(btn_cancel, 18, 3, 1, 3)
 
