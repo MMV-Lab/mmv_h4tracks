@@ -30,6 +30,8 @@ from ._grabber import grab_layer
 from ._logger import choice_dialog, notify, handle_exception
 from .add_models import ModelWindow
 
+CUSTOM_MODEL_PREFIX = "custom_"
+
 
 class ProcessingWindow(QWidget):
     """
@@ -94,8 +96,8 @@ class ProcessingWindow(QWidget):
         btn_add_custom_model = QPushButton("Add custom model")
         btn_add_custom_model.setToolTip("Add a custom Cellpose model")
 
-        self.btn_segment.setEnabled(False)
-        self.btn_preview_segment.setEnabled(False)
+        # self.btn_segment.setEnabled(False)
+        # self.btn_preview_segment.setEnabled(False)
 
         self.btn_segment.clicked.connect(self._run_segmentation)
         self.btn_preview_segment.clicked.connect(self._run_demo_segmentation)
@@ -169,7 +171,9 @@ class ProcessingWindow(QWidget):
         # for file in os.listdir(path):
         #     self.combobox_segmentation.addItem(file)
 
-        p = Path("/models/custom_models")
+        p = Path(__file__).parent / "models"/ "custom_models"
+        for file in p.iterdir():
+            print(file.name)
         custom_model_filenames = [file.name for file in p.glob("*") if file.is_file()]
         # custom_model_filenames = [
         #     custom_file.name
@@ -179,11 +183,11 @@ class ProcessingWindow(QWidget):
         # ]
         for custom_model in self.custom_models:
             if self.custom_models[custom_model]["filename"] in custom_model_filenames:
-                custom_models.append(custom_model)
+                custom_models.append(CUSTOM_MODEL_PREFIX + custom_model)
         if len(custom_models) < 1:
             return
         custom_models.sort()
-        self.combobox_segmentation.addItems([custom_models])
+        self.combobox_segmentation.addItems(custom_models)
 
     def _add_segmentation_to_viewer(self, mask):
         """
@@ -218,9 +222,10 @@ class ProcessingWindow(QWidget):
         worker = self._segment_image(True)
         worker.returned.connect(self._add_segmentation_to_viewer)
         # worker.errored.connect(handle_exception)
-        # worker.start()
+        worker.start()
 
-    @thread_worker(connect={"errored": handle_exception})
+    @thread_worker
+    # @thread_worker(connect={"errored": handle_exception})
     def _segment_image(self, demo=False):
         """
         Run segmentation on the raw image data
@@ -235,13 +240,18 @@ class ProcessingWindow(QWidget):
         print("Running segmentation")
         QApplication.setOverrideCursor(Qt.WaitCursor)
 
-        try:
-            data = grab_layer(
-                self.viewer, self.parent.combobox_image.currentText()
-            ).data
-        except ValueError as exc:
-            handle_exception(exc)
-            return
+        
+        data = grab_layer(
+            self.viewer, self.parent.combobox_image.currentText()
+        ).data
+            
+        # try:
+        #     data = grab_layer(
+        #         self.viewer, self.parent.combobox_image.currentText()
+        #     ).data
+        # except ValueError as exc:
+        #     handle_exception(exc)
+        #     return
 
         if demo:
             data = data[0:5]
@@ -253,8 +263,9 @@ class ProcessingWindow(QWidget):
         if core.use_gpu():
             print("can gpu")
             model = models.CellposeModel(
-                gpu=True, pretrained_model=parameters["model_path"]
+                gpu=True, pretrained_model=parameters.pop("model_path")
             )
+            print(parameters)
             mask = []
             for layer_slice in data:
                 layer_mask, _, _ = model.eval(
@@ -291,7 +302,7 @@ class ProcessingWindow(QWidget):
         QApplication.restoreOverrideCursor()
         return mask
 
-    def _get_parameters(self, model):
+    def _get_parameters(self, model: str):
         """
         Get the parameters for the selected model
 
@@ -317,16 +328,21 @@ class ProcessingWindow(QWidget):
                 "flow_threshold": 0.4,
                 "cellprob_threshold": 0,
             }
+            print("assigning standard model")
 
+        print(self.custom_models)
+        model = model[len(CUSTOM_MODEL_PREFIX):]
+        print(model)
         # Custom models
         if model in self.custom_models:
-            params = self.custom_models[model][params]
-            params["model_path"] = (
+            params = self.custom_models[model]["params"]
+            params["model_path"] = str(
                 Path(__file__).parent.absolute()
                 / "models"
                 / "custom_models"
-                / model[filename]
+                / self.custom_models[model]["filename"]
             )
+            print("assigning custom model")
             # params = {
             #     "model_path": f"/models/{custom_models[filename]}",
             #     "diameter": custom_models[diameter],
