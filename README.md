@@ -1,3 +1,5 @@
+We are actively working on the documentation
+
 # mmv-tracking-napari
 
 [![License](https://img.shields.io/pypi/l/mmv-tracking-napari.svg?color=green)](https://github.com/MMV-Lab/mmv-tracking-napari/raw/main/LICENSE)
@@ -22,11 +24,27 @@ You can install `mmv-tracking-napari` via [pip]:
 
     pip install mmv-tracking-napari
 
-
+<!-- 
 
 To install latest development version :
 
-    pip install git+https://github.com/MMV-Lab/mmv-tracking-napari.git
+    pip install git+https://github.com/MMV-Lab/mmv-tracking-napari.git -->
+
+
+## Documentation
+This plugin was developed to analyze 2D cell migration. It includes the function of segmenting 2D+T videos using [Cellpose](https://github.com/MouseLand/cellpose) (both CPU and GPU implemented) and then tracking them using different automatic tracking algorithms, depending on the use case. For both segmentation and tracking, we have implemented user-friendly options for manual curation after automatic processing. In conjunction with napari's inherent functionalities, our plugin provides the capability to automatically track data and subsequently process the tracks in three different ways based on the reliability of the automated results. Firstly, any potentially existing incorrect tracks can be rectified in a user-friendly manner, thereby maximizing the evaluation of available information. Secondly, unreliable tracks can be selectively deleted, and thirdly, individual tracks can be manually or semi-automatically created for particularly challenging data, ensuring reliable results. In essence, our tool aims to offer a valuable supplement to the existing fully automated tracking tools and a user-friendly means to analyze videos where fully automated tracking has been previously challenging.
+
+Common metrics such as speed, cell size, velocity, etc... can then be extracted, plotted and exported from the tracks obtained in this way. Furthermore, the plugin incorporates a functionality to assess the automatic tracking outcomes using a [quality score](https://doi.org/10.1371/journal.pone.0144959). Since automated tracking may not be consistently 100% accurate, presenting a quality measure alongside scientific discoveries becomes essential. This supplementary metric offers researchers valuable insights into the dependability of the produced tracking results, fostering informed data interpretation and decision-making in the analysis of cell migration.
+
+More detailed information and instructions on each topic can be found in the following sections.
+
+### Segmentation
+
+### Tracking
+
+### Analysis
+
+### Evaluation
 
 
 ## Contributing
