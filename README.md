@@ -40,6 +40,14 @@ More detailed information and instructions on each topic can be found in the fol
 
 ### Segmentation
 
+#### Automatic instance segmentation
+
+##### Custom models
+
+#### Manual curation
+
+
+
 ### Tracking
 
 ### Analysis
