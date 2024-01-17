@@ -24,6 +24,9 @@ You can install `mmv-tracking-napari` via [pip]:
 
     pip install mmv-tracking-napari
 
+
+By default, CPU is used for segmentation computing. We have tried to optimize the CPU computing time, but still recommend GPU computing. For more detailed instructions on how to install GPU support look [here](https://github.com/MouseLand/cellpose#gpu-version-cuda-on-windows-or-linux).
+
 <!-- 
 
 To install latest development version :
@@ -32,23 +35,45 @@ To install latest development version :
 
 
 ## Documentation
-This plugin was developed to analyze 2D cell migration. It includes the function of segmenting 2D+T videos using [Cellpose](https://github.com/MouseLand/cellpose) (both CPU and GPU implemented) and then tracking them using different automatic tracking algorithms, depending on the use case. For both segmentation and tracking, we have implemented user-friendly options for manual curation after automatic processing. In conjunction with napari's inherent functionalities, our plugin provides the capability to automatically track data and subsequently process the tracks in three different ways based on the reliability of the automated results. Firstly, any potentially existing incorrect tracks can be rectified in a user-friendly manner, thereby maximizing the evaluation of available information. Secondly, unreliable tracks can be selectively deleted, and thirdly, individual tracks can be manually or semi-automatically created for particularly challenging data, ensuring reliable results. In essence, our tool aims to offer a valuable supplement to the existing fully automated tracking tools and a user-friendly means to analyze videos where fully automated tracking has been previously challenging.
+This plugin was developed to analyze 2D cell migration. It includes the function of segmenting 2D videos using [Cellpose](https://github.com/MouseLand/cellpose) (both CPU and GPU implemented) and then tracking them using different automatic tracking algorithms, depending on the use case. For both segmentation and tracking, we have implemented user-friendly options for manual curation after automatic processing. In conjunction with napari's inherent functionalities, our plugin provides the capability to automatically track data and subsequently process the tracks in three different ways based on the reliability of the automated results. Firstly, any potentially existing incorrect tracks can be rectified in a user-friendly manner, thereby maximizing the evaluation of available information. Secondly, unreliable tracks can be selectively deleted, and thirdly, individual tracks can be manually or semi-automatically created for particularly challenging data, ensuring reliable results. In essence, our tool aims to offer a valuable supplement to the existing fully automated tracking tools and a user-friendly means to analyze videos where fully automated tracking has been previously challenging.
 
 Common metrics such as speed, cell size, velocity, etc... can then be extracted, plotted and exported from the tracks obtained in this way. Furthermore, the plugin incorporates a functionality to assess the automatic tracking outcomes using a [quality score](https://doi.org/10.1371/journal.pone.0144959). Since automated tracking may not be consistently 100% accurate, presenting a quality measure alongside scientific discoveries becomes essential. This supplementary metric offers researchers valuable insights into the dependability of the produced tracking results, fostering informed data interpretation and decision-making in the analysis of cell migration.
 
 More detailed information and instructions on each topic can be found in the following sections.
 
+### Get started
+
+To load raw data, you can simply drag & drop them into napari. Ensure that the 'Image' combobox on the right displays the correct layer afterward. To load custom segmentations, you can do equivalent.
+
+The "save as" button can be used to save the existing layers (raw, segmentation, tracks) in a single .zarr file, which can be loaded again later using the "load" button. The "save" button overwrites the loaded .zarr file.
+
+The computation mode is used to set how many of the available CPU cores (40% or 80%) are to be used for computing the CPU segmentation and tracking and therefore has a direct impact on performance.
+
+
 ### Segmentation
+
+For segmentation, we use the state of the art instance segmentation method Cellpose. We provide one (/several??) model that we trained and has proven successful for our data ([see more information](https://doi.org/10.1038/s41467-023-43765-3)).
+
+(...)
+
+
 
 #### Automatic instance segmentation
 
 ##### Custom models
+
+The plugin supports loading custom Cellpose models. To train your own Cellpose model, [this](https://cellpose.readthedocs.io/en/latest/train.html) might be helpful.
+
+In future versions, we plan to support fine-tuning of Cellpose models within the plugin. 
+
 
 #### Manual curation
 
 
 
 ### Tracking
+
+#### Manual curation
 
 ### Analysis
 
