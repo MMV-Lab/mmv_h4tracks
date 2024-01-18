@@ -73,11 +73,23 @@ In future versions, we plan to support fine-tuning of Cellpose models within the
 
 ### Tracking
 
+The plugin supports both coordinate-based and overlap-based tracking. Overlap-based tracking requires more computation, but can also be used in particularly complicated data for individual cells.
+In our experience, coordinate-based tracking has proven itself in cases with reliable segmentation. Overlap-based tracking serves as a useful complement in cases where the segmentation is not of sufficient quality.
+
+(...)
+
 #### Manual curation
 
 ### Analysis
 
+The plugin supports the calculation of various metrics, which can be divided into two categories: migration-based (such as speed, direction, ...) and cell-based (such as size, eccentricity, ...). Through the use of these metrics, a comprehensive understanding of the available data can be obtained.
+
+(...)
+
 ### Evaluation
+
+
+(...)
 
 
 ## Contributing
@@ -130,3 +142,20 @@ added edge:
 	
 deleted edge:
 	check if a connection in eval has both cells matched in gt & the matched cells are connected. if no, then de
+
+## Development plan
+
+We will continue to develop the plugin and implement new features in the future. Some of our plans in arbitrary order:
+
+- Support of lineages
+- Support training custom Cellpose models within the plugin
+- Model optimization to further optimize segmentation computation
+- ...
+
+If you have a feature request, please [file an issue].
+
+## Resources
+
+The following resources may be of interest:
+
+- [Cellpose]()
