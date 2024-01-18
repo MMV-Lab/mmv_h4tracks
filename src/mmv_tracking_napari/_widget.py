@@ -3,6 +3,7 @@ import napari
 from qtpy.QtWidgets import (
     QWidget,
     QLabel,
+    QGroupBox,
     QPushButton,
     QRadioButton,
     QVBoxLayout,
@@ -12,13 +13,17 @@ from qtpy.QtWidgets import (
     QApplication,
     QFileDialog,
     QComboBox,
+    QTabWidget,
     QSizePolicy,
+    QHBoxLayout,
 )
 from qtpy.QtCore import Qt
+from qtpy.QtGui import QImage, QPixmap
 
 from pathlib import Path
 import numpy as np
 import copy
+import cv2
 import zarr
 from napari.layers.image.image import Image
 from napari.layers.labels.labels import Labels
@@ -60,6 +65,7 @@ class MMVTracking(QWidget):
     analysis()
         Opens a window to do analysis
     """
+
     dock = None
 
     def __init__(self, viewer: napari.Viewer = None, parent=None):
@@ -74,16 +80,31 @@ class MMVTracking(QWidget):
         self.viewer = viewer
         MMVTracking.dock = self
 
-        #setup_logging()
+        # setup_logging()
 
         ### QObjects
 
+        # Logo
+        filename = "celltracking_logo.jpg"
+        path = Path(__file__).parent / "ressources" / filename
+        image = cv2.imread(str(path))
+        height, width, _ = image.shape
+        logo = QPixmap(
+            QImage(image.data, width, height, 3 * width, QImage.Format_BGR888)
+        )
+
         # Labels
-        title = QLabel("<font color='green'>HITL4Trk</font>")
+        logo_label = QLabel()
+        logo_label.setPixmap(logo)
+        logo_label.setMaximumHeight(150)
+        logo_label.setMaximumWidth(150)
+        logo_label.setScaledContents(True)
+        logo_label.setAlignment(Qt.AlignCenter)
+        title = QLabel("<h1><font color='green'>HITL4Trk</font></h1>")
         title.setMaximumHeight(100)
-        self.loaded_file_name = QLabel()
-        computation_mode = QLabel("Computation mode")
-        computation_mode.setMaximumHeight(20)
+        # self.loaded_file_name = QLabel()
+        # computation_mode = QLabel("Computation mode")
+        # computation_mode.setMaximumHeight(20)
         label_image = QLabel("Image:")
         label_segmentation = QLabel("Segmentation:")
         label_tracks = QLabel("Tracks:")
@@ -94,18 +115,10 @@ class MMVTracking(QWidget):
         btn_save = QPushButton("Save")
         btn_save_as = QPushButton("Save as")
         btn_save_as.setToolTip("Save as a new Zarr file")
-        btn_processing = QPushButton("Data processing")
-        btn_segmentation = QPushButton("Segmentation correction")
-        btn_tracking = QPushButton("Tracking correction")
-        btn_analysis = QPushButton("Analysis")
 
         btn_load.clicked.connect(self._load)
         btn_save.clicked.connect(self._save)
         btn_save_as.clicked.connect(self.save_as)
-        btn_processing.clicked.connect(self._processing)
-        btn_segmentation.clicked.connect(self._segmentation)
-        btn_tracking.clicked.connect(self._tracking)
-        btn_analysis.clicked.connect(self._analysis)
 
         # Radio Buttons
         self.rb_eco = QRadioButton("Eco")
@@ -134,23 +147,45 @@ class MMVTracking(QWidget):
         line2.setFixedHeight(4)
         line2.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         line2.setStyleSheet("background-color: #c0c0c0")
-        invisi_line = QWidget()
-        invisi_line.setFixedHeight(4)
-        invisi_line.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        h_spacer_1 = QWidget()
+        h_spacer_1.setFixedHeight(4)
+        h_spacer_1.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+
+        # QGroupBoxes
+        computation_mode = QGroupBox("Computation mode")
+        computation_mode.setLayout(QHBoxLayout())
+        computation_mode.layout().addWidget(self.rb_eco)
+        computation_mode.layout().addWidget(rb_heavy)
+        self.file_interaction = QGroupBox()
+        self.file_interaction.setLayout(QHBoxLayout())
+        self.file_interaction.layout().addWidget(btn_load)
+        self.file_interaction.layout().addWidget(btn_save)
+        self.file_interaction.layout().addWidget(btn_save_as)
+
+        # QTabwidget
+        tabwidget = QTabWidget()
+        # self.processing_window = ProcessingWindow(self)
+        # tabwidget.addTab(self.processing_window, "Data processing")
+        self.segmentation_window = SegmentationWindow(self)
+        tabwidget.addTab(self.segmentation_window, "Segmentation")
+        self.tracking_window = TrackingWindow(self)
+        tabwidget.addTab(self.tracking_window, "Tracking")
+        self.analysis_window = AnalysisWindow(self)
+        tabwidget.addTab(self.analysis_window, "Analysis")
 
         ### Organize objects via widgets
         # widget: parent widget of all content
         widget = QWidget()
         widget.setLayout(QGridLayout())
-        widget.layout().addWidget(title, 0, 0, 1, -1)
+        widget.layout().addWidget(logo_label, 0, 0, 1, 2)
+        widget.layout().addWidget(title, 0, 2)
         widget.layout().addWidget(computation_mode, 1, 0, 1, -1)
-        widget.layout().addWidget(self.rb_eco, 2, 0)
-        widget.layout().addWidget(rb_heavy, 2, 1)
-        widget.layout().addWidget(self.loaded_file_name, 3, 0,1,2)
-        widget.layout().addWidget(invisi_line, 3, 2, 1, -1)
-        widget.layout().addWidget(btn_load, 4, 0)
-        widget.layout().addWidget(btn_save, 4, 1)
-        widget.layout().addWidget(btn_save_as, 4, 2)
+        widget.layout().addWidget(self.file_interaction, 2, 0, 1, -1)
+        # widget.layout().addWidget(self.loaded_file_name, 3, 0, 1, 2)
+        # widget.layout().addWidget(h_spacer_1, 3, 2, 1, -1)
+        # widget.layout().addWidget(btn_load, 4, 0)
+        # widget.layout().addWidget(btn_save, 4, 1)
+        # widget.layout().addWidget(btn_save_as, 4, 2)
         widget.layout().addWidget(line, 5, 0, 1, -1)
         widget.layout().addWidget(label_image, 6, 0)
         widget.layout().addWidget(self.combobox_image, 6, 1, 1, 2)
@@ -159,10 +194,7 @@ class MMVTracking(QWidget):
         widget.layout().addWidget(label_tracks, 8, 0)
         widget.layout().addWidget(self.combobox_tracks, 8, 1, 1, 2)
         widget.layout().addWidget(line2, 9, 0, 1, -1)
-        widget.layout().addWidget(btn_processing, 10, 0, 1, -1)
-        widget.layout().addWidget(btn_segmentation, 11, 0, 1, -1)
-        widget.layout().addWidget(btn_tracking, 12, 0, 1, -1)
-        widget.layout().addWidget(btn_analysis, 13, 0, 1, -1)
+        widget.layout().addWidget(tabwidget, 10, 0, 1, -1)
 
         # Scrollarea allows content to be larger than the assigned space (small monitor)
         scroll_area = QScrollArea()
@@ -382,7 +414,8 @@ class MMVTracking(QWidget):
         self.combobox_image.setCurrentText("Raw Image")
         self.combobox_segmentation.setCurrentText("Segmentation Data")
         self.combobox_tracks.setCurrentText("Tracks")
-        self.loaded_file_name.setText(Path(filepath).name)
+        self.file_interaction.setTitle(Path(filepath).name)
+        # self.loaded_file_name.setText(Path(filepath).name)
         QApplication.restoreOverrideCursor()
 
     def _save(self):
@@ -454,42 +487,6 @@ class MMVTracking(QWidget):
         t = z.create_dataset(
             "tracking_data", shape=track_data.shape, dtype="i4", data=track_data
         )
-
-    def _processing(self, hide=False):
-        """
-        Opens a [ProcessingWindow]
-        """
-        self.processing_window = ProcessingWindow(self)
-        print("Opening processing window")
-        if not hide:
-            self.processing_window.show()
-
-    def _segmentation(self, hide=False):
-        """
-        Opens a [SegmentationWindow]
-        """
-        self.segmentation_window = SegmentationWindow(self)
-        print("Opening segmentation window")
-        if not hide:
-            self.segmentation_window.show()
-
-    def _tracking(self, hide=False):
-        """
-        Opens a [TrackingWindow]
-        """
-        self.tracking_window = TrackingWindow(self)
-        print("Opening tracking window")
-        if not hide:
-            self.tracking_window.show()
-
-    def _analysis(self, hide=False):
-        """
-        Opens an [AnalysisWindow]
-        """
-        self.analysis_window = AnalysisWindow(self)
-        print("Opening analysis window")
-        if not hide:
-            self.analysis_window.show()
 
     @napari.Viewer.bind_key("Shift-r")
     def _hotkey_remove_label(self):

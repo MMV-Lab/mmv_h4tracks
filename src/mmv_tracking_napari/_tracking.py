@@ -14,7 +14,7 @@ from qtpy.QtWidgets import (
     QLineEdit,
     QMessageBox,
     QPushButton,
-#    QSizePolicy,
+    QGroupBox,
     QVBoxLayout,
     QWidget,
 )
@@ -50,8 +50,6 @@ class TrackingWindow(QWidget):
         """         # ?? hier vlt. noch ergänzen
         super().__init__()
         self.setLayout(QVBoxLayout())
-        self.setWindowFlag(Qt.WindowStaysOnTopHint)
-        self.setWindowTitle("Tracking correction")
         self.parent = parent
         self.viewer = parent.viewer
         try:
@@ -89,6 +87,17 @@ class TrackingWindow(QWidget):
         # Line Edits
         self.lineedit_trajectory = QLineEdit("")
         #self.lineedit_trajectory.editingFinished.connect(self._filter_tracks)  # ?? kann weg?
+
+        # QGroupBoxes
+        automatic_tracking = QGroupBox("Automatic tracking")
+        automatic_tracking.setLayout(QGridLayout())
+
+        tracking_correction = QGroupBox("Tracking correction")
+        tracking_correction.setLayout(QVBoxLayout())
+
+        filter_tracks = QGroupBox("Filter tracks")
+        filter_tracks.setLayout(QGridLayout())
+        filter_tracks.layout().addWidget(self.lineedit_trajectory, 0, 0)
 
         ### Organize objects via widgets
         content = QWidget()

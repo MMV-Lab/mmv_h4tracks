@@ -47,11 +47,9 @@ class AnalysisWindow(QWidget):
         ----------
         """
         super().__init__()
-        self.setWindowFlag(Qt.WindowStaysOnTopHint)
         self.parent = parent
         self.viewer = parent.viewer
         self.setLayout(QVBoxLayout())
-        self.setWindowTitle("Analysis")
         try:
             self.setStyleSheet(napari.qt.get_stylesheet(theme="dark"))
         except TypeError:

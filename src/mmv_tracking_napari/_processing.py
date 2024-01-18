@@ -28,7 +28,6 @@ import torch
 from mmv_tracking_napari import APPROX_INF, MAX_MATCHING_DIST
 from ._grabber import grab_layer
 from ._logger import choice_dialog, notify, handle_exception
-from .add_models import ModelWindow
 
 CUSTOM_MODEL_PREFIX = "custom_"
 
@@ -67,7 +66,6 @@ class ProcessingWindow(QWidget):
             The parent widget
         """
         super().__init__()
-        self.setWindowFlag(Qt.WindowStaysOnTopHint)
         self.setLayout(QVBoxLayout())
         self.setWindowTitle("Data processing")
         self.parent = parent
@@ -83,32 +81,15 @@ class ProcessingWindow(QWidget):
 
         ### QObjects
         # Labels
-        label_segmentation = QLabel("Segmentation")
         label_tracking = QLabel("Tracking")
 
         # Buttons
-        self.btn_segment = QPushButton("Run Instance Segmentation")
-        self.btn_preview_segment = QPushButton("Preview Segmentation")
-        self.btn_preview_segment.setToolTip("Segment the first 5 frames")
         btn_track = QPushButton("Run Tracking")
         btn_adjust_seg_ids = QPushButton("Initiate color lock")
         btn_adjust_seg_ids.setToolTip("WARNING: This will take a while")
-        btn_add_custom_model = QPushButton("Add custom model")
-        btn_add_custom_model.setToolTip("Add a custom Cellpose model")
 
-        self.btn_segment.clicked.connect(self._run_segmentation)
-        self.btn_preview_segment.clicked.connect(self._run_demo_segmentation)
         btn_track.clicked.connect(self._run_tracking)
         btn_adjust_seg_ids.clicked.connect(self._adjust_ids)
-        btn_add_custom_model.clicked.connect(self._add_model)
-
-        # Comboboxes
-        self.combobox_segmentation = QComboBox()
-        self.combobox_segmentation.addItem("select model")
-        self.read_models()
-        self.combobox_segmentation.currentTextChanged.connect(
-            self.toggle_segmentation_buttons
-        )
 
         # Horizontal lines
         line = QWidget()
@@ -120,197 +101,12 @@ class ProcessingWindow(QWidget):
         content = QWidget()
         content.setLayout(QGridLayout())
 
-        content.layout().addWidget(label_segmentation, 0, 0, 1, -1)
-        content.layout().addWidget(self.combobox_segmentation, 1, 0)
-        content.layout().addWidget(btn_add_custom_model, 1, 1)
-        content.layout().addWidget(self.btn_preview_segment, 2, 0, 1, -1)
-        content.layout().addWidget(self.btn_segment, 3, 0, 1, -1)
         content.layout().addWidget(line, 4, 0, 1, -1)
         content.layout().addWidget(label_tracking, 5, 0, 1, -1)
         content.layout().addWidget(btn_track, 6, 0, 1, -1)
         content.layout().addWidget(btn_adjust_seg_ids, 7, 0, 1, -1)
 
         self.layout().addWidget(content)
-
-    def toggle_segmentation_buttons(self, text):
-        """
-        Toggles the segmentation buttons if a valid model is selected.
-
-        Args:
-            text (str): Selected model from the combobox.
-
-        Returns:
-            None
-        """
-        if text == "select model":
-            self.btn_segment.setEnabled(False)
-            self.btn_preview_segment.setEnabled(False)
-        else:
-            self.btn_segment.setEnabled(True)
-            self.btn_preview_segment.setEnabled(True)
-
-    def read_models(self):
-        """
-        Reads the available models from the 'models' directory and adds them to the segmentation combobox.
-        """
-        self.combobox_segmentation.clear()
-        with open(Path(__file__).parent / "custom_models.json", "r") as file:
-            self.custom_models = json.load(file)
-
-        path = Path(__file__).parent / "models"
-
-        custom_models = []
-
-        for file in path.iterdir():
-            if not file.is_dir():
-                self.combobox_segmentation.addItem(file.name)
-
-        p = Path(__file__).parent / "models"/ "custom_models"
-        for file in p.iterdir():
-            print(file.name)
-        custom_model_filenames = [file.name for file in p.glob("*") if file.is_file()]
-        for custom_model in self.custom_models:
-            if self.custom_models[custom_model]["filename"] in custom_model_filenames:
-                custom_models.append(CUSTOM_MODEL_PREFIX + custom_model)
-        if len(custom_models) < 1:
-            return
-        custom_models.sort()
-        self.combobox_segmentation.addItems(custom_models)
-
-    def _add_segmentation_to_viewer(self, mask):
-        """
-        Adds the segmentation as a layer to the viewer with a specified name
-
-        Parameters
-        ----------
-        mask : array
-            the segmentation data to add to the viewer
-        """
-        labels = self.viewer.add_labels(mask, name="calculated segmentation")
-        self.parent.combobox_segmentation.setCurrentText(labels.name)
-        print("Added segmentation to viewer")
-
-    def _run_segmentation(self):
-        """
-        Calls segmentation without demo flag set
-        """
-        print("Calling full segmentation")
-
-        worker = self._segment_image()
-        worker.returned.connect(self._add_segmentation_to_viewer)
-        # worker.errored.connect(handle_exception)
-        # worker.start()
-
-    def _run_demo_segmentation(self):
-        """
-        Calls segmentation with the demo flag set
-        """
-        print("Calling demo segmentation")
-
-        worker = self._segment_image(True)
-        worker.returned.connect(self._add_segmentation_to_viewer)
-        
-    @thread_worker(connect={"errored": handle_exception})
-    def _segment_image(self, demo=False):
-        """
-        Run segmentation on the raw image data
-
-        Parameters
-        ----------
-        demo : Boolean
-            whether or not to do a demo of the segmentation
-        Returns
-        -------
-        """
-        print("Running segmentation")
-        QApplication.setOverrideCursor(Qt.WaitCursor)
-
-        
-        data = grab_layer(
-            self.viewer, self.parent.combobox_image.currentText()
-        ).data
-
-        if demo:
-            data = data[0:5]
-
-        selected_model = self.combobox_segmentation.currentText()
-
-        parameters = self._get_parameters(selected_model)
-
-        if core.use_gpu():
-            print("can gpu")
-            model = models.CellposeModel(
-                gpu=True, pretrained_model=parameters.pop("model_path")
-            )
-            print(parameters)
-            mask = []
-            for layer_slice in data:
-                layer_mask, _, _ = model.eval(
-                    layer_slice,
-                    **parameters
-                )
-                mask.append(layer_mask)
-            mask = np.array(mask)
-        else:
-            print("can't gpu")
-
-            # set process limit
-            if self.parent.rb_eco.isChecked():
-                AMOUNT_OF_PROCESSES = np.maximum(
-                    1, int(multiprocessing.cpu_count() * 0.4)
-                )
-            else:
-                AMOUNT_OF_PROCESSES = np.maximum(
-                    1, int(multiprocessing.cpu_count() * 0.8)
-                )
-            print("Running on {} processes max".format(AMOUNT_OF_PROCESSES))
-
-            data_with_parameters = [(layer_slice, parameters) for layer_slice in data]
-
-            with Pool(AMOUNT_OF_PROCESSES) as p:
-                mask = p.starmap(segment_slice_cpu, data_with_parameters)
-                mask = np.asarray(mask)
-                print("Done calculating segmentation")
-
-        QApplication.restoreOverrideCursor()
-        return mask
-
-    def _get_parameters(self, model: str):
-        """
-        Get the parameters for the selected model
-
-        Parameters
-        ----------
-        model : String
-            The selected model
-
-        Returns
-        -------
-        dict
-            a dictionary of all the parameters based on selected model
-        """
-        # Hardcoded models
-        if model == "cellpose_neutrophils":
-            params = {
-                "model_path": str(Path(__file__).parent.absolute() / "models" / model),
-                "diameter": 15,
-                "channels": [0,0],
-                "flow_threshold": 0.4,
-                "cellprob_threshold": 0,
-            }
-
-        model = model[len(CUSTOM_MODEL_PREFIX):]
-        # Custom models
-        if model in self.custom_models:
-            params = self.custom_models[model]["params"]
-            params["model_path"] = str(
-                Path(__file__).parent.absolute()
-                / "models"
-                / "custom_models"
-                / self.custom_models[model]["filename"]
-            )
-
-        return params
 
     def _add_tracks_to_viewer(self, params):
         """
@@ -523,14 +319,6 @@ class ProcessingWindow(QWidget):
         np.set_printoptions(threshold=sys.maxsize)
         print(self.viewer.layers[self.viewer.layers.index("Tracks")].data)
         QApplication.restoreOverrideCursor()
-        
-    def _add_model(self):
-        """
-        Opens a [ModelWindow]
-        """
-        self.model_window = ModelWindow(self)
-        print("Opening model window")
-        self.model_window.show()
 
 
 def segment_slice_cpu(
@@ -646,3 +434,169 @@ def match_centroids(
         )
 
     return matched_pairs
+
+def read_models(widget):
+    """
+    Reads the available models from the 'models' directory and adds them to the segmentation combobox.
+    """
+    widget.combobox_segmentation.clear()
+    with open(Path(__file__).parent / "custom_models.json", "r") as file:
+        widget.custom_models = json.load(file)
+
+    path = Path(__file__).parent / "models"
+
+    custom_models = []
+
+    for file in path.iterdir():
+        if not file.is_dir():
+            widget.combobox_segmentation.addItem(file.name)
+
+    p = Path(__file__).parent / "models"/ "custom_models"
+    for file in p.iterdir():
+        print(file.name)
+    custom_model_filenames = [file.name for file in p.glob("*") if file.is_file()]
+    for custom_model in widget.custom_models:
+        if widget.custom_models[custom_model]["filename"] in custom_model_filenames:
+            custom_models.append(CUSTOM_MODEL_PREFIX + custom_model)
+    if len(custom_models) < 1:
+        return
+    custom_models.sort()
+    widget.combobox_segmentation.addItem("select model")
+    widget.combobox_segmentation.addItems(custom_models)
+
+def _run_segmentation(widget):
+    """
+    Calls segmentation without demo flag set
+    """
+    print("Calling full segmentation")
+
+    worker = _segment_image(widget)
+    worker.returned.connect(_add_segmentation_to_viewer)
+    # worker.errored.connect(handle_exception)
+    # worker.start()
+
+def _run_demo_segmentation(widget):
+    """
+    Calls segmentation with the demo flag set
+    """
+    print("Calling demo segmentation")
+
+    worker = _segment_image(widget, True)
+    worker.returned.connect(_add_segmentation_to_viewer)
+
+def _add_segmentation_to_viewer(widget, mask):
+    """
+    Adds the segmentation as a layer to the viewer with a specified name
+
+    Parameters
+    ----------
+    mask : array
+        the segmentation data to add to the viewer
+    """
+    labels = widget.viewer.add_labels(mask, name="calculated segmentation")
+    widget.parent.combobox_segmentation.setCurrentText(labels.name)
+    print("Added segmentation to viewer")
+        
+@thread_worker(connect={"errored": handle_exception})
+def _segment_image(widget, demo=False):
+    """
+    Run segmentation on the raw image data
+
+    Parameters
+    ----------
+    demo : Boolean
+        whether or not to do a demo of the segmentation
+    Returns
+    -------
+    """
+    print("Running segmentation")
+    QApplication.setOverrideCursor(Qt.WaitCursor)
+
+    viewer = widget.viewer
+    
+    data = grab_layer(
+        viewer, widget.parent.combobox_image.currentText()
+    ).data
+
+    if demo:
+        data = data[0:5]
+
+    selected_model = widget.combobox_segmentation.currentText()
+
+    parameters = _get_parameters(selected_model)
+
+    if core.use_gpu():
+        print("can gpu")
+        model = models.CellposeModel(
+            gpu=True, pretrained_model=parameters.pop("model_path")
+        )
+        print(parameters)
+        mask = []
+        for layer_slice in data:
+            layer_mask, _, _ = model.eval(
+                layer_slice,
+                **parameters
+            )
+            mask.append(layer_mask)
+        mask = np.array(mask)
+    else:
+        print("can't gpu")
+
+        # set process limit
+        if widget.parent.rb_eco.isChecked():
+            AMOUNT_OF_PROCESSES = np.maximum(
+                1, int(multiprocessing.cpu_count() * 0.4)
+            )
+        else:
+            AMOUNT_OF_PROCESSES = np.maximum(
+                1, int(multiprocessing.cpu_count() * 0.8)
+            )
+        print("Running on {} processes max".format(AMOUNT_OF_PROCESSES))
+
+        data_with_parameters = [(layer_slice, parameters) for layer_slice in data]
+
+        with Pool(AMOUNT_OF_PROCESSES) as p:
+            mask = p.starmap(segment_slice_cpu, data_with_parameters)
+            mask = np.asarray(mask)
+            print("Done calculating segmentation")
+
+    QApplication.restoreOverrideCursor()
+    return widget, mask
+
+def _get_parameters(widget, model: str):
+    """
+    Get the parameters for the selected model
+
+    Parameters
+    ----------
+    model : String
+        The selected model
+
+    Returns
+    -------
+    dict
+        a dictionary of all the parameters based on selected model
+    """
+    # Hardcoded models
+    if model == "cellpose_neutrophils":
+        params = {
+            "model_path": str(Path(__file__).parent.absolute() / "models" / model),
+            "diameter": 15,
+            "channels": [0,0],
+            "flow_threshold": 0.4,
+            "cellprob_threshold": 0,
+        }
+
+    model = model[len(CUSTOM_MODEL_PREFIX):]
+    # Custom models
+    if model in widget.custom_models:
+        params = widget.custom_models[model]["params"]
+        params["model_path"] = str(
+            Path(__file__).parent.absolute()
+            / "models"
+            / "custom_models"
+            / widget.custom_models[model]["filename"]
+        )
+
+    return params
+

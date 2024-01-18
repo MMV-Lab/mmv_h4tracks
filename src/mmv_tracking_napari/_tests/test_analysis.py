@@ -232,7 +232,6 @@ def test_false_positives(set_widget_up, layername, expected_value):
     """
     widget = set_widget_up
     viewer = widget.viewer
-    widget._analysis(hide=True)
     window = widget.analysis_window
     gt_seg = viewer.layers[viewer.layers.index("GT")].data
     eval_seg = viewer.layers[viewer.layers.index(layername)].data

@@ -2,6 +2,9 @@ import numpy as np
 
 from qtpy.QtWidgets import (
     QWidget,
+    QGroupBox,
+    QCheckBox,
+    QComboBox,
     QVBoxLayout,
     QLabel,
     QPushButton,
@@ -14,6 +17,8 @@ import napari
 
 from ._logger import notify
 from ._grabber import grab_layer
+import mmv_tracking_napari._processing as processing
+from .add_models import ModelWindow
 
 
 class SegmentationWindow(QWidget):
@@ -37,9 +42,7 @@ class SegmentationWindow(QWidget):
             The Napari viewer instance
         """
         super().__init__()
-        self.setWindowFlag(Qt.WindowStaysOnTopHint)
         self.setLayout(QVBoxLayout())
-        self.setWindowTitle("Segmentation correction")
         self.parent = parent
         self.viewer = parent.viewer
         try:
@@ -49,52 +52,99 @@ class SegmentationWindow(QWidget):
 
         ### QObjects
 
-        # Labels
-        label_false_positive = QLabel("Remove false positive for ID:")
-        label_next_free = QLabel("Next free label:")
-        label_false_merge = QLabel("Separate falsely merged ID:")
-        label_false_cut = QLabel("Merge falsely cut ID and second ID:")
-        label_grab_label = QLabel("Select label:")
-
         # Buttons
         btn_false_positive = QPushButton("Remove")
         btn_false_positive.setToolTip("Remove label from segmentation")
-        btn_false_positive.clicked.connect(self._add_remove_callback)
 
-        btn_free_label = QPushButton("Load Label")
+        btn_free_label = QPushButton("Next free")
         btn_free_label.setToolTip("Load next free segmentation label")
-        btn_free_label.clicked.connect(self._set_label_id)
 
         btn_false_merge = QPushButton("Separate")
         btn_false_merge.setToolTip(
             "Split two separate parts of the same label into two"
         )
-        btn_false_merge.clicked.connect(self._add_replace_callback)
 
         btn_false_cut = QPushButton("Merge")
         btn_false_cut.setToolTip("Merge two separate labels into one")
-        btn_false_cut.clicked.connect(self._add_merge_callback)
 
         btn_grab_label = QPushButton("Select")
         btn_grab_label.setToolTip("Load selected segmentation label")
+
+        self.btn_segment = QPushButton("Run Segmentation")
+
+        self.btn_add_custom_model = QPushButton("Add custom Cellpose model")
+
+        btn_false_positive.clicked.connect(self._add_remove_callback)
+        btn_free_label.clicked.connect(self._set_label_id)
+        btn_false_merge.clicked.connect(self._add_replace_callback)
+        btn_false_cut.clicked.connect(self._add_merge_callback)
+        self.btn_segment.clicked.connect(self.segment)
+        self.btn_add_custom_model.clicked.connect(self._add_model)
         btn_grab_label.clicked.connect(self._add_select_callback)
+
+        # QComboBoxes
+        self.combobox_segmentation = QComboBox()
+        self.combobox_segmentation.setToolTip("select model")
+        processing.read_models(self)
+        self.combobox_segmentation.currentTextChanged.connect(
+            self.toggle_segmentation_button
+        )
+
+        # QCheckBoxes
+        self.checkbox_preview = QCheckBox("Preview")
+
+        # QGroupBoxes
+        automatic_segmentation = QGroupBox("Automatic Segmentation")
+        automatic_segmentation.setLayout(QGridLayout())
+        automatic_segmentation.layout().addWidget(self.combobox_segmentation, 0, 0, 1, 1)
+        automatic_segmentation.layout().addWidget(self.btn_segment, 0, 1, 1, 1)
+        automatic_segmentation.layout().addWidget(self.checkbox_preview, 0, 2, 1, 1)
+        automatic_segmentation.layout().addWidget(self.btn_add_custom_model, 1, 0, 1, -1)
+
+        segmentation_correction = QGroupBox("Segmentation Correction")
+        segmentation_correction.setLayout(QGridLayout())
+        segmentation_correction.layout().addWidget(btn_false_positive, 0, 0)
+        segmentation_correction.layout().addWidget(btn_free_label, 1, 0)
+        segmentation_correction.layout().addWidget(btn_grab_label, 1, 1)
+        segmentation_correction.layout().addWidget(btn_false_cut, 2, 0)
+        segmentation_correction.layout().addWidget(btn_false_merge, 2, 1)
 
         ### Organize objects via widgets
         content = QWidget()
-        content.setLayout(QGridLayout())
-
-        content.layout().addWidget(label_false_positive, 3, 0)
-        content.layout().addWidget(btn_false_positive, 3, 1)
-        content.layout().addWidget(label_next_free, 4, 0)
-        content.layout().addWidget(btn_free_label, 4, 1)
-        content.layout().addWidget(label_false_merge, 5, 0)
-        content.layout().addWidget(btn_false_merge, 5, 1)
-        content.layout().addWidget(label_false_cut, 6, 0)
-        content.layout().addWidget(btn_false_cut, 6, 1)
-        content.layout().addWidget(label_grab_label, 7, 0)
-        content.layout().addWidget(btn_grab_label, 7, 1)
+        content.setLayout(QVBoxLayout())
+        content.layout().addWidget(automatic_segmentation)
+        content.layout().addWidget(segmentation_correction)
 
         self.layout().addWidget(content)
+
+    def segment(self):
+        if self.checkbox_preview.isChecked():
+            processing.run_demo_segmentation(self)
+        else:
+            processing.run_segmentation(self)
+        
+    def _add_model(self):
+        """
+        Opens a [ModelWindow]
+        """
+        self.model_window = ModelWindow(self)
+        print("Opening model window")
+        self.model_window.show()
+
+    def toggle_segmentation_button(self, text):
+        """
+        Toggles the segmentation button if a valid model is selected.
+        
+        Args:
+            text (str): Name of the selected model
+
+        Returns:
+            None
+        """
+        if text == "selected model":
+            self.btn_segment.setEnabled(False)
+        else:
+            self.btn_segment.setEnabled(True)
 
     def _add_remove_callback(self):
         self._remove_on_clicks()
