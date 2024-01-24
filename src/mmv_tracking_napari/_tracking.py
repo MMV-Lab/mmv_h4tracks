@@ -1,6 +1,7 @@
 import multiprocessing
 #import platform
 from multiprocessing import Pool
+from threading import Event
 
 import napari
 import numpy as np
@@ -16,6 +17,8 @@ from qtpy.QtWidgets import (
     QPushButton,
     QGroupBox,
     QVBoxLayout,
+    QHBoxLayout,
+    QSizePolicy,
     QWidget,
 )
 from scipy import ndimage
@@ -23,9 +26,10 @@ from scipy import ndimage
 from ._logger import notify, notify_with_delay, choice_dialog, handle_exception
 from ._grabber import grab_layer
 from ._logger import choice_dialog, notify, notify_with_delay
+import mmv_tracking_napari._processing as processing
 
-LINK_TEXT = "Link"
-UNLINK_TEXT = "Unlink"
+LINK_TEXT = "Link tracks"
+UNLINK_TEXT = "Unlink tracks"
 CONFIRM_TEXT = "Confirm"
 
 class TrackingWindow(QWidget):
@@ -52,6 +56,7 @@ class TrackingWindow(QWidget):
         self.setLayout(QVBoxLayout())
         self.parent = parent
         self.viewer = parent.viewer
+        self.choice_event = Event()
         try:
             self.setStyleSheet(napari.qt.get_stylesheet(theme="dark"))
         except TypeError:
@@ -60,65 +65,179 @@ class TrackingWindow(QWidget):
         ### QObjects
 
         # Labels
-        label_trajectory = QLabel("Filter tracks by cell:")
-        label_remove_correspondence = QLabel(
-            "Remove tracking for later slices for cell:"
-        )
-        label_insert_correspondence = QLabel("Cell should be tracked with second cell:")
+        label_display_ids = QLabel("Enter specific track IDs to display:")
+        label_delete_specific_ids = QLabel("Delete specified tracks:")
 
         # Buttons
+        btn_centroid_tracking = QPushButton("Centroid based tracking")
+        btn_auto_track_all = QPushButton("Overlap based tracking")
+        btn_auto_track = QPushButton("Overlap based tracking single")
+
         self.btn_remove_correspondence = QPushButton(UNLINK_TEXT)
         self.btn_remove_correspondence.setToolTip("Remove cells from their tracks")
-        self.btn_remove_correspondence.clicked.connect(self._unlink)
 
         self.btn_insert_correspondence = QPushButton(LINK_TEXT)
         self.btn_insert_correspondence.setToolTip("Add cells to new track")
-        self.btn_insert_correspondence.clicked.connect(self._link)
 
-        btn_delete_displayed_tracks = QPushButton("Delete displayed tracks")
-        btn_delete_displayed_tracks.clicked.connect(self._remove_displayed_tracks)
-        btn_auto_track = QPushButton("Tracking for single slow cell")
-        btn_auto_track.clicked.connect(self._add_auto_track_callback)
-        btn_auto_track_all = QPushButton("Automatic tracking for all cells")
-        btn_auto_track_all.clicked.connect(self._proximity_track_all)
+        btn_delete_displayed_tracks = QPushButton("Delete all displayed tracks")
         btn_filter_tracks = QPushButton("Filter")
+        btn_delete_selected_tracks = QPushButton("Delete")
+
+        btn_centroid_tracking.clicked.connect(self._run_tracking)
+        btn_auto_track_all.clicked.connect(self._proximity_track_all)
+        btn_auto_track.clicked.connect(self._add_auto_track_callback)
+        self.btn_remove_correspondence.clicked.connect(self._unlink)
+        self.btn_insert_correspondence.clicked.connect(self._link)
+        btn_delete_displayed_tracks.clicked.connect(self._remove_displayed_tracks)
         btn_filter_tracks.clicked.connect(self._filter_tracks)
+        btn_delete_selected_tracks.clicked.connect(self._delete_selected)
 
         # Line Edits
-        self.lineedit_trajectory = QLineEdit("")
-        #self.lineedit_trajectory.editingFinished.connect(self._filter_tracks)  # ?? kann weg?
+        self.lineedit_filter = QLineEdit("")
+        self.lineedit_delete = QLineEdit("")
+        #self.lineedit_filter.editingFinished.connect(self._filter_tracks)  # ?? kann weg?
+
+        # Spacers
+        v_spacer = QWidget()
+        v_spacer.setFixedWidth(4)
+        v_spacer.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
+        h_spacer_1 = QWidget()
+        h_spacer_1.setFixedHeight(0)
+        h_spacer_1.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        h_spacer_2 = QWidget()
+        h_spacer_2.setFixedHeight(0)
+        h_spacer_2.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        h_spacer_3 = QWidget()
+        h_spacer_3.setFixedHeight(0)
+        h_spacer_3.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        h_spacer_4 = QWidget()
+        h_spacer_4.setFixedHeight(20)
+        h_spacer_4.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
         # QGroupBoxes
         automatic_tracking = QGroupBox("Automatic tracking")
         automatic_tracking.setLayout(QGridLayout())
+        automatic_tracking.layout().addWidget(h_spacer_1, 0, 0, 1, -1)
+        automatic_tracking.layout().addWidget(btn_centroid_tracking, 1, 0)
+        automatic_tracking.layout().addWidget(btn_auto_track_all, 2, 0)
+        automatic_tracking.layout().addWidget(btn_auto_track, 2, 1)
 
         tracking_correction = QGroupBox("Tracking correction")
-        tracking_correction.setLayout(QVBoxLayout())
+        tracking_correction.setLayout(QGridLayout())
+        tracking_correction.layout().addWidget(h_spacer_2, 0, 0, 1, -1)
+        tracking_correction.layout().addWidget(self.btn_insert_correspondence, 1, 0)
+        tracking_correction.layout().addWidget(self.btn_remove_correspondence, 1, 1)
 
-        filter_tracks = QGroupBox("Filter tracks")
+        filter_tracks = QGroupBox("Filter tracks with lots of love and happiness")
         filter_tracks.setLayout(QGridLayout())
-        filter_tracks.layout().addWidget(self.lineedit_trajectory, 0, 0)
+        filter_tracks.layout().addWidget(h_spacer_3, 0, 0, 1, -1)
+        filter_tracks.layout().addWidget(label_display_ids, 2, 0)
+        filter_tracks.layout().addWidget(self.lineedit_filter, 2, 1)
+        filter_tracks.layout().addWidget(btn_filter_tracks, 2, 2)
+        filter_tracks.layout().addWidget(h_spacer_4, 3, 2, 1, -1)
+        filter_tracks.layout().addWidget(btn_delete_displayed_tracks, 4, 0, 1, -1)
+        filter_tracks.layout().addWidget(label_delete_specific_ids, 5, 0)
+        filter_tracks.layout().addWidget(self.lineedit_delete, 5, 1)
+        filter_tracks.layout().addWidget(btn_delete_selected_tracks, 5, 2)
 
         ### Organize objects via widgets
         content = QWidget()
-        content.setLayout(QGridLayout())
+        content.setLayout(QVBoxLayout())
 
-        content.layout().addWidget(label_trajectory, 3, 0)
-        content.layout().addWidget(self.lineedit_trajectory, 3, 1)
-        content.layout().addWidget(btn_filter_tracks, 3, 2)
-        content.layout().addWidget(btn_delete_displayed_tracks, 3, 3)
-        content.layout().addWidget(label_remove_correspondence, 4, 0)
-        content.layout().addWidget(self.btn_remove_correspondence, 4, 1, 1, 2)
-        content.layout().addWidget(btn_auto_track, 4, 3)
-        content.layout().addWidget(label_insert_correspondence, 5, 0)
-        content.layout().addWidget(self.btn_insert_correspondence, 5, 1, 1, 2)
-        content.layout().addWidget(btn_auto_track_all, 5, 3)
+        content.layout().addWidget(automatic_tracking)
+        content.layout().addWidget(tracking_correction)
+        content.layout().addWidget(filter_tracks)
+        content.layout().addWidget(v_spacer)
 
         self.layout().addWidget(content)
 
+    def _delete_selected(self):
+        input_text = self.lineedit_delete.text()
+        if input_text == "":
+            return
+        try:
+            tracks_to_delete = [int(input_text)]
+        except ValueError:
+            tracks_to_delete = []
+            split_input = input_text.split(",")
+            try:
+                for i in range(0, len(split_input)):
+                    tracks_to_delete.append(int((split_input[i])))
+            except ValueError:
+                notify(
+                    "Please use a single integer (whole number) or a comma separated list of integers"
+                )
+                return
+            
+        ids = filter(lambda value: value >= 0, tracks_to_delete)
+        ids = list(set(ids))
+
+        # if self.lineedit_filter.text() != "":
+        filter_text = self.lineedit_filter.text().split(",")
+        try:
+            visible_tracks = [int(track) for track in filter_text]
+        except ValueError:
+            pass
+
+        if len(visible_tracks) > 0:
+            # if trying to delete non-displayed tracks, ask for confirmation
+            if not set(ids).issubset(set(visible_tracks)):
+                ret = choice_dialog(
+                    "Some of the tracks you are trying to delete are not displayed. Do you want to delete them anyway?",
+                    [("Delete anyway", QMessageBox.AcceptRole), QMessageBox.Cancel],
+                )
+                # ret = 0 -> Delete anyway, ret = 4194304 -> Cancel
+                if ret == 4194304:
+                    return
+            for track in ids:
+                # if visible tracks are deleted, remove their entry from the filter text
+                if track in visible_tracks:
+                    visible_tracks.remove(track)
+
+            self.parent.tracks = np.delete(
+                self.parent.tracks, np.isin(self.parent.tracks[:, 0], ids), 0
+            )
+            if len(visible_tracks) == 0:
+            # if all visible tracks are deleted, show all tracks again
+                self.lineedit_filter.setText("")
+                self._replace_tracks()
+            else:
+            # if only some visible tracks are deleted, update filter text
+                filtered_text = ""
+                for i in range(0, len(visible_tracks)):
+                    if len(filtered_text) > 0:
+                        filtered_text += ","
+                    filtered_text = f"{filtered_text}{visible_tracks[i]}"
+                self.lineedit_filter.setText(filtered_text)
+                self._replace_tracks(visible_tracks)
+            
+        self.lineedit_delete.setText("")
+
+    def _run_tracking(self):
+        """
+        Calls the centroid bassed tracking function
+        """
+        print("Calling tracking")
+
+        def on_yielded(value):
+            if value == "Replace tracks layer":
+                ret = choice_dialog(
+                    "Tracks layer found. Do you want to replace it?",
+                    [QMessageBox.Yes, QMessageBox.No],
+                )
+                if ret == 16384:
+                    self.ret = ret
+                    self.choice_event.set()
+                else:
+                    worker.quit()
+
+        worker = processing._track_segmentation()
+        worker.returned.connect(processing._add_tracks_to_viewer)
+        worker.yielded.connect(on_yielded)
+
     def _filter_tracks(self):   # ?? hier vlt. noch Beschreibung ergänzen
         print("Filtering tracks")
-        input_text = self.lineedit_trajectory.text()
+        input_text = self.lineedit_filter.text()
         if input_text == "":
             self._replace_tracks()
             return
@@ -137,14 +256,14 @@ class TrackingWindow(QWidget):
                 return
 
         # Remove values < 0 and duplicates      # ?? lass uns mal zusammen schauen, ob wir das hier noch effizienter und übersichtlicher hinkriegen
-        ids = filter(lambda value: value >= 0, tracks)  
-        ids = list(dict.fromkeys(ids))
+        ids = filter(lambda value: value >= 0, tracks)
+        ids = list(set(ids))
         filtered_text = ""
         for i in range(0, len(ids)):
             if len(filtered_text) > 0:
                 filtered_text += ","
             filtered_text = f"{filtered_text}{ids[i]}"
-        self.lineedit_trajectory.setText(filtered_text)
+        self.lineedit_filter.setText(filtered_text)
         self._replace_tracks(ids)
 
     def _replace_tracks(self, ids:list=None):
@@ -357,7 +476,7 @@ class TrackingWindow(QWidget):
         )
         # ret = 0 -> Display all, ret = 4194304 -> Cancel
         if ret == 0:
-            self.lineedit_trajectory.setText("")
+            self.lineedit_filter.setText("")
             self._replace_tracks()
     
     def _validate_track_cells(self):
@@ -528,10 +647,7 @@ class TrackingWindow(QWidget):
             self.viewer, self.parent.combobox_segmentation.currentText()
         )
 
-        if self.parent.rb_eco.isChecked():
-            AMOUNT_OF_PROCESSES = np.maximum(1, int(multiprocessing.cpu_count() * 0.4))
-        else:
-            AMOUNT_OF_PROCESSES = np.maximum(1, int(multiprocessing.cpu_count() * 0.8))
+        AMOUNT_OF_PROCESSES = self.parent.get_process_limit()
         print("Running on {} processes max".format(AMOUNT_OF_PROCESSES))
 
         data = []

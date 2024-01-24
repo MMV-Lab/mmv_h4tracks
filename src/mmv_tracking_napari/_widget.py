@@ -1,4 +1,5 @@
 import napari
+import multiprocessing
 
 from qtpy.QtWidgets import (
     QWidget,
@@ -30,8 +31,8 @@ from napari.layers.labels.labels import Labels
 from napari.layers.tracks.tracks import Tracks
 
 from ._analysis import AnalysisWindow
+from ._evaluation import EvaluationWindow
 from ._logger import setup_logging, notify
-from ._processing import ProcessingWindow
 from ._reader import open_dialog, napari_get_reader
 from ._segmentation import SegmentationWindow
 from ._tracking import TrackingWindow
@@ -102,9 +103,6 @@ class MMVTracking(QWidget):
         logo_label.setAlignment(Qt.AlignCenter)
         title = QLabel("<h1><font color='green'>HITL4Trk</font></h1>")
         title.setMaximumHeight(100)
-        # self.loaded_file_name = QLabel()
-        # computation_mode = QLabel("Computation mode")
-        # computation_mode.setMaximumHeight(20)
         label_image = QLabel("Image:")
         label_segmentation = QLabel("Segmentation:")
         label_tracks = QLabel("Tracks:")
@@ -147,31 +145,47 @@ class MMVTracking(QWidget):
         line2.setFixedHeight(4)
         line2.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         line2.setStyleSheet("background-color: #c0c0c0")
+
+        # Spacers
         h_spacer_1 = QWidget()
-        h_spacer_1.setFixedHeight(4)
+        h_spacer_1.setFixedHeight(0)
         h_spacer_1.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        h_spacer_2 = QWidget()
+        h_spacer_2.setFixedHeight(4)
+        h_spacer_2.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        h_spacer_3 = QWidget()
+        h_spacer_3.setFixedHeight(0)
+        h_spacer_3.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        h_spacer_4 = QWidget()
+        h_spacer_4.setFixedHeight(4)
+        h_spacer_4.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        h_spacer_5 = QWidget()
+        h_spacer_5.setFixedHeight(4)
+        h_spacer_5.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
         # QGroupBoxes
         computation_mode = QGroupBox("Computation mode")
-        computation_mode.setLayout(QHBoxLayout())
-        computation_mode.layout().addWidget(self.rb_eco)
-        computation_mode.layout().addWidget(rb_heavy)
+        computation_mode.setLayout(QGridLayout())
+        computation_mode.layout().addWidget(h_spacer_1, 0, 0, 1, -1)
+        computation_mode.layout().addWidget(self.rb_eco, 1, 0)
+        computation_mode.layout().addWidget(rb_heavy, 1, 1)
         self.file_interaction = QGroupBox()
-        self.file_interaction.setLayout(QHBoxLayout())
-        self.file_interaction.layout().addWidget(btn_load)
-        self.file_interaction.layout().addWidget(btn_save)
-        self.file_interaction.layout().addWidget(btn_save_as)
+        self.file_interaction.setLayout(QGridLayout())
+        self.file_interaction.layout().addWidget(h_spacer_3, 0, 0, 1, -1)
+        self.file_interaction.layout().addWidget(btn_load, 1, 0)
+        self.file_interaction.layout().addWidget(btn_save, 1, 1)
+        self.file_interaction.layout().addWidget(btn_save_as, 1, 2)
 
         # QTabwidget
         tabwidget = QTabWidget()
-        # self.processing_window = ProcessingWindow(self)
-        # tabwidget.addTab(self.processing_window, "Data processing")
         self.segmentation_window = SegmentationWindow(self)
         tabwidget.addTab(self.segmentation_window, "Segmentation")
         self.tracking_window = TrackingWindow(self)
         tabwidget.addTab(self.tracking_window, "Tracking")
         self.analysis_window = AnalysisWindow(self)
         tabwidget.addTab(self.analysis_window, "Analysis")
+        self.evaluation_window = EvaluationWindow(self)
+        tabwidget.addTab(self.evaluation_window, "Evaluation")
 
         ### Organize objects via widgets
         # widget: parent widget of all content
@@ -180,12 +194,9 @@ class MMVTracking(QWidget):
         widget.layout().addWidget(logo_label, 0, 0, 1, 2)
         widget.layout().addWidget(title, 0, 2)
         widget.layout().addWidget(computation_mode, 1, 0, 1, -1)
-        widget.layout().addWidget(self.file_interaction, 2, 0, 1, -1)
-        # widget.layout().addWidget(self.loaded_file_name, 3, 0, 1, 2)
-        # widget.layout().addWidget(h_spacer_1, 3, 2, 1, -1)
-        # widget.layout().addWidget(btn_load, 4, 0)
-        # widget.layout().addWidget(btn_save, 4, 1)
-        # widget.layout().addWidget(btn_save_as, 4, 2)
+        widget.layout().addWidget(h_spacer_2, 2, 0, 1, -1)
+        widget.layout().addWidget(self.file_interaction, 3, 0, 1, -1)
+        widget.layout().addWidget(h_spacer_4, 4, 0, 1, -1)
         widget.layout().addWidget(line, 5, 0, 1, -1)
         widget.layout().addWidget(label_image, 6, 0)
         widget.layout().addWidget(self.combobox_image, 6, 1, 1, 2)
@@ -194,16 +205,21 @@ class MMVTracking(QWidget):
         widget.layout().addWidget(label_tracks, 8, 0)
         widget.layout().addWidget(self.combobox_tracks, 8, 1, 1, 2)
         widget.layout().addWidget(line2, 9, 0, 1, -1)
-        widget.layout().addWidget(tabwidget, 10, 0, 1, -1)
+        widget.layout().addWidget(h_spacer_5, 10, 0, 1, -1)
+        widget.layout().addWidget(tabwidget, 11, 0, 1, -1)
 
         # Scrollarea allows content to be larger than the assigned space (small monitor)
         scroll_area = QScrollArea()
         scroll_area.setWidget(widget)
         scroll_area.setWidgetResizable(True)
 
-        self.setMinimumSize(250, 300)
+        # self.setMinimumSize(250, 300)
         self.setLayout(QVBoxLayout())
         self.layout().addWidget(scroll_area)
+
+        self.setMinimumWidth(540)
+        self.setMinimumHeight(1080)
+
         self.viewer.layers.events.inserted.connect(self.add_entry_to_comboboxes)
         self.viewer.layers.events.removed.connect(self.remove_entry_from_comboboxes)
         for layer in self.viewer.layers:
@@ -527,3 +543,9 @@ class MMVTracking(QWidget):
     def _hotkey_track_single(self):
         if hasattr(MMVTracking.dock, "tracking_window"):
             MMVTracking.dock.tracking_window._add_auto_track_callback()
+
+    def get_process_limit(self):
+        if self.rb_eco.isChecked():
+            return max(1, int(multiprocessing.cpu_count() * 0.4))
+        else:
+            return max(1, int(multiprocessing.cpu_count() * 0.8))

@@ -5,6 +5,7 @@ from multiprocessing import Pool, Manager
 from threading import Event
 import json
 from pathlib import Path
+# import sys
 
 import napari
 import numpy as np
@@ -32,293 +33,17 @@ from ._logger import choice_dialog, notify, handle_exception
 CUSTOM_MODEL_PREFIX = "custom_"
 
 
-class ProcessingWindow(QWidget):
+def _adjust_ids(widget):  # ?? ich weiß, ist noch zu tun, aber ich vermute stark, dass dann Kommentare hilfreich sein werden :D
     """
-    A (QWidget) window to run processing steps on the data. Contains segmentation and tracking.
-
-    Attributes
-    ----------
-    viewer : Viewer
-        The Napari viewer instance
-
-    Methods
-    -------
-    run_segmentation()
-        Run segmentation on the raw image data
-    run_demo_segmentation()
-        Run the segmentation on the first 5 layers only
-    run_tracking()
-        Run tracking on the segmented cells
-    adjust_ids()
-        Replaces track ID 0 & adjusts segmentation IDs to match track IDs
+    Replaces track ID 0. Also adjusts segmentation IDs to match track IDs
     """
+    raise NotImplementedError("Not implemented yet!")
+    print("Adjusting segmentation IDs")
+    QApplication.setOverrideCursor(Qt.WaitCursor)
 
-    dock = None  # ?? ich vermute, kluge Menschen wissen, was das hier macht. Braucht keinen Kommentar, aber interessieren würde es mich trotzdem
-
-    # !! Attribut für selbstverweis. Wird für hotkeys benutzt
-    def __init__(self, parent):
-        """
-        Parameters
-        ----------
-        viewer : Viewer
-            The Napari viewer instance
-        parent : QWidget
-            The parent widget
-        """
-        super().__init__()
-        self.setLayout(QVBoxLayout())
-        self.setWindowTitle("Data processing")
-        self.parent = parent
-        self.viewer = parent.viewer
-        ProcessingWindow.dock = self
-        self.choice_event = Event()
-        try:
-            self.setStyleSheet(napari.qt.get_stylesheet(theme="dark"))
-        except TypeError:
-            self.setStyleSheet(napari.qt.get_stylesheet(theme_id="dark"))
-
-        self.custom_models: dict
-
-        ### QObjects
-        # Labels
-        label_tracking = QLabel("Tracking")
-
-        # Buttons
-        btn_track = QPushButton("Run Tracking")
-        btn_adjust_seg_ids = QPushButton("Initiate color lock")
-        btn_adjust_seg_ids.setToolTip("WARNING: This will take a while")
-
-        btn_track.clicked.connect(self._run_tracking)
-        btn_adjust_seg_ids.clicked.connect(self._adjust_ids)
-
-        # Horizontal lines
-        line = QWidget()
-        line.setFixedHeight(4)
-        line.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        line.setStyleSheet("background-color: #c0c0c0")
-
-        ### Organize objects via widgets
-        content = QWidget()
-        content.setLayout(QGridLayout())
-
-        content.layout().addWidget(line, 4, 0, 1, -1)
-        content.layout().addWidget(label_tracking, 5, 0, 1, -1)
-        content.layout().addWidget(btn_track, 6, 0, 1, -1)
-        content.layout().addWidget(btn_adjust_seg_ids, 7, 0, 1, -1)
-
-        self.layout().addWidget(content)
-
-    def _add_tracks_to_viewer(self, params):
-        """
-        Adds the tracks as a layer to the viewer with a specified name
-
-        Parameters
-        ----------
-        tracks : array
-            the tracks data to add to the viewer
-        """
-        # check if tracks are usable
-        tracks, layername = params
-        try:
-            tracks_layer = grab_layer(
-                self.viewer, self.parent.combobox_tracks.currentText()
-            )
-        except ValueError as exc:
-            if str(exc) == "Layer name can not be blank":
-                self.viewer.add_tracks(tracks, name=layername)
-            else:
-                handle_exception(exc)
-                return
-        else:
-            tracks_layer.data = tracks
-        self.parent.combobox_tracks.setCurrentText(layername)
-        print("Added tracks to viewer")
-
-    def _run_tracking(self):
-        """
-        Calls the tracking function
-        """
-        print("Calling tracking")
-
-        def on_yielded(value):
-            if value == "Replace tracks layer":
-                ret = choice_dialog(
-                    "Tracks layer found. Do you want to replace it?",
-                    [QMessageBox.Yes, QMessageBox.No],
-                )
-                if ret == 16384:
-                    self.ret = ret
-                    self.choice_event.set()
-                else:
-                    worker.quit()
-
-        worker = self._track_segmentation()
-        worker.returned.connect(self._add_tracks_to_viewer)
-        worker.yielded.connect(on_yielded)
-
-    @thread_worker(connect={"errored": handle_exception})
-    def _track_segmentation(self):
-        print("Running tracking")
-        QApplication.setOverrideCursor(Qt.WaitCursor)
-        try:
-            data = self._get_segmentation_data()
-        except ValueError as exc:
-            handle_exception(exc)
-            return
-
-        # check for tracks layer
-        tracks_name = self._check_for_tracks_layer()
-
-        AMOUNT_OF_PROCESSES = self._calculate_processes_limit()
-        print(f"Running on {AMOUNT_OF_PROCESSES} processes max")
-
-        extended_centroids = self._calculate_centroids_parallel(data)
-        matches = self._match_centroids_parallel(extended_centroids)
-
-        tracks = self._process_matches(matches)
-
-        QApplication.restoreOverrideCursor()
-        return tracks, tracks_name
-
-    def _get_segmentation_data(self):
-        try:
-            return grab_layer(
-                self.viewer, self.parent.combobox_segmentation.currentText()
-            ).data
-        except ValueError as exc:
-            raise ValueError("Segmentation layer not found in viewer") from exc
-
-    def _check_for_tracks_layer(self):
-        tracks_name = "Tracks"
-        try:
-            tracks_layer = grab_layer(
-                self.viewer, self.parent.combobox_tracks.currentText()
-            )
-        except ValueError:
-            pass
-        else:
-            QApplication.restoreOverrideCursor()
-            yield "Replace tracks layer"
-            self.choice_event.wait()
-            self.choice_event.clear()
-            ret = self.ret
-            del self.ret
-            print(ret)
-            QApplication.setOverrideCursor(Qt.WaitCursor)
-            if ret == 65536:
-                QApplication.restoreOverrideCursor()
-                return
-            tracks_name = tracks_layer.name
-        return tracks_name
-
-    def _calculate_processes_limit(self):
-        if self.parent.rb_eco.isChecked():
-            return max(1, int(multiprocessing.cpu_count() * 0.4))
-        else:
-            return max(1, int(multiprocessing.cpu_count() * 0.8))
-
-    def _calculate_centroids_parallel(self, data):
-        with Pool(self._calculate_processes_limit()) as p:
-            return p.map(calculate_centroids, data)
-
-    def _match_centroids_parallel(self, extended_centroids):
-        slice_pairs = [
-            (extended_centroids[i - 1], extended_centroids[i])
-            for i in range(1, len(extended_centroids))
-        ]
-        with Pool(self._calculate_processes_limit()) as p:
-            return p.map(match_centroids, (slice_pairs))
-
-    def _process_matches(self, matches):
-        # Initialize variables to store tracks, unique ID and visited cells
-        tracks = np.array([])
-        next_id = 0
-        visited = [[0] * len(matches[i]) for i in range(len(matches))]
-
-        # Helper function to append entry to tracks
-        def process_entry(entry, tracks):
-            try:
-                tracks = np.append(tracks, np.array([entry]), axis=0)
-            except ValueError:
-                tracks = np.array([entry])
-            return tracks
-
-        # Create an iterator to traverse through all slices and cells
-        iterator = iter(
-            ((i, j) for i in range(len(visited)) for j in range(len(visited[i])))
-        )
-
-        # Iterate through slices and cells
-        for slice_id, cell_id in iterator:
-            if visited[slice_id][cell_id]:
-                continue
-
-            # Extract centroid information for parent and child cells
-            entry = [
-                next_id,
-                slice_id,
-                int(matches[slice_id][cell_id]["parent"]["centroid"][0]),
-                int(matches[slice_id][cell_id]["parent"]["centroid"][1]),
-            ]
-            tracks = process_entry(entry, tracks)
-
-            entry = [
-                next_id,
-                slice_id + 1,
-                int(matches[slice_id][cell_id]["child"]["centroid"][0]),
-                int(matches[slice_id][cell_id]["child"]["centroid"][1]),
-            ]
-            tracks = process_entry(entry, tracks)
-
-            if next_id == 14 or next_id == 56:
-                print(f"relevant id: {next_id}")
-
-            visited[slice_id][cell_id] = 1
-            label = matches[slice_id][cell_id]["child"]["id"]
-
-            # Iterate through subsequent slices to complete the track
-            while True:
-                if slice_id + 1 >= len(matches):
-                    break
-                labels = [
-                    matches[slice_id + 1][matched_cell]["parent"]["id"]
-                    for matched_cell in range(len(matches[slice_id + 1]))
-                ]
-
-                if not label in labels:
-                    break
-
-                match_number = labels.index(label)
-                visited[slice_id + 1][match_number] = 1
-                entry = [
-                    next_id,
-                    slice_id + 2,
-                    int(matches[slice_id + 1][match_number]["child"]["centroid"][0]),
-                    int(matches[slice_id + 1][match_number]["child"]["centroid"][1]),
-                ]
-                tracks = process_entry(entry, tracks)
-                label = matches[slice_id + 1][match_number]["child"]["id"]
-
-                slice_id += 1
-
-            next_id += 1
-
-        return tracks.astype(int)
-
-    def _adjust_ids(
-        self,
-    ):  # ?? ich weiß, ist noch zu tun, aber ich vermute stark, dass dann Kommentare hilfreich sein werden :D
-        """
-        Replaces track ID 0. Also adjusts segmentation IDs to match track IDs
-        """
-        raise NotImplementedError("Not implemented yet!")
-        print("Adjusting segmentation IDs")
-        QApplication.setOverrideCursor(Qt.WaitCursor)
-        import sys
-
-        np.set_printoptions(threshold=sys.maxsize)
-        print(self.viewer.layers[self.viewer.layers.index("Tracks")].data)
-        QApplication.restoreOverrideCursor()
+    np.set_printoptions(threshold=sys.maxsize)
+    print(widget.viewer.layers[widget.viewer.layers.index("Tracks")].data)
+    QApplication.restoreOverrideCursor()
 
 
 def segment_slice_cpu(
@@ -543,14 +268,7 @@ def _segment_image(widget, demo=False):
         print("can't gpu")
 
         # set process limit
-        if widget.parent.rb_eco.isChecked():
-            AMOUNT_OF_PROCESSES = np.maximum(
-                1, int(multiprocessing.cpu_count() * 0.4)
-            )
-        else:
-            AMOUNT_OF_PROCESSES = np.maximum(
-                1, int(multiprocessing.cpu_count() * 0.8)
-            )
+        AMOUNT_OF_PROCESSES = self.parent.get_process_limit()
         print("Running on {} processes max".format(AMOUNT_OF_PROCESSES))
 
         data_with_parameters = [(layer_slice, parameters) for layer_slice in data]
@@ -599,4 +317,179 @@ def _get_parameters(widget, model: str):
         )
 
     return params
+
+@thread_worker(connect={"errored": handle_exception})
+def _track_segmentation(widget):
+    print("Running tracking")
+    QApplication.setOverrideCursor(Qt.WaitCursor)
+    try:
+        data = _get_segmentation_data()
+    except ValueError as exc:
+        handle_exception(exc)
+        return
+
+    # check for tracks layer
+    tracks_name = _check_for_tracks_layer()
+
+    AMOUNT_OF_PROCESSES = _calculate_processes_limit(widget)
+    print(f"Running on {AMOUNT_OF_PROCESSES} processes max")
+
+    extended_centroids = _calculate_centroids_parallel(data)
+    matches = _match_centroids_parallel(extended_centroids)
+
+    tracks = _process_matches(matches)
+
+    QApplication.restoreOverrideCursor()
+    return tracks, tracks_name
+
+def _get_segmentation_data(widget):
+    try:
+        return grab_layer(
+            widget.viewer, widget.parent.combobox_segmentation.currentText()
+        ).data
+    except ValueError as exc:
+        raise ValueError("Segmentation layer not found in viewer") from exc
+
+def _add_tracks_to_viewer(widget, params):
+    """
+    Adds the tracks as a layer to the viewer with a specified name
+
+    Parameters
+    ----------
+    tracks : array
+        the tracks data to add to the viewer
+    """
+    # check if tracks are usable
+    tracks, layername = params
+    try:
+        tracks_layer = grab_layer(
+            widget.viewer, widget.parent.combobox_tracks.currentText()
+        )
+    except ValueError as exc:
+        if str(exc) == "Layer name can not be blank":
+            widget.viewer.add_tracks(tracks, name=layername)
+        else:
+            handle_exception(exc)
+            return
+    else:
+        tracks_layer.data = tracks
+    widget.parent.combobox_tracks.setCurrentText(layername)
+    print("Added tracks to viewer")
+
+def _check_for_tracks_layer(widget):
+    tracks_name = "Tracks"
+    try:
+        tracks_layer = grab_layer(
+            widget.viewer, widget.parent.combobox_tracks.currentText()
+        )
+    except ValueError:
+        pass
+    else:
+        QApplication.restoreOverrideCursor()
+        yield "Replace tracks layer"
+        widget.choice_event.wait()
+        widget.choice_event.clear()
+        ret = widget.ret
+        del widget.ret
+        print(ret)
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        if ret == 65536:
+            QApplication.restoreOverrideCursor()
+            return
+        tracks_name = tracks_layer.name
+    return tracks_name
+
+def _calculate_processes_limit(widget):
+    if widget.parent.rb_eco.isChecked():
+        return max(1, int(multiprocessing.cpu_count() * 0.4))
+    else:
+        return max(1, int(multiprocessing.cpu_count() * 0.8))
+
+def _calculate_centroids_parallel(data):
+    with Pool(_calculate_processes_limit()) as p:
+        return p.map(calculate_centroids, data)
+
+def _match_centroids_parallel(extended_centroids):
+    slice_pairs = [
+        (extended_centroids[i - 1], extended_centroids[i])
+        for i in range(1, len(extended_centroids))
+    ]
+    with Pool(_calculate_processes_limit()) as p:
+        return p.map(match_centroids, (slice_pairs))
+
+def _process_matches(matches):
+    # Initialize variables to store tracks, unique ID and visited cells
+    tracks = np.array([])
+    next_id = 0
+    visited = [[0] * len(matches[i]) for i in range(len(matches))]
+
+    # Helper function to append entry to tracks
+    def process_entry(entry, tracks):
+        try:
+            tracks = np.append(tracks, np.array([entry]), axis=0)
+        except ValueError:
+            tracks = np.array([entry])
+        return tracks
+
+    # Create an iterator to traverse through all slices and cells
+    iterator = iter(
+        ((i, j) for i in range(len(visited)) for j in range(len(visited[i])))
+    )
+
+    # Iterate through slices and cells
+    for slice_id, cell_id in iterator:
+        if visited[slice_id][cell_id]:
+            continue
+
+        # Extract centroid information for parent and child cells
+        entry = [
+            next_id,
+            slice_id,
+            int(matches[slice_id][cell_id]["parent"]["centroid"][0]),
+            int(matches[slice_id][cell_id]["parent"]["centroid"][1]),
+        ]
+        tracks = process_entry(entry, tracks)
+
+        entry = [
+            next_id,
+            slice_id + 1,
+            int(matches[slice_id][cell_id]["child"]["centroid"][0]),
+            int(matches[slice_id][cell_id]["child"]["centroid"][1]),
+        ]
+        tracks = process_entry(entry, tracks)
+
+        if next_id == 14 or next_id == 56:
+            print(f"relevant id: {next_id}")
+
+        visited[slice_id][cell_id] = 1
+        label = matches[slice_id][cell_id]["child"]["id"]
+
+        # Iterate through subsequent slices to complete the track
+        while True:
+            if slice_id + 1 >= len(matches):
+                break
+            labels = [
+                matches[slice_id + 1][matched_cell]["parent"]["id"]
+                for matched_cell in range(len(matches[slice_id + 1]))
+            ]
+
+            if not label in labels:
+                break
+
+            match_number = labels.index(label)
+            visited[slice_id + 1][match_number] = 1
+            entry = [
+                next_id,
+                slice_id + 2,
+                int(matches[slice_id + 1][match_number]["child"]["centroid"][0]),
+                int(matches[slice_id + 1][match_number]["child"]["centroid"][1]),
+            ]
+            tracks = process_entry(entry, tracks)
+            label = matches[slice_id + 1][match_number]["child"]["id"]
+
+            slice_id += 1
+
+        next_id += 1
+
+    return tracks.astype(int)
 

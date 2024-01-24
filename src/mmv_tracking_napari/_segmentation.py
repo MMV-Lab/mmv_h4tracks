@@ -9,6 +9,7 @@ from qtpy.QtWidgets import (
     QLabel,
     QPushButton,
     QGridLayout,
+    QSizePolicy,
     QApplication,
 )
 from qtpy.QtCore import Qt
@@ -93,27 +94,41 @@ class SegmentationWindow(QWidget):
         # QCheckBoxes
         self.checkbox_preview = QCheckBox("Preview")
 
+        # Spacer
+        v_spacer = QWidget()
+        v_spacer.setFixedWidth(4)
+        v_spacer.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
+        h_spacer_1 = QWidget()
+        h_spacer_1.setFixedHeight(0)
+        h_spacer_1.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        h_spacer_2 = QWidget()
+        h_spacer_2.setFixedHeight(0)
+        h_spacer_2.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+
         # QGroupBoxes
         automatic_segmentation = QGroupBox("Automatic Segmentation")
         automatic_segmentation.setLayout(QGridLayout())
-        automatic_segmentation.layout().addWidget(self.combobox_segmentation, 0, 0, 1, 1)
-        automatic_segmentation.layout().addWidget(self.btn_segment, 0, 1, 1, 1)
-        automatic_segmentation.layout().addWidget(self.checkbox_preview, 0, 2, 1, 1)
-        automatic_segmentation.layout().addWidget(self.btn_add_custom_model, 1, 0, 1, -1)
+        automatic_segmentation.layout().addWidget(h_spacer_1, 0, 0, 1, -1)
+        automatic_segmentation.layout().addWidget(self.combobox_segmentation, 1, 0, 1, 1)
+        automatic_segmentation.layout().addWidget(self.btn_segment, 1, 1, 1, 1)
+        automatic_segmentation.layout().addWidget(self.checkbox_preview, 1, 2, 1, 1)
+        automatic_segmentation.layout().addWidget(self.btn_add_custom_model, 2, 0, 1, -1)
 
         segmentation_correction = QGroupBox("Segmentation Correction")
         segmentation_correction.setLayout(QGridLayout())
-        segmentation_correction.layout().addWidget(btn_false_positive, 0, 0)
-        segmentation_correction.layout().addWidget(btn_free_label, 1, 0)
-        segmentation_correction.layout().addWidget(btn_grab_label, 1, 1)
-        segmentation_correction.layout().addWidget(btn_false_cut, 2, 0)
-        segmentation_correction.layout().addWidget(btn_false_merge, 2, 1)
+        segmentation_correction.layout().addWidget(h_spacer_2, 0, 0, 1, -1)
+        segmentation_correction.layout().addWidget(btn_false_positive, 1, 0)
+        segmentation_correction.layout().addWidget(btn_free_label, 2, 0)
+        segmentation_correction.layout().addWidget(btn_grab_label, 2, 1)
+        segmentation_correction.layout().addWidget(btn_false_cut, 3, 0)
+        segmentation_correction.layout().addWidget(btn_false_merge, 3, 1)
 
         ### Organize objects via widgets
         content = QWidget()
         content.setLayout(QVBoxLayout())
         content.layout().addWidget(automatic_segmentation)
         content.layout().addWidget(segmentation_correction)
+        content.layout().addWidget(v_spacer)
 
         self.layout().addWidget(content)
 
