@@ -1,4 +1,4 @@
-We are actively working on the documentation
+**We are actively working on the documentation**
 
 # mmv-tracking-napari
 
@@ -94,7 +94,7 @@ The plugin supports the calculation of various metrics, which can be divided int
 
 To be aware of the accuracy of your automatic tracking and segmentation results, we have implemented an evaluation function based on [this manuscript](https://doi.org/10.1371/journal.pone.0144959). Evaluation is always carried out against the latest results of automatic segmentation and automatic tracking or previously created results loaded via the plugin's own load function. We may implement the option to evaluate external segmentations in the future, but for now you can use save and load as a workaround.
 
-To evaluate results, at least 2 consecutive frames must first be corrected manually. The plugin saves the previously mentioned automatic or loaded results in the background, so no activation via button or similar is necessary for manual correction.
+To evaluate results, at least 2 consecutive frames must first be corrected manually. The plugin saves the previously mentioned automatic or loaded results in the background, so no activation via button or similar is necessary before manual correction.
 
 (...)
 
@@ -123,6 +123,13 @@ added edge:
 	
 deleted edge:
 	check if a connection in eval has both cells matched in gt & the matched cells are connected. if no, then de
+
+
+## Hotkeys
+
+Here's an overview of the hotkeys. All of them can also be found in the corresponding tooltips. 
+
+- `?` - ? 
 
 ## Development plan
 
