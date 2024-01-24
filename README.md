@@ -60,6 +60,8 @@ For segmentation, we use the state of the art instance segmentation method Cellp
 
 #### Automatic instance segmentation
 
+(...)
+
 ##### Custom models
 
 The plugin supports loading custom Cellpose models. To train your own Cellpose model, [this](https://cellpose.readthedocs.io/en/latest/train.html) might be helpful.
@@ -69,7 +71,7 @@ In future versions, we plan to support fine-tuning of Cellpose models within the
 
 #### Manual curation
 
-
+(...)
 
 ### Tracking
 
@@ -80,6 +82,8 @@ In our experience, coordinate-based tracking has proven itself in cases with rel
 
 #### Manual curation
 
+(...)
+
 ### Analysis
 
 The plugin supports the calculation of various metrics, which can be divided into two categories: migration-based (such as speed, direction, ...) and cell-based (such as size, eccentricity, ...). Through the use of these metrics, a comprehensive understanding of the available data can be obtained.
@@ -88,9 +92,55 @@ The plugin supports the calculation of various metrics, which can be divided int
 
 ### Evaluation
 
+To be aware of the accuracy of your automatic tracking and segmentation results, we have implemented an evaluation function based on [this manuscript](https://doi.org/10.1371/journal.pone.0144959). Evaluation is always carried out against the latest results of automatic segmentation and automatic tracking or previously created results loaded via the plugin's own load function. We may implement the option to evaluate external segmentations in the future, but for now you can use save and load as a workaround.
+
+To evaluate results, at least 2 consecutive frames must first be corrected manually. The plugin saves the previously mentioned automatic or loaded results in the background, so no activation via button or similar is necessary for manual correction.
 
 (...)
 
+
+#### Segmentation evaluation
+
+(...)
+
+#### Tracking evaluation
+
+(...)
+
+false positives:
+	check if cell from eval has a match > .4 IoU. If no, check if cell has second highest match >= .2 IoU. If no, then fp
+	
+false negatives:
+	check if cell from gt has a match > .4. If no, then fn 
+	check if matched cell maxIoU is higher than match. If yes, then fn
+	ckeck if matched cell top 2 maxIoU are equal. If yes, then half fn (this will apply for both cells)
+	
+split cell:
+	check if cell from eval has more than one match, and if second highest match is >= .2 IoU. If yes, then sc
+	
+added edge:
+	check if a connection in gt has both cells matched in eval & the matched cells are connected. if no, then ae
+	
+deleted edge:
+	check if a connection in eval has both cells matched in gt & the matched cells are connected. if no, then de
+
+## Development plan
+
+We will continue to develop the plugin and implement new features in the future. Some of our plans in arbitrary order:
+
+- Support of lineages
+- Support training custom Cellpose models within the plugin
+- Model optimization to further optimize segmentation computation
+- Support evaluation of external segmentations
+- ...
+
+If you have a feature request, please [file an issue].
+
+## Resources
+
+The following resources may be of interest:
+
+- [Cellpose]()
 
 ## Contributing
 
@@ -123,39 +173,3 @@ If you encounter any problems, please [file an issue] along with a detailed desc
 [tox]: https://tox.readthedocs.io/en/latest/
 [pip]: https://pypi.org/project/pip/
 [PyPI]: https://pypi.org/
-
-## Notes
-
-false positives:
-	check if cell from eval has a match > .4 IoU. If no, check if cell has second highest match >= .2 IoU. If no, then fp
-	
-false negatives:
-	check if cell from gt has a match > .4. If no, then fn 
-	check if matched cell maxIoU is higher than match. If yes, then fn
-	ckeck if matched cell top 2 maxIoU are equal. If yes, then half fn (this will apply for both cells)
-	
-split cell:
-	check if cell from eval has more than one match, and if second highest match is >= .2 IoU. If yes, then sc
-	
-added edge:
-	check if a connection in gt has both cells matched in eval & the matched cells are connected. if no, then ae
-	
-deleted edge:
-	check if a connection in eval has both cells matched in gt & the matched cells are connected. if no, then de
-
-## Development plan
-
-We will continue to develop the plugin and implement new features in the future. Some of our plans in arbitrary order:
-
-- Support of lineages
-- Support training custom Cellpose models within the plugin
-- Model optimization to further optimize segmentation computation
-- ...
-
-If you have a feature request, please [file an issue].
-
-## Resources
-
-The following resources may be of interest:
-
-- [Cellpose]()
