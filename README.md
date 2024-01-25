@@ -71,6 +71,8 @@ In future versions, we plan to support fine-tuning of Cellpose models within the
 
 #### Manual curation
 
+Be aware that removing a cell cuts the track the cell is on. Resulting tracks shorter than two timesteps will be removed
+
 (...)
 
 ### Tracking
