@@ -113,7 +113,7 @@ false positives:
 	check if cell from eval has a match > .4 IoU. If no, check if cell has second highest match >= .2 IoU. If no, then fp
 	
 false negatives:
-	check if cell from gt has a match > .4. If no, then fn 
+	check if cell from gt has a match > .4. If no, then fn.
 	check if matched cell maxIoU is higher than match. If yes, then fn.
 	check if matched cell top 2 maxIoU are equal. If yes, then half fn (this will apply for both cells)
 	
