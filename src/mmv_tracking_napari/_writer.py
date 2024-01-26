@@ -25,18 +25,14 @@ def save_dialog(parent, filetype="*.zarr", directory=""):
     str
         Path of selected file
     """
-    print("Prompting user to select save location")
     dialog = QFileDialog()
     dialog.setNameFilter(filetype)
     filetype_name = filetype[2:].capitalize()
-    print("Showing dialog")
     filepath = dialog.getSaveFileName(
         parent,
         f"Select location for {filetype_name}-File to be created",
         directory,
     )
-    print("Dialog has been closed")
-    print(f"Selected {filepath} as path")
     return filepath
 
 
@@ -56,11 +52,8 @@ def save_zarr(parent, zarr_file, layers, cached_tracks):
         The complete tracks layer
     """
 
-    print("Saving to file")
-
     response = 1    # ?? das wird so passen mit Zeile 64, aber vlt. kannst du mir das nochmal kurz erklären
     if not np.array_equal(layers[2].data, cached_tracks):
-        print("Difference between displayed and full tracks detected")
         response = choice_dialog(
             (
                 "It looks like you have selected only some of the tracks from your tracks layer. "
@@ -73,18 +66,13 @@ def save_zarr(parent, zarr_file, layers, cached_tracks):
             ],
         )
         if response == 4194304: # ?? ich nehme den return Wert mal so hin :D Aber vlt. gehen wir das trotzdem hier nochmal zusammen durch
-            print("Saving cancelled")
             return
 
     tracks = cached_tracks
     if response == 0:
-        print("Saving currently displayed tracks")
         tracks = layers[2]
-    else:
-        print("Saving complete tracks")
 
     if zarr_file == None:
-        print("No zarr file passed, prompting for new file location")
         file = save_dialog(parent, "*.zarr")
         zarr_file = zarr.open(file, mode="w")
         zarr_file.create_dataset(
@@ -103,12 +91,10 @@ def save_zarr(parent, zarr_file, layers, cached_tracks):
             "tracking_data", shape=tracks.shape, dtype="i4", data=tracks
         )
     else:
-        print("Saving to loaded zarr file")
         zarr_file["raw_data"][:] = layers[0].data
         zarr_file["segmentation_data"][:] = layers[1].data
         zarr_file["tracking_data"].resize(tracks.shape[0], tracks.shape[1])
         zarr_file["tracking_data"][:] = tracks
-    print("Saving to zarr successful")
     notify("Zarr file has been saved.")
 
 
@@ -127,4 +113,3 @@ def save_csv(file, data):
     writer = csv.writer(csvfile)
     [writer.writerow(row) for row in data]
     csvfile.close()
-    print("Export complete")

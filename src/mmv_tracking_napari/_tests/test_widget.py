@@ -44,10 +44,6 @@ def add_layers(viewer, amount, names=None):
         Names of the added layers
     """
     if names is None:
-    #     names = range(amount + 1)
-    # for i in range(0, amount):
-    #     viewer.add_labels(
-    #         np.random.randint(2, size=(1, 100, 100), dtype=int), name=names[i]
         names = range(1,3*amount+1)
     for i in range(amount):
         viewer.add_image(
@@ -83,8 +79,6 @@ def test_combobox_add_layer(viewer_with_widget, index):
     """
     widget = viewer_with_widget
     combobox = widget.layer_comboboxes[index]
-    # add_layers(widget.viewer, 1, ["New"])
-    # assert combobox.findText("New") == combobox.count() - 1
 
 
     names = ["IMAGE","LABELS","TRACKS"]
@@ -227,8 +221,6 @@ def test_moved_layer_order(viewer_with_widget, index, from_index, to_index):
     combobox = widget.layer_comboboxes[index]
     combobox.setCurrentIndex(5)
     layername = combobox.currentText()
-    # widget.viewer.layers.move(from_index, to_index)
-    # assert widget.viewer.layers.index(layername) + 1 == combobox.findText(layername)
 
 
     widget.viewer.layers.move(
@@ -257,7 +249,6 @@ def test_moved_layer_index_moved(viewer_with_widget, index):
     widget = viewer_with_widget
     combobox = widget.layer_comboboxes[index]
     combobox.setCurrentIndex(5)
-    # widget.viewer.layers.move(4, 2)
     widget.viewer.layers.move(index * 10 + 4, index * 10 + 2)
     assert combobox.currentIndex() == 3
 

@@ -53,15 +53,24 @@ class AnalysisWindow(QWidget):
         ### QObjects
 
         # Labels
-        label_min_movement = QLabel("Movement Minmum:")
-        label_min_duration = QLabel("Minimum Track Length:")
+        label_min_movement = QLabel("Movement minmum:")
+        label_min_movement.setToolTip("Sort exported tracks by smaller/larger than movement minimum in pixels")
+        label_min_duration = QLabel("Minimum track length:")
+        label_min_duration.setToolTip("Sort exported tracks by shorter/longer than minimum track length in timesteps")
         label_metric = QLabel("Metric:")
 
         # Buttons
         btn_plot = QPushButton("Plot")
         btn_export = QPushButton("Export")
 
-        btn_plot.setToolTip("Only displayed tracks are plotted")
+        btn_plot.setToolTip(
+            "Plot selected metric\n"
+            "Only displayed tracks are plotted"
+        )
+        btn_export.setToolTip(
+            "Export selected metrics as csv\n"
+            "All tracks are exported"
+        )
 
         btn_plot.clicked.connect(self._start_plot_worker)
         btn_export.clicked.connect(self._start_export_worker)
@@ -104,7 +113,9 @@ class AnalysisWindow(QWidget):
 
         # Line Edits
         self.lineedit_movement = QLineEdit("")
+        self.lineedit_movement.setMaximumWidth(40)
         self.lineedit_track_duration = QLineEdit("")
+        self.lineedit_track_duration.setMaximumWidth(40)
 
         # Spacer
         v_spacer = QWidget()
@@ -212,7 +223,6 @@ class AnalysisWindow(QWidget):
                 [tracks[np.where(tracks[:, 0] == unique_id)], segmentation]
             )
         AMOUNT_OF_PROCESSES = self.parent.get_process_limit()
-        print("Running on {} processes max".format(AMOUNT_OF_PROCESSES))
 
         with Pool(AMOUNT_OF_PROCESSES) as p:
             sizes = p.starmap(calculate_size_single_track, track_and_segmentation)
@@ -385,7 +395,6 @@ class AnalysisWindow(QWidget):
         btn_apply = QPushButton("Apply")
         btn_apply.clicked.connect(self.selector.apply)
         self.parent.plot_window.layout().addWidget(btn_apply)
-        print("Showing plot window")
         self.parent.plot_window.show()
 
     @thread_worker(connect={"errored": handle_exception})
@@ -407,14 +416,12 @@ class AnalysisWindow(QWidget):
         )
         retval = {"Name": metric}
         if metric == "Speed":
-            print("Plotting speed")
             retval.update(
                 {"Description": "Scatterplot Standard Deviation vs Average: Speed"}
             )
             retval.update({"x_label": "Average", "y_label": "Standard Deviation"})
             retval.update({"Results": self._calculate_speed(tracks_layer.data)})
         elif metric == "Size":
-            print("Plotting size")
             segmentation_layer = grab_layer(
                 self.viewer, self.parent.combobox_segmentation.currentText()
             )
@@ -430,19 +437,16 @@ class AnalysisWindow(QWidget):
                 }
             )
         elif metric == "Direction":
-            print("Plotting direction")
             retval.update({"Description": "Scatterplot: Travel direction & Distance"})
             retval.update({"Results": self._calculate_direction(tracks_layer.data)})
             retval.update({"x_label": "Δx", "y_label": "Δy"})
         elif metric == "Euclidean distance":
-            print("Plotting euclidean distance")
             retval.update({"Description": "Scatterplot x vs y"})
             retval.update({"x_label": "x", "y_label": "y"})
             retval.update(
                 {"Results": self._calculate_euclidean_distance(tracks_layer.data)}
             )
         elif metric == "Accumulated distance":
-            print("Plotting accumulated distance")
             retval.update({"Description": "Scatterplot x vs y"})
             retval.update({"x_label": "x", "y_label": "y"})
             retval.update(
@@ -454,20 +458,17 @@ class AnalysisWindow(QWidget):
         return retval
 
     def _start_export_worker(self):
-        print("Exporting")
         selected_metrics = []
         for checkbox in self.checkboxes:
             if checkbox.checkState():
                 selected_metrics.append(checkbox.text())
 
         if len(selected_metrics) == 0:
-            print("Export stopped due to no selected metric")
             return
 
         dialog = QFileDialog()
         file = dialog.getSaveFileName(filter="*.csv")
         if file[0] == "":
-            print("Export stopped due to no selected file")
             return
 
         worker = self._export(file, selected_metrics)
@@ -612,7 +613,6 @@ class AnalysisWindow(QWidget):
             )
 
             rows.append(["Cells matching the filters"])
-            # [rows.append(value) for value in valid_values]
             for value in valid_values:
                 rows.append(value)
 
@@ -849,7 +849,6 @@ class AnalysisWindow(QWidget):
                     )
 
                 directness = np.around(np.array(directness), 3)
-                # all_values.append(np.around(np.average(directness[:, 1]), 3))
                 all_values.append((np.average(directness[:, 1])))
                 valid_values.append(
                     np.around(

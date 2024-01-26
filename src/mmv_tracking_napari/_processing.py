@@ -5,7 +5,6 @@ from multiprocessing import Pool, Manager
 from threading import Event
 import json
 from pathlib import Path
-# import sys
 
 import napari
 import numpy as np
@@ -38,7 +37,6 @@ def _adjust_ids(widget):  # ?? ich weiß, ist noch zu tun, aber ich vermute star
     Replaces track ID 0. Also adjusts segmentation IDs to match track IDs
     """
     raise NotImplementedError("Not implemented yet!")
-    print("Adjusting segmentation IDs")
     QApplication.setOverrideCursor(Qt.WaitCursor)
 
     np.set_printoptions(threshold=sys.maxsize)
@@ -189,27 +187,21 @@ def read_models(widget):
     widget.combobox_segmentation.addItem("select model")
     widget.combobox_segmentation.addItems(custom_models)
 
-def _run_segmentation(widget):
+def run_segmentation(widget):
     """
     Calls segmentation without demo flag set
     """
-    print("Calling full segmentation")
-
     worker = _segment_image(widget)
     worker.returned.connect(_add_segmentation_to_viewer)
-    # worker.errored.connect(handle_exception)
-    # worker.start()
 
-def _run_demo_segmentation(widget):
+def run_demo_segmentation(widget):
     """
     Calls segmentation with the demo flag set
     """
-    print("Calling demo segmentation")
-
     worker = _segment_image(widget, True)
     worker.returned.connect(_add_segmentation_to_viewer)
 
-def _add_segmentation_to_viewer(widget, mask):
+def _add_segmentation_to_viewer(widget_and_mask):
     """
     Adds the segmentation as a layer to the viewer with a specified name
 
@@ -218,9 +210,9 @@ def _add_segmentation_to_viewer(widget, mask):
     mask : array
         the segmentation data to add to the viewer
     """
+    widget, mask = widget_and_mask
     labels = widget.viewer.add_labels(mask, name="calculated segmentation")
     widget.parent.combobox_segmentation.setCurrentText(labels.name)
-    print("Added segmentation to viewer")
         
 @thread_worker(connect={"errored": handle_exception})
 def _segment_image(widget, demo=False):
@@ -234,7 +226,6 @@ def _segment_image(widget, demo=False):
     Returns
     -------
     """
-    print("Running segmentation")
     QApplication.setOverrideCursor(Qt.WaitCursor)
 
     viewer = widget.viewer
@@ -247,15 +238,12 @@ def _segment_image(widget, demo=False):
         data = data[0:5]
 
     selected_model = widget.combobox_segmentation.currentText()
-
-    parameters = _get_parameters(selected_model)
+    parameters = _get_parameters(widget, selected_model)
 
     if core.use_gpu():
-        print("can gpu")
         model = models.CellposeModel(
             gpu=True, pretrained_model=parameters.pop("model_path")
         )
-        print(parameters)
         mask = []
         for layer_slice in data:
             layer_mask, _, _ = model.eval(
@@ -265,18 +253,14 @@ def _segment_image(widget, demo=False):
             mask.append(layer_mask)
         mask = np.array(mask)
     else:
-        print("can't gpu")
-
         # set process limit
-        AMOUNT_OF_PROCESSES = self.parent.get_process_limit()
-        print("Running on {} processes max".format(AMOUNT_OF_PROCESSES))
+        AMOUNT_OF_PROCESSES = widget.parent.get_process_limit()
 
         data_with_parameters = [(layer_slice, parameters) for layer_slice in data]
 
         with Pool(AMOUNT_OF_PROCESSES) as p:
             mask = p.starmap(segment_slice_cpu, data_with_parameters)
             mask = np.asarray(mask)
-            print("Done calculating segmentation")
 
     QApplication.restoreOverrideCursor()
     return widget, mask
@@ -320,7 +304,6 @@ def _get_parameters(widget, model: str):
 
 @thread_worker(connect={"errored": handle_exception})
 def _track_segmentation(widget):
-    print("Running tracking")
     QApplication.setOverrideCursor(Qt.WaitCursor)
     try:
         data = _get_segmentation_data()
@@ -332,7 +315,6 @@ def _track_segmentation(widget):
     tracks_name = _check_for_tracks_layer()
 
     AMOUNT_OF_PROCESSES = _calculate_processes_limit(widget)
-    print(f"Running on {AMOUNT_OF_PROCESSES} processes max")
 
     extended_centroids = _calculate_centroids_parallel(data)
     matches = _match_centroids_parallel(extended_centroids)
@@ -374,7 +356,6 @@ def _add_tracks_to_viewer(widget, params):
     else:
         tracks_layer.data = tracks
     widget.parent.combobox_tracks.setCurrentText(layername)
-    print("Added tracks to viewer")
 
 def _check_for_tracks_layer(widget):
     tracks_name = "Tracks"
@@ -383,20 +364,18 @@ def _check_for_tracks_layer(widget):
             widget.viewer, widget.parent.combobox_tracks.currentText()
         )
     except ValueError:
-        pass
-    else:
+        return tracks_name
+    QApplication.restoreOverrideCursor()
+    yield "Replace tracks layer"
+    widget.choice_event.wait()
+    widget.choice_event.clear()
+    ret = widget.ret
+    del widget.ret
+    QApplication.setOverrideCursor(Qt.WaitCursor)
+    if ret == 65536:
         QApplication.restoreOverrideCursor()
-        yield "Replace tracks layer"
-        widget.choice_event.wait()
-        widget.choice_event.clear()
-        ret = widget.ret
-        del widget.ret
-        print(ret)
-        QApplication.setOverrideCursor(Qt.WaitCursor)
-        if ret == 65536:
-            QApplication.restoreOverrideCursor()
-            return
-        tracks_name = tracks_layer.name
+        return
+    tracks_name = tracks_layer.name
     return tracks_name
 
 def _calculate_processes_limit(widget):
@@ -457,9 +436,6 @@ def _process_matches(matches):
             int(matches[slice_id][cell_id]["child"]["centroid"][1]),
         ]
         tracks = process_entry(entry, tracks)
-
-        if next_id == 14 or next_id == 56:
-            print(f"relevant id: {next_id}")
 
         visited[slice_id][cell_id] = 1
         label = matches[slice_id][cell_id]["child"]["id"]

@@ -1,5 +1,6 @@
 import napari
 import multiprocessing
+import warnings
 
 from qtpy.QtWidgets import (
     QWidget,
@@ -32,7 +33,7 @@ from napari.layers.tracks.tracks import Tracks
 
 from ._analysis import AnalysisWindow
 from ._evaluation import EvaluationWindow
-from ._logger import setup_logging, notify
+from ._logger import notify
 from ._reader import open_dialog, napari_get_reader
 from ._segmentation import SegmentationWindow
 from ._tracking import TrackingWindow
@@ -81,8 +82,6 @@ class MMVTracking(QWidget):
         self.viewer = viewer
         MMVTracking.dock = self
 
-        # setup_logging()
-
         ### QObjects
 
         # Logo
@@ -111,6 +110,7 @@ class MMVTracking(QWidget):
         btn_load = QPushButton("Load")
         btn_load.setToolTip("Load a Zarr file")
         btn_save = QPushButton("Save")
+        btn_save.setToolTip("Overwrite the loaded Zarr file")
         btn_save_as = QPushButton("Save as")
         btn_save_as.setToolTip("Save as a new Zarr file")
 
@@ -165,6 +165,14 @@ class MMVTracking(QWidget):
 
         # QGroupBoxes
         computation_mode = QGroupBox("Computation mode")
+        computation_mode_tooltip = (
+            "Select how much of your computer's resources napari should use for CPU-computing.<br>"
+            "<ul>"
+            "<li> Eco: Up to 40%</li>"
+            "<li> Regular: Up to 80%</li>"
+            "</ul>"
+        )
+        computation_mode.setToolTip(computation_mode_tooltip)
         computation_mode.setLayout(QGridLayout())
         computation_mode.layout().addWidget(h_spacer_1, 0, 0, 1, -1)
         computation_mode.layout().addWidget(self.rb_eco, 1, 0)
@@ -213,12 +221,20 @@ class MMVTracking(QWidget):
         scroll_area.setWidget(widget)
         scroll_area.setWidgetResizable(True)
 
-        # self.setMinimumSize(250, 300)
         self.setLayout(QVBoxLayout())
         self.layout().addWidget(scroll_area)
 
         self.setMinimumWidth(540)
-        self.setMinimumHeight(1080)
+        self.setMinimumHeight(900)
+        
+        hotkeys = self.viewer.keymap.keys()
+        custom_binds = [
+            ("E", self.hotkey_next_free),
+            ("S", self.hotkey_overlap_single_tracking),
+        ]
+        for custom_bind in custom_binds:
+            if not custom_bind[0] in hotkeys:
+                viewer.bind_key(*custom_bind)
 
         self.viewer.layers.events.inserted.connect(self.add_entry_to_comboboxes)
         self.viewer.layers.events.removed.connect(self.remove_entry_from_comboboxes)
@@ -234,6 +250,14 @@ class MMVTracking(QWidget):
                 self.rename_entry_in_comboboxes
             )  # doesn't contain index
         self.viewer.layers.events.moving.connect(self.reorder_entry_in_comboboxes)
+        
+    def hotkey_next_free(self, _):
+        label_layer = grab_layer(self.viewer, self.combobox_segmentation.currentText())
+        self.segmentation_window._set_label_id()
+        label_layer.mode = "paint"
+    
+    def hotkey_overlap_single_tracking(self, _):
+        self.tracking_window._add_auto_track_callback()
 
     def add_entry_to_comboboxes(self, event):
         if isinstance(event.value, Image):
@@ -323,40 +347,25 @@ class MMVTracking(QWidget):
         index = combobox.findText(current_item)
         combobox.setCurrentIndex(index)
 
-    """def apply_on_clicks(self, event):
-        for on_click in self.on_clicks:
-            layer = event.value
-            
-            @layer.mouse_drag_callbacks.append
-            on_click"""
-
     def _load(self):
         """
         Opens a dialog for the user to choose a zarr file to open. Checks if any layernames are blocked
         """
         QApplication.setOverrideCursor(Qt.WaitCursor)
-        print("Opening dialog")
         filepath = open_dialog(self)
-        print("Dialog is closed, retrieving reader")
         file_reader = napari_get_reader(filepath)
-        print("Got '{}' as file reader".format(file_reader))
-        import warnings
 
         try:
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
-                print("Reading file")
                 zarr_file = file_reader(filepath)
-                print("File has been read")
         except TypeError:
-            print("Could not read file")
             QApplication.restoreOverrideCursor()
             return
 
         # check all layer names
         for layername in zarr_file.__iter__():
             if layername in self.viewer.layers:
-                print("Detected layer with name {}".format(layername))
                 msg = QMessageBox()
                 msg.setWindowTitle("Layer already exists")
                 msg.setText("Found layer with name " + layername)
@@ -373,13 +382,11 @@ class MMVTracking(QWidget):
 
                 # Cancel
                 if ret == 4194304:
-                    print("Loading cancelled")
                     QApplication.restoreOverrideCursor()
                     return
 
                 # YesToAll -> Remove all layers with names in the file
                 if ret == 32768:
-                    print("Removing all layers with names in zarr from viewer")
                     for name in zarr_file.__iter__():
                         try:
                             self.viewer.layers.remove(name)
@@ -388,23 +395,15 @@ class MMVTracking(QWidget):
                     break
 
                 # Yes -> Remove this layer
-                print("removing layer {}".format(layername))
                 self.viewer.layers.remove(layername)
 
-        print("Adding layers")
         # add layers to viewer
-        # try:
         self.viewer.add_image(zarr_file["raw_data"][:], name="Raw Image")
         segmentation = zarr_file["segmentation_data"][:]
 
         self.viewer.add_labels(segmentation, name="Segmentation Data")
         # save tracks so we can delete one slice tracks first
         tracks = zarr_file["tracking_data"][:]
-        """except:
-            print(
-                "File does not have the right structure of raw_data, segmentation_data and tracking_data!"
-            )
-        else:"""
         # Filter track ids of tracks that just occur once
         count_of_track_ids = np.unique(tracks[:, 0], return_counts=True)
         filtered_track_ids = np.delete(
@@ -419,8 +418,6 @@ class MMVTracking(QWidget):
         )
         self.viewer.add_tracks(filtered_tracks, name="Tracks")
 
-        print("Layers have been added")
-
         self.zarr = zarr_file
         self.tracks = filtered_tracks
         self.initial_layers = [
@@ -431,7 +428,6 @@ class MMVTracking(QWidget):
         self.combobox_segmentation.setCurrentText("Segmentation Data")
         self.combobox_tracks.setCurrentText("Tracks")
         self.file_interaction.setTitle(Path(filepath).name)
-        # self.loaded_file_name.setText(Path(filepath).name)
         QApplication.restoreOverrideCursor()
 
     def _save(self):
@@ -443,44 +439,19 @@ class MMVTracking(QWidget):
             self.save_as()
             return
         raw_data = self.combobox_image.currentText()
-        """raw_data = layer_select(self, "Raw Image")
-        if not raw_data[1]:
-            return
-        raw_data = raw_data[0]"""
         raw_layer = grab_layer(self.viewer, raw_data)
         segmentation_data = self.combobox_segmentation.currentText()
-        """segmentation_data = layer_select(self, "Segmentation Data")
-        if not segmentation_data[1]:
-            return
-        segmentation_data = segmentation_data[0]"""
         segmentation_layer = grab_layer(self.viewer, segmentation_data)
         track_data = self.combobox_tracks.currentText()
-        """track_data = layer_select(self, "Tracks")
-        if not track_data[1]:
-            return
-        track_data = track_data[0]"""
         track_layer = grab_layer(self.viewer, track_data)
         layers = [raw_layer, segmentation_layer, track_layer]
         save_zarr(self, self.zarr, layers, self.tracks)
 
     def save_as(self):
         raw_name = self.combobox_image.currentText()
-        """raw = layer_select(self, "Raw Image")
-        if not raw[1]:
-            return
-        raw_name= raw[0]"""
         raw_data = grab_layer(self.viewer, raw_name).data
         segmentation_name = self.combobox_segmentation.currentText()
-        """segmentation = layer_select(self, "Segmentation Data")
-        if not segmentation[1]:
-            return
-        segmentation_name = segmentation[0]"""
         segmentation_data = grab_layer(self.viewer, segmentation_name).data
-        tracks_name = self.combobox_tracks.currentText()
-        """tracks = layer_select(self, "Tracks")
-        if not tracks[1]:
-            return
-        track_name = tracks[0]"""
         track_data = grab_layer(self.viewer, tracks_name).data
 
         dialog = QFileDialog()

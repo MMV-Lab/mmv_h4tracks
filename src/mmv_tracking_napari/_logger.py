@@ -6,20 +6,6 @@ from qtpy.QtWidgets import QMessageBox, QInputDialog, QApplication
 from napari.qt.threading import thread_worker
 
 
-def setup_logging():
-    """
-    Sets up for print to write to the log file
-    """
-    plugin_directory = Path(__file__).parent.parent.parent.absolute()
-    print(plugin_directory)
-    path = plugin_directory / "hitl4trk.log"
-    with open(path, "w", encoding="utf-8") as file:
-        #file = open(path, "w")
-        sys.stdout = file
-        sys.stderr = file
-    print("Logging initialized")
-
-
 def notify(text):
     """
     Shows a notification dialog
@@ -32,7 +18,6 @@ def notify(text):
     msg = QMessageBox()
     msg.setWindowTitle("napari")
     msg.setText(text)
-    print(f"Notifying user: '{text}'")
     msg.exec()
 
 @thread_worker
@@ -70,7 +55,6 @@ def choice_dialog(text, choices):
             msg.addButton(choice[0], choice[1])
         else:
             msg.addButton(choice)
-    print(f"Prompting user: '{text}'")
     return msg.exec()
 
 

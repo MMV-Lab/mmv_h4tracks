@@ -1,5 +1,4 @@
 import multiprocessing
-#import platform
 from multiprocessing import Pool
 from threading import Event
 
@@ -61,6 +60,8 @@ class TrackingWindow(QWidget):
             self.setStyleSheet(napari.qt.get_stylesheet(theme="dark"))
         except TypeError:
             self.setStyleSheet(napari.qt.get_stylesheet(theme_id="dark"))
+            
+        self.cached_callback = None
 
         ### QObjects
 
@@ -69,9 +70,23 @@ class TrackingWindow(QWidget):
         label_delete_specific_ids = QLabel("Delete specified tracks:")
 
         # Buttons
-        btn_centroid_tracking = QPushButton("Centroid based tracking")
-        btn_auto_track_all = QPushButton("Overlap based tracking")
-        btn_auto_track = QPushButton("Overlap based tracking single")
+        btn_centroid_tracking = QPushButton("Coordinate-based tracking")
+        btn_centroid_tracking_tooltip = (
+            "Start coordinate-based tracking for all slices\n"
+            "Faster than the overlap-based tracking\n"
+            "More tracks will be created, can track complex migration\n"
+            "Tracks may jump between cells if given imperfect segmentation"
+        )
+        btn_centroid_tracking.setToolTip(btn_centroid_tracking_tooltip)
+        btn_auto_track_all = QPushButton("Overlap-based tracking")
+        btn_auto_track_all_tooltip = (
+            "Start overlap-based tracking for all slices\n"
+            "Slower than the coordinate-based tracking\n"
+            "Less tracks will be created, but tracks are less likely to be incorrect\n"
+        )
+        btn_auto_track_all.setToolTip(btn_auto_track_all_tooltip)
+        btn_auto_track = QPushButton("Overlap-based tracking (single cell)")
+        btn_auto_track.setToolTip("Click on a cell to track based on overlap")
 
         self.btn_remove_correspondence = QPushButton(UNLINK_TEXT)
         self.btn_remove_correspondence.setToolTip("Remove cells from their tracks")
@@ -128,17 +143,17 @@ class TrackingWindow(QWidget):
         tracking_correction.layout().addWidget(self.btn_insert_correspondence, 1, 0)
         tracking_correction.layout().addWidget(self.btn_remove_correspondence, 1, 1)
 
-        filter_tracks = QGroupBox("Filter tracks with lots of love and happiness")
+        filter_tracks = QGroupBox("Visualize && filter tracks")
         filter_tracks.setLayout(QGridLayout())
         filter_tracks.layout().addWidget(h_spacer_3, 0, 0, 1, -1)
         filter_tracks.layout().addWidget(label_display_ids, 2, 0)
         filter_tracks.layout().addWidget(self.lineedit_filter, 2, 1)
         filter_tracks.layout().addWidget(btn_filter_tracks, 2, 2)
         filter_tracks.layout().addWidget(h_spacer_4, 3, 2, 1, -1)
-        filter_tracks.layout().addWidget(btn_delete_displayed_tracks, 4, 0, 1, -1)
-        filter_tracks.layout().addWidget(label_delete_specific_ids, 5, 0)
-        filter_tracks.layout().addWidget(self.lineedit_delete, 5, 1)
-        filter_tracks.layout().addWidget(btn_delete_selected_tracks, 5, 2)
+        filter_tracks.layout().addWidget(label_delete_specific_ids, 4, 0)
+        filter_tracks.layout().addWidget(self.lineedit_delete, 4, 1)
+        filter_tracks.layout().addWidget(btn_delete_selected_tracks, 4, 2)
+        filter_tracks.layout().addWidget(btn_delete_displayed_tracks, 5, 0, 1, -1)
 
         ### Organize objects via widgets
         content = QWidget()
@@ -217,7 +232,6 @@ class TrackingWindow(QWidget):
         """
         Calls the centroid bassed tracking function
         """
-        print("Calling tracking")
 
         def on_yielded(value):
             if value == "Replace tracks layer":
@@ -236,7 +250,6 @@ class TrackingWindow(QWidget):
         worker.yielded.connect(on_yielded)
 
     def _filter_tracks(self):   # ?? hier vlt. noch Beschreibung ergänzen
-        print("Filtering tracks")
         input_text = self.lineedit_filter.text()
         if input_text == "":
             self._replace_tracks()
@@ -276,23 +289,16 @@ class TrackingWindow(QWidget):
             handle_exception(exc)
             return
 
-        print("Displaying tracks {}".format(ids))
         if ids == []:
             tracks_layer.data = self.parent.tracks
             return
         tracks_data = [track for track in self.parent.tracks if track[0] in ids]    # ?? das hier können wir problemlos nach der if Abfrage machen, oder?
         if not tracks_data:
-            print(
-                "No tracking data for ids "
-                + str(ids)
-                + ", displaying all tracks instead"
-            )
             tracks_layer.data = self.parent.tracks
             return
         tracks_layer.data = tracks_data
 
     def _remove_displayed_tracks(self):
-        print("Removing displayed tracks")
         tracks_name = self.parent.combobox_tracks.currentText()
         try:
             tracks_layer = grab_layer(self.viewer, tracks_name)
@@ -326,13 +332,13 @@ class TrackingWindow(QWidget):
             self._perform_unlink()
 
     def _prepare_for_unlink(self):
-        self._reset()
-        self.btn_remove_correspondence.setText(CONFIRM_TEXT)
+        #self._update_callbacks()
         self._add_tracking_callback()
+        self.btn_remove_correspondence.setText(CONFIRM_TEXT)
 
     def _perform_unlink(self):
         self.btn_remove_correspondence.setText(UNLINK_TEXT)
-        self._reset()
+        self._update_callbacks()
 
         label_layer = self._get_layer(self.parent.combobox_segmentation.currentText())
         if label_layer is None:
@@ -402,7 +408,6 @@ class TrackingWindow(QWidget):
         selected_track_to_reassign = selected_track[
             np.where(selected_track[:, 1] >= self.track_cells[-1][0])
         ]
-
         delete_indices = np.where(
             np.any(
                 np.all(
@@ -413,7 +418,6 @@ class TrackingWindow(QWidget):
             )
         )[0]
         tracks_filtered = np.delete(tracks, delete_indices, axis=0)
-
         reassign_indices = np.where(
             np.any(
                 np.all(
@@ -424,7 +428,10 @@ class TrackingWindow(QWidget):
             )
         )[0]
         tracks_filtered[reassign_indices, 0] = new_track_id
-
+        ids, counts = np.unique(tracks_filtered[:, 0], return_counts = True)
+        unique_ids = ids[counts == 1]
+        mask = np.isin(tracks_filtered[:, 0], unique_ids, invert = True)
+        tracks_filtered = tracks_filtered[mask] 
         df = pd.DataFrame(tracks_filtered, columns=["ID", "Z", "Y", "X"])
         df.sort_values(["ID", "Z"], ascending=True, inplace=True)
         return df.values
@@ -436,13 +443,13 @@ class TrackingWindow(QWidget):
             self._perform_link()
 
     def _prepare_for_link(self):
-        self._reset()
-        self.btn_insert_correspondence.setText(CONFIRM_TEXT)
+        #self._update_callbacks()
         self._add_tracking_callback()
+        self.btn_insert_correspondence.setText(CONFIRM_TEXT)
 
     def _perform_link(self):
         self.btn_insert_correspondence.setText(LINK_TEXT)
-        self._reset()
+        self._update_callbacks()
 
         label_layer = self._get_layer(self.parent.combobox_segmentation.currentText())
         if label_layer is None:
@@ -491,6 +498,13 @@ class TrackingWindow(QWidget):
                 "Looks like you selected more than one cell per slice. This makes the tracks freak out, so please don't do it. Thanks!"
             )
             return False
+        
+        for i in range(len(self.track_cells) - 1):
+            if self.track_cells[i][0] + 1 != self.track_cells[i+1][0]:
+                notify(
+                    f"Looks like you missed a cell in slice {self.track_cells[i][0] + 1}. Please try again."
+                )
+                return False
     
         return True
     
@@ -542,91 +556,81 @@ class TrackingWindow(QWidget):
         if tracks_layer is not None:
             tracks_layer.data = self.parent.tracks
         else:
-            print("adding new tracks layer")
             layer = self.viewer.add_tracks(self.parent.tracks, name = "Tracks")
             self.parent.combobox_tracks.setCurrentText(layer.name)
 
     def _add_tracking_callback(self):
-        QApplication.setOverrideCursor(Qt.CrossCursor)
+        
         self.track_cells = []
-        for layer in self.viewer.layers:
-
-            @layer.mouse_drag_callbacks.append
-            def _select_cells(layer, event):
-                try:
-                    label_layer = grab_layer(
-                        self.viewer, self.parent.combobox_segmentation.currentText()
-                    )
-                except ValueError as exc:
-                    handle_exception(exc)
-                    self._reset()
-                    return
-                z = int(event.position[0])
-                selected_id = label_layer.data[
-                    z, int(event.position[1]), int(event.position[2])
-                ]
-                if selected_id == 0:
-                    worker = notify_with_delay("no clicky")
-                    worker.start()
-                    return
-                centroid = ndimage.center_of_mass(
-                    label_layer.data[z], labels=label_layer.data[z], index=selected_id
+        def _select_cells(layer, event):
+            try:
+                label_layer = grab_layer(
+                    self.viewer, self.parent.combobox_segmentation.currentText()
                 )
-                cell = [z, int(np.rint(centroid[0])), int(np.rint(centroid[1]))]
-                if not cell in self.track_cells:
-                    self.track_cells.append(cell)
-                    self.track_cells.sort()
-                    print("Added cell {} to list for track cells".format(cell))
-                else:
-                    print(f"Skipping duplicate for {cell}")
+            except ValueError as exc:
+                handle_exception(exc)
+                self._update_callbacks()
+                return
+            z = int(event.position[0])
+            selected_id = label_layer.data[
+                z, int(event.position[1]), int(event.position[2])
+            ]
+            if selected_id == 0:
+                worker = notify_with_delay("no clicky")
+                worker.start()
+                return
+            centroid = ndimage.center_of_mass(
+                label_layer.data[z], labels=label_layer.data[z], index=selected_id
+            )
+            cell = [z, int(np.rint(centroid[0])), int(np.rint(centroid[1]))]
+            if not cell in self.track_cells:
+                self.track_cells.append(cell)
+                self.track_cells.sort()
+                
+        self._update_callbacks(_select_cells)
+        QApplication.setOverrideCursor(Qt.CrossCursor)
 
-        print("Added callback to record track cells")
 
     def _add_auto_track_callback(self):
-        self._reset()
-        QApplication.setOverrideCursor(Qt.CrossCursor)
-        for layer in self.viewer.layers:
-
-            @layer.mouse_drag_callbacks.append
-            def _proximity_track(layer, event):
-                try:
-                    label_layer = grab_layer(
-                        self.viewer, self.parent.combobox_segmentation.currentText()
-                    )
-                except ValueError as exc:
-                    handle_exception(exc)
-                    return
-
-                selected_cell = label_layer.data[
-                    int(round(event.position[0])),
-                    int(round(event.position[1])),
-                    int(round(event.position[2])),
-                ]
-                if selected_cell == 0:
-                    notify_with_delay("no clicky!")
-                    return
-                worker = self._proximity_track_cell(
-                    label_layer, int(event.position[0]), selected_cell
+        
+        def _proximity_track(layer, event):
+            try:
+                label_layer = grab_layer(
+                    self.viewer, self.parent.combobox_segmentation.currentText()
                 )
-                worker.start()
-                worker.finished.connect(self._link)
+            except ValueError as exc:
+                handle_exception(exc)
+                return
+
+            selected_cell = label_layer.data[
+                int(round(event.position[0])),
+                int(round(event.position[1])),
+                int(round(event.position[2])),
+            ]
+            if selected_cell == 0:
+                notify_with_delay("no clicky!")
+                return
+            worker = self._proximity_track_cell(
+                label_layer, int(event.position[0]), selected_cell
+            )
+            worker.finished.connect(self._link)
+                
+        self._update_callbacks(_proximity_track)
+        QApplication.setOverrideCursor(Qt.CrossCursor)
 
     @thread_worker(connect={"errored": handle_exception})
     def _proximity_track_cell(self, label_layer, start_slice, id):
-        self._reset()
+        self._update_callbacks()
         self.track_cells = func(label_layer.data, start_slice, id)
         if self.track_cells is None:
-            print("Track too short")
+            self._update_callbacks()
             return
         self.btn_insert_correspondence.setText("Tracking..")
-        #self._link()
 
     def _proximity_track_all(self):
         worker = self._proximity_track_all_worker()
         QApplication.setOverrideCursor(Qt.WaitCursor)
         worker.returned.connect(self._restore_tracks)
-        #worker.errored.connect(self.handle_exception)
-        #worker.start()
 
     def _restore_tracks(self, tracks):
         if tracks is None:
@@ -641,14 +645,13 @@ class TrackingWindow(QWidget):
 
     @thread_worker(connect={"errored": handle_exception})
     def _proximity_track_all_worker(self):
-        self._reset()
+        self._update_callbacks()
         self.parent.tracks = np.empty((1, 4), dtype=np.int8)
         label_layer = grab_layer(
             self.viewer, self.parent.combobox_segmentation.currentText()
         )
 
         AMOUNT_OF_PROCESSES = self.parent.get_process_limit()
-        print("Running on {} processes max".format(AMOUNT_OF_PROCESSES))
 
         data = []
         for start_slice in range(len(label_layer.data) - self.MIN_TRACK_LENGTH):
@@ -674,19 +677,35 @@ class TrackingWindow(QWidget):
             track_id += 1
 
         if not "tracks"in locals():
-            print("no tracks created")
             return None
         tracks = np.array(tracks)
         df = pd.DataFrame(tracks, columns=["ID", "Z", "Y", "X"])
         df.sort_values(["ID", "Z"], ascending=True, inplace=True)
         return df.values
 
-    def _reset(self):
-        for layer in self.viewer.layers:
-            layer.mouse_drag_callbacks = []
+    def _update_callbacks(self, callback = None):
+        if not len(self.viewer.layers, callback = None):
+            return
+        label_layer = grab_layer(self.viewer, self.parent.combobox_segmentation.currentText())
+        if callback:
+            current_callback = label_layer.mouse_drag_callbacks[0] if label_layer.mouse_drag_callbacks else None
+            if current_callback and current_callback.__qualname__ in ["draw", "pick"]:
+                self.cached_callback = current_callback
+            for layer in self.viewer.layers:
+                layer.mouse_drag_callbacks = [callback]
+        else:
+            for layer in self.viewer.layers:
+                if layer == label_layer and self.cached_callback:
+                    layer.mouse_drag_callbacks = [self.cached_callback]
+                else:
+                    layer.mouse_drag_callbacks = []
+            self.cached_callback = None
+        self._reset_button_labels()
+        QApplication.restoreOverrideCursor()
+        
+    def _reset_button_labels(self):
         self.btn_insert_correspondence.setText(LINK_TEXT)
         self.btn_remove_correspondence.setText(UNLINK_TEXT)
-        QApplication.restoreOverrideCursor()
 
 
 def func(label_data, start_slice, id):

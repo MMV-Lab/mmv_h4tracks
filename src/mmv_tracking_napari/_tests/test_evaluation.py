@@ -15,7 +15,6 @@ from mmv_tracking_napari import MMVTracking
 
 # this tests if the analysis returns the proper values
 PATH = Path(__file__).parent / "data"
-# PATH = f"{os.path.dirname(__file__)}/data"
 
 
 @pytest.fixture
@@ -41,21 +40,11 @@ def set_widget_up(make_napari_viewer):
         segmentation = AICSImage(file).get_image_data("ZYX")
         name = file.stem
         viewer.add_labels(segmentation, name=name)
-    """for file in os.listdir(f"{PATH}/segmentation"):
-        segmentation = AICSImage(f"{PATH}/segmentation/{file}").get_image_data("ZYX")
-        name = Path(file).stem
-        #name = os.path.basename(file)               # ?? lass und pathlib verwenden
-        viewer.add_labels(segmentation, name=name)"""
     for file in list(Path(PATH / "tracks").iterdir()):
         print(file.stem)
         tracks = np.load(file)
         name = file.stem
         viewer.add_tracks(tracks, name=name)
-    """for file in os.listdir(f"{PATH}/tracks"):
-        tracks = np.load(PATH + "/tracks/" + file)
-        name = Path(file).stem
-        #name = os.path.basename(file)
-        viewer.add_tracks(tracks, name=name)"""
     my_widget.combobox_segmentation.setCurrentIndex(
         my_widget.combobox_segmentation.findText(SEGMENTATION_GT)
     )
@@ -109,7 +98,7 @@ def add_layers(viewer):
 @pytest.mark.unit
 @pytest.mark.parametrize("score", ["iou", "dice", "f1"])
 @pytest.mark.parametrize("area", ["unchanged", "decreased", "increased"])
-@pytest.mark.parametrize("frames", ["single", "range", "all"])
+@pytest.mark.parametrize("frames", ["range", "all"])
 def test_segmentation_evaluation(get_widget, score, area, frames):
     """
     Test if segmentation evaluation produces correct values
@@ -129,85 +118,59 @@ def test_segmentation_evaluation(get_widget, score, area, frames):
     # !! vielleicht, aber ich habe spontan keine schlaue idee wie, ohne die parametrisierung weg zu schmeißen
     widget = get_widget
     viewer = widget.viewer
-    widget._analysis(hide=True)
-    window = widget.analysis_window
-    if frames == "single":
-        gt = viewer.layers[1].data[1]
-        if area == "unchanged":
-            if score == "iou":
-                assert window.get_iou(gt, gt) == 1
-            elif score == "dice":
-                assert window.get_dice(gt, gt) == 1
-            elif score == "f1":
-                assert window.get_f1(gt, gt) == 1
-        elif area == "decreased":
-            seg = viewer.layers[0].data[1]
-            if score == "iou":
-                assert window.get_iou(gt, seg) == 0.5
-            elif score == "dice":
-                assert window.get_dice(gt, seg) == 2 / 3
-            elif score == "f1":
-                assert window.get_f1(gt, seg) == 2 / 3
-        elif area == "increased":
-            seg = viewer.layers[2].data[1]
-            if score == "iou":
-                assert window.get_iou(gt, seg) == 0.5
-            elif score == "dice":
-                assert window.get_dice(gt, seg) == 2 / 3
-            elif score == "f1":
-                assert window.get_f1(gt, seg) == 2 / 3
-    elif frames == "range":
+    window = widget.evaluation_window
+    if frames == "range":
         gt = viewer.layers[1].data[0:2]
         if area == "unchanged":
             if score == "iou":
-                assert window.get_iou(gt, gt) == 1
+                assert window._calculate_iou(gt, gt) == 1
             elif score == "dice":
-                assert window.get_dice(gt, gt) == 1
+                assert window._calculate_dice(gt, gt) == 1
             elif score == "f1":
-                assert window.get_f1(gt, gt) == 1
+                assert window._calculate_f1(gt, gt) == 1
         elif area == "decreased":
             seg = viewer.layers[0].data[0:2]
             if score == "iou":
-                assert window.get_iou(gt, seg) == 1 / 6
+                assert window._calculate_iou(gt, seg) == 1 / 6
             elif score == "dice":
-                assert window.get_dice(gt, seg) == 2 / 7
+                assert window._calculate_dice(gt, seg) == 2 / 7
             elif score == "f1":
-                assert window.get_f1(gt, seg) == 2 / 7
+                assert window._calculate_f1(gt, seg) == 2 / 7
         elif area == "increased":
             seg = viewer.layers[2].data[0:2]
             if score == "iou":
-                assert window.get_iou(gt, seg) == 0.625
+                assert window._calculate_iou(gt, seg) == 0.625
             elif score == "dice":
-                assert window.get_dice(gt, seg) == 10 / 13
+                assert window._calculate_dice(gt, seg) == 10 / 13
             elif score == "f1":
-                assert window.get_f1(gt, seg) == 10 / 13
+                assert window._calculate_f1(gt, seg) == 10 / 13
     elif frames == "all":
         print("in all")
         gt = viewer.layers[1].data
         if area == "unchanged":
             if score == "iou":
-                assert window.get_iou(gt, gt) == 1
+                assert window._calculate_iou(gt, gt) == 1
             elif score == "dice":
-                assert window.get_dice(gt, gt) == 1
+                assert window._calculate_dice(gt, gt) == 1
             elif score == "f1":
-                assert window.get_f1(gt, gt) == 1
+                assert window._calculate_f1(gt, gt) == 1
         elif area == "decreased":
             seg = viewer.layers[0].data
             if score == "iou":
-                assert window.get_iou(gt, seg) == 0.1
+                assert window._calculate_iou(gt, seg) == 0.1
             elif score == "dice":
-                assert window.get_dice(gt, seg) == 2 / 11
+                assert window._calculate_dice(gt, seg) == 2 / 11
             elif score == "f1":
-                assert window.get_f1(gt, seg) == 2 / 11
+                assert window._calculate_f1(gt, seg) == 2 / 11
         elif area == "increased":
             print("in increased")
             seg = viewer.layers[2].data
             if score == "iou":
-                assert window.get_iou(gt, seg) == 0.75
+                assert window._calculate_iou(gt, seg) == 0.75
             elif score == "dice":
-                assert window.get_dice(gt, seg) == 6 / 7
+                assert window._calculate_dice(gt, seg) == 6 / 7
             elif score == "f1":
-                assert window.get_f1(gt, seg) == 6 / 7
+                assert window._calculate_f1(gt, seg) == 6 / 7
 
 
 @pytest.mark.eval
@@ -232,12 +195,12 @@ def test_false_positives(set_widget_up, layername, expected_value):
     """
     widget = set_widget_up
     viewer = widget.viewer
-    window = widget.analysis_window
+    window = widget.evaluation_window
     gt_seg = viewer.layers[viewer.layers.index("GT")].data
     eval_seg = viewer.layers[viewer.layers.index(layername)].data
-    fp = window.get_false_positives(gt_seg, eval_seg)
+    from mmv_tracking_napari._evaluation import get_false_positives as func
+    fp = window.get_segmentation_fault(gt_seg, eval_seg, func)
     assert fp == expected_value
-
 
 @pytest.mark.eval
 @pytest.mark.eval_tracking
@@ -267,13 +230,12 @@ def test_false_negatives(set_widget_up, layername, expected_value, gt):
     """
     widget = set_widget_up
     viewer = widget.viewer
-    widget._analysis(hide=True)
-    window = widget.analysis_window
+    window = widget.evaluation_window
     gt_seg = viewer.layers[viewer.layers.index(gt)].data
     eval_seg = viewer.layers[viewer.layers.index(layername)].data
-    fn = window.get_false_negatives(gt_seg, eval_seg)
+    from mmv_tracking_napari._evaluation import get_false_negatives as func
+    fn = window.get_segmentation_fault(gt_seg, eval_seg, func)
     assert fn == expected_value
-
 
 @pytest.mark.eval
 @pytest.mark.eval_tracking
@@ -295,11 +257,11 @@ def test_split_cells(set_widget_up, layername, expected_value):
     # test if split cells are calculated correctly
     widget = set_widget_up
     viewer = widget.viewer
-    widget._analysis(hide=True)
-    window = widget.analysis_window
+    window = widget.evaluation_window
     gt_seg = viewer.layers[viewer.layers.index("GT")].data
     eval_seg = viewer.layers[viewer.layers.index(layername)].data
-    sc = window.get_split_cells(gt_seg, eval_seg)
+    from mmv_tracking_napari._evaluation import get_split_cells as func
+    sc = window.get_segmentation_fault(gt_seg, eval_seg, func)
     assert sc == expected_value
 
 
@@ -331,14 +293,15 @@ def test_added_edges(set_widget_up, layername, expected_value):
     """
     widget = set_widget_up
     viewer = widget.viewer
-    widget._analysis(hide=True)
-    window = widget.analysis_window
+    window = widget.evaluation_window
     gt_seg = viewer.layers[viewer.layers.index("GT")].data
     eval_seg = gt_seg
     gt_tracks = viewer.layers[viewer.layers.index("GT_tracks")].data
-    eval_tracks = viewer.layers[viewer.layers.index(layername)].data
+    eval_tracks_layer = viewer.layers[viewer.layers.index(layername)]
     widget.combobox_tracks.setCurrentIndex(widget.combobox_tracks.findText(layername))
-    ae = window.get_added_edges(gt_seg, eval_seg, gt_tracks, eval_tracks)
+    window.adjust_centroids(gt_seg, eval_tracks_layer)
+    eval_tracks = eval_tracks_layer.data
+    _, ae = window.get_track_fault(gt_seg, gt_tracks, eval_seg, eval_tracks)
     assert ae == expected_value
 
 
@@ -370,23 +333,16 @@ def test_deleted_edges(set_widget_up, layername, expected_value):
     """
     widget = set_widget_up
     viewer = widget.viewer
-    widget._analysis(hide=True)
-    window = widget.analysis_window
+    window = widget.evaluation_window
     gt_seg = viewer.layers[viewer.layers.index("GT")].data
     eval_seg = gt_seg
     gt_tracks = viewer.layers[viewer.layers.index("GT_tracks")].data
-    eval_tracks = viewer.layers[viewer.layers.index(layername)].data
+    eval_tracks_layer = viewer.layers[viewer.layers.index(layername)]
     widget.combobox_tracks.setCurrentIndex(widget.combobox_tracks.findText(layername))
-    de = window.get_removed_edges(gt_seg, eval_seg, gt_tracks, eval_tracks)
+    window.adjust_centroids(gt_seg, eval_tracks_layer)
+    eval_tracks = eval_tracks_layer.data
+    de, _ = window.get_track_fault(gt_seg, gt_tracks, eval_seg, eval_tracks)
     assert de == expected_value
-
-
-# test if tracking evaluation is calculated right
-# -> false positives
-# -> false negatives
-# -> split cells
-# -> added edges
-# -> removed edges
 
 
 @pytest.mark.eval
@@ -413,14 +369,27 @@ def test_fault_value(set_widget_up, layername_seg, layername_tracks, expected_va
     """
     widget = set_widget_up
     viewer = widget.viewer
-    widget._analysis(hide=True)
-    window = widget.analysis_window
-    gt_seg = viewer.layers[viewer.layers.index("GT")].data
+    window = widget.evaluation_window
+    #gt_seg = viewer.layers[viewer.layers.index("GT")].data
     eval_seg = viewer.layers[viewer.layers.index(layername_seg)].data
-    gt_tracks = viewer.layers[viewer.layers.index("GT_tracks")].data
+    #gt_tracks = viewer.layers[viewer.layers.index("GT_tracks")].data
     eval_tracks = viewer.layers[viewer.layers.index(layername_tracks)].data
-    widget.combobox_tracks.setCurrentIndex(
-        widget.combobox_tracks.findText(layername_tracks)
+    widget.initial_layers = [eval_seg, eval_tracks]
+    widget.combobox_segmentation.setCurrentIndex(
+        widget.combobox_segmentation.findText("GT")
     )
-    fault_value = window.evaluate_tracking(gt_seg, eval_seg, gt_tracks, eval_tracks)
+    widget.combobox_tracks.setCurrentIndex(
+        widget.combobox_tracks.findText("GT_tracks")
+    )
+    window.evaluate_tracking()
+    fault_value = float(window.tracking_results.layout().itemAt(1).widget().item(4,1).text())
     assert fault_value == expected_value
+    
+@pytest.mark.unit
+@pytest.mark.parametrize("value", *[np.linspace(0,1,11)])
+def test_round_half_up(set_widget_up, value):
+    from mmv_tracking_napari._evaluation import round_half_up
+    if value < 0.5:
+        assert round_half_up(value) == 0
+    else:
+        assert round_half_up(value) == 1

@@ -1,4 +1,5 @@
 import numpy as np
+import inspect
 
 from qtpy.QtWidgets import (
     QWidget,
@@ -16,7 +17,7 @@ from qtpy.QtCore import Qt
 from scipy import ndimage
 import napari
 
-from ._logger import notify
+from ._logger import notify, handle_exception
 from ._grabber import grab_layer
 import mmv_tracking_napari._processing as processing
 from .add_models import ModelWindow
@@ -50,14 +51,20 @@ class SegmentationWindow(QWidget):
             self.setStyleSheet(napari.qt.get_stylesheet(theme = "dark"))
         except TypeError:
             self.setStyleSheet(napari.qt.get_stylesheet(theme_id="dark"))
+            
+        # Used to cach the callback on the label layer
+        self.cached_callback = None
 
         ### QObjects
 
         # Buttons
-        btn_false_positive = QPushButton("Remove")
-        btn_false_positive.setToolTip("Remove label from segmentation")
+        btn_false_positive = QPushButton("Remove cell")
+        btn_false_positive.setToolTip(
+            "Remove label from segmentation\n"
+            "WARNING: If a tracked cell is removed the track will be cut!"
+        )
 
-        btn_free_label = QPushButton("Next free")
+        btn_free_label = QPushButton("Next free ID")
         btn_free_label.setToolTip("Load next free segmentation label")
 
         btn_false_merge = QPushButton("Separate")
@@ -65,15 +72,26 @@ class SegmentationWindow(QWidget):
             "Split two separate parts of the same label into two"
         )
 
-        btn_false_cut = QPushButton("Merge")
+        btn_false_cut = QPushButton("Merge cell")
         btn_false_cut.setToolTip("Merge two separate labels into one")
 
-        btn_grab_label = QPushButton("Select")
+        btn_grab_label = QPushButton("Select ID")
         btn_grab_label.setToolTip("Load selected segmentation label")
 
         self.btn_segment = QPushButton("Run Segmentation")
+        btn_segment_tooltip = (
+            "Run instance segmentation with selected model.\n"
+            "Computation varies depending on GPU/CPU computation.\n"
+            "Selecting preview segments only 5 slices."
+        )
+        self.btn_segment.setToolTip(btn_segment_tooltip)
 
         self.btn_add_custom_model = QPushButton("Add custom Cellpose model")
+        btn_add_custom_model_tooltip = (
+            "Add a custom trained Cellpose model.\n"
+            "Note: This is not for training a Cellpose model."
+        )
+        self.btn_add_custom_model.setToolTip(btn_add_custom_model_tooltip)
 
         btn_false_positive.clicked.connect(self._add_remove_callback)
         btn_free_label.clicked.connect(self._set_label_id)
@@ -106,7 +124,7 @@ class SegmentationWindow(QWidget):
         h_spacer_2.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
         # QGroupBoxes
-        automatic_segmentation = QGroupBox("Automatic Segmentation")
+        automatic_segmentation = QGroupBox("Automatic segmentation")
         automatic_segmentation.setLayout(QGridLayout())
         automatic_segmentation.layout().addWidget(h_spacer_1, 0, 0, 1, -1)
         automatic_segmentation.layout().addWidget(self.combobox_segmentation, 1, 0, 1, 1)
@@ -114,7 +132,7 @@ class SegmentationWindow(QWidget):
         automatic_segmentation.layout().addWidget(self.checkbox_preview, 1, 2, 1, 1)
         automatic_segmentation.layout().addWidget(self.btn_add_custom_model, 2, 0, 1, -1)
 
-        segmentation_correction = QGroupBox("Segmentation Correction")
+        segmentation_correction = QGroupBox("Segmentation correction")
         segmentation_correction.setLayout(QGridLayout())
         segmentation_correction.layout().addWidget(h_spacer_2, 0, 0, 1, -1)
         segmentation_correction.layout().addWidget(btn_false_positive, 1, 0)
@@ -143,7 +161,6 @@ class SegmentationWindow(QWidget):
         Opens a [ModelWindow]
         """
         self.model_window = ModelWindow(self)
-        print("Opening model window")
         self.model_window.show()
 
     def toggle_segmentation_button(self, text):
@@ -162,15 +179,18 @@ class SegmentationWindow(QWidget):
             self.btn_segment.setEnabled(True)
 
     def _add_remove_callback(self):
-        self._remove_on_clicks()
+        try:
+            grab_layer(self.viewer, self.parent.combobox_segmentation.currentText())
+        except ValueError as exc:
+            handle_exception(exc)
+            return
+        
+        def _remove_label(layer, event):
+            self._remove_label(event)
+            self._update_callbacks()
+            
+        self._update_callbacks(_remove_label)
         QApplication.setOverrideCursor(Qt.CrossCursor)
-        for layer in self.viewer.layers:
-
-            @layer.mouse_drag_callbacks.append
-            def _remove_label(layer, event):
-                self._remove_label(event)
-
-        print("Added callback to remove cell")
 
     def _remove_label(self, event):
         """
@@ -185,15 +205,11 @@ class SegmentationWindow(QWidget):
         
         # replace label with 0 to make it background
         self._replace_label(event, 0)
-        print("Removed cell")
-        self._remove_on_clicks()
-        print("Remove cell callback is removed")
         
     def remove_cell_from_tracks(self, position): # TODO: doesn't work for cached tracks
         label_layer = grab_layer(self.viewer, self.parent.combobox_segmentation.currentText())
         
         if label_layer is None:
-            print("Segmentation layer not selected")
             QApplication.restoreOverrideCursor()
             notify("No segmentation layer found")
             return
@@ -218,46 +234,43 @@ class SegmentationWindow(QWidget):
         tracks_name = self.parent.combobox_tracks.currentText()
         if tracks_name == "":
             return
-        tracks = grab_layer(self.viewer, tracks_name).data
+        tracks_layer = grab_layer(self.viewer, tracks_name)
+        displayed_tracks = tracks_layer.data
+        #tracks_cached = self.parent.tracks
         
-        next_id = max(tracks[:,0]) + 1
+        next_id = max(self.parent.tracks[:,0]) + 1
+        
+        for tracks in [displayed_tracks, self.parent.tracks]:
 
-        # find index of entry
-        for i in range(len(tracks)):
-            if (
-                tracks[i, 1] == cell[0]
-                and tracks[i, 2] == cell[1]
-                and tracks[i, 3] == cell[2]
-            ):
-                index = i
-                # get track id of that entry
-                track_id = tracks[i][0]
-                break
-                
-        # find first and last index of that track id
-        indices = np.where(tracks[:,0] == track_id)[0]
-        first = min(indices)
-        last = max(indices)
-        
-        # if index != first and != last index change id of all entries after index
-        if index > first + 1:
-            indices = indices[indices >= index]
-        if index < last - 1:
-            indices = indices[indices <= index]
-         
-        if len(indices) == 1:
-            for i in range(index + 1, last + 1):
-                tracks[i][0] = next_id
-                
-        # remove entry (or entries)
-        tracks = np.delete(tracks, indices, 0)
-        self.viewer.layers.remove(tracks_name)
-        self.viewer.add_tracks(tracks, name=tracks_name)
+            # find index of entry in displayed tracks
+            for i in range(len(tracks)):
+                if np.all(tracks[i, 1:4] == cell):
+                    index = i
+                    # get track id of that entry
+                    track_id = tracks[i][0]
+                    break
+                    
+            # find first and last index of that track id
+            indices = np.where(tracks[:,0] == track_id)[0]
+            first = min(indices)
+            last = max(indices)
+            
+            # if index != first and != last index change id of all entries after index
+            if index > first + 1:
+                indices = indices[indices >= index]
+            if index < last - 1:
+                indices = indices[indices <= index]
+             
+            if len(indices) == 1:
+                for i in range(index + 1, last + 1):
+                    tracks[i][0] = next_id
+                    
+            # remove entry (or entries)
+            tracks = np.delete(tracks, indices, 0)
+        tracks_layer.data = displayed_tracks
         
     def get_track_id_of_cell(self, cell):
         tracks_name = self.parent.combobox_tracks.currentText()
-        """if tracks_name == "":
-            return"""
         tracks_layer = grab_layer(self.viewer, tracks_name)
         if tracks_layer is None:
             return
@@ -274,18 +287,19 @@ class SegmentationWindow(QWidget):
         raise ValueError('No matching track found')
 
     def _add_select_callback(self):
-        self._remove_on_clicks()
+        try:
+            segmentation_layer = grab_layer(self.viewer, self.parent.combobox_segmentation.currentText())
+        except ValueError as exc:
+            handle_exception(exc)
+            return
+        
+        def _select_label(layer, event):
+            id = self._read_label_id(event)
+            self._set_label_id(id)
+            self._update_callbacks()
+        
+        self._update_callbacks(_select_label)
         QApplication.setOverrideCursor(Qt.CrossCursor)
-        for layer in self.viewer.layers:
-
-            @layer.mouse_drag_callbacks.append
-            def _select_label(layer, event):
-                id = self._read_label_id(event)
-                self._set_label_id(id)
-                self._remove_on_clicks()
-                print("Select cell callback is removed")
-
-        print("Added callback to select a label")
 
     def _set_label_id(self, id=0):
         """
@@ -298,7 +312,6 @@ class SegmentationWindow(QWidget):
         """
         label_layer = grab_layer(self.viewer, self.parent.combobox_segmentation.currentText())
         if label_layer is None:
-            print("Tried to set label id on missing label layer")
             notify("Please make sure the label layer exists!")
             return
 
@@ -333,40 +346,44 @@ class SegmentationWindow(QWidget):
         """
         Sets a new id on the clicked label
         """
-        self._remove_on_clicks()
+        try:
+            grab_layer(self.viewer, self.parent.combobox_segmentation.currentText())
+        except ValueError as exc:
+            handle_exception(exc)
+            return
+        
+        def _replace_label(layer, event):
+            self._replace_label(event)
+            self._update_callbacks()
+            
+        self._update_callbacks(_replace_label)
         QApplication.setOverrideCursor(Qt.CrossCursor)
-        for layer in self.viewer.layers:
+        """for layer in self.viewer.layers:
 
             @layer.mouse_drag_callbacks.append
             def _replace_label(layer, event):
-                self._fill_label(event)
-                self._remove_on_clicks()
-                print("Replace cell callback is removed")
-
-        print("Added callback to replace cell")
+                self._replace_label(event)
+                self._update_callbacks()"""
 
     def _add_merge_callback(self):
-        self._remove_on_clicks()
+        try:
+            grab_layer(self.viewer, self.parent.combobox_segmentation.currentText())
+        except ValueError as exc:
+            handle_exception(exc)
+            return
+        
+        def _pick_merge_label(layer, event):
+            id = self._read_label_id(event)
+            
+            def _assimilate_label(layer, event):
+                self._replace_label(event, id)
+                self._update_callbacks()
+                
+            self._update_callbacks(_assimilate_label)
+            QApplication.setOverrideCursor(Qt.CrossCursor)
+                        
+        self._update_callbacks(_pick_merge_label)
         QApplication.setOverrideCursor(Qt.CrossCursor)
-        for layer in self.viewer.layers:
-
-            @layer.mouse_drag_callbacks.append
-            def _pick_merge_label(layer, event):
-                id = self._read_label_id(event)
-                self._remove_on_clicks()
-                print("Merge step 1 callback is removed")
-                QApplication.setOverrideCursor(Qt.CrossCursor)
-                for layer in self.viewer.layers:
-
-                    @layer.mouse_drag_callbacks.append
-                    def _assimilate_label(layer, event):
-                        self._replace_label(event, id)
-                        self._remove_on_clicks()
-                        print("Merge step 2 callback is removed")
-
-                print("Added callback for merge step 2")
-
-        print("Added callback for merge step 1")
 
     def _replace_label(self, event, id=-1):
         """
@@ -381,7 +398,6 @@ class SegmentationWindow(QWidget):
         """
         label_layer = grab_layer(self.viewer, self.parent.combobox_segmentation.currentText())
         if label_layer is None:
-            print("Tried to replace label but no label layer found")
             notify("Please make sure the label layer exists!")
             return
 
@@ -394,38 +410,10 @@ class SegmentationWindow(QWidget):
 
         # Replace the ID with the new id
         old_id = label_layer.data[z, y, x]
-        print(old_id)
         """if old_id == 0:
             notify("Can't change ID of background, please make sure to select a cell!")
             return"""
-        np.place(label_layer.data[z], label_layer.data[z] == old_id, id)
-
-        # Refresh the layer
-        label_layer.refresh()
-
-        # set the label layer as currently selected layer
-        self.viewer.layers.select_all()
-        self.viewer.layers.selection.select_only(label_layer)
-    
-    def _fill_label(self, event):
-        """
-        Replaces the label at the given position with a new ID.
-        Only affects pixels directly connected to the selected one
-        """
-        label_layer = grab_layer(self.viewer, self.parent.combobox_segmentation.currentText())
-        if label_layer is None:
-            print("Tried to replace label but no label layer found")
-            notify("Please make sure the label layer exists!")
-            return
-
-        x = int(round(event.position[2]))
-        y = int(round(event.position[1]))
-        z = int(round(event.position[0]))
-
-        id = self._get_free_label_id(label_layer)
-        
-        # Replace the ID with the new id
-        label_layer.fill(coord=(z,y,x), new_label=id, refresh=True)
+        label_layer.fill((z,y,x),id)
 
         # set the label layer as currently selected layer
         self.viewer.layers.select_all()
@@ -447,7 +435,6 @@ class SegmentationWindow(QWidget):
         """
         label_layer = grab_layer(self.viewer, self.parent.combobox_segmentation.currentText())
         if label_layer is None:
-            print("Tried to replace label but no label layer found")
             notify("Please make sure the label layer exists!")
             return
 
@@ -459,11 +446,24 @@ class SegmentationWindow(QWidget):
 
     def _print_on_clicks(self):
         for layer in self.viewer.layers:
-            print("layer: {}".format(layer))
             for callback in layer.mouse_drag_callbacks:
                 print(callback)
 
-    def _remove_on_clicks(self):
-        for layer in self.viewer.layers:
-            layer.mouse_drag_callbacks = []
+    def _update_callbacks(self, callback = None):
+        if not len(self.viewer.layers):
+            return
+        label_layer = grab_layer(self.viewer, self.parent.combobox_segmentation.currentText())
+        if callback:
+            current_callback = label_layer.mouse_drag_callbacks[0] if label_layer.mouse_drag_callbacks else None
+            if current_callback and current_callback.__qualname__ in ["draw", "pick"]:
+                self.cached_callback = current_callback
+            for layer in self.viewer.layers:
+                layer.mouse_drag_callbacks = [callback]
+        else:
+            for layer in self.viewer.layers:
+                if layer == label_layer and self.cached_callback:
+                    layer.mouse_drag_callbacks = [self.cached_callback]
+                else:
+                    layer.mouse_drag_callbacks = []
+            self.cached_callback = None
         QApplication.restoreOverrideCursor()

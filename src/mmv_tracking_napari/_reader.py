@@ -21,16 +21,12 @@ def open_dialog(parent, filetype="*.zarr", directory=""):
     str
         Path of the selected file
     """
-    print("Loading from zarr")
     dialog = QFileDialog()
     dialog.setNameFilter(filetype)
     filetype_name = filetype[2:].capitalize()
-    print("Showing dialog")
     filepath = dialog.getExistingDirectory(
         parent, f"Select {filetype_name}-File", directory=directory
     )
-    print("Dialog has been closed")
-    print(f"Selected {filepath} as path")
     return filepath
 
 
@@ -49,7 +45,6 @@ def napari_get_reader(path):
         If the path is a recognized format, return a function that accepts the
         same path list or list of paths, and returns a list of layer data tuples.
     """
-    print(f"Got {path} as path")
     if isinstance(path, list):
         # reader plugins may be handed single path, or a list of paths.
         # if it is a list, it is assumed to be an image stack...

@@ -37,7 +37,6 @@ class ModelWindow(QWidget):
         label_name = QLabel("Name")  # basic
         label_name.setToolTip("The name your model will be displayed as")
         label_file = QLabel("File")  # basic
-        # self.label_selected_file = QLabel()  # basic
         label_diameter = QLabel("diameter")  # basic
         label_channels = QLabel("channels")  # basic
         label_batch_size = QLabel("batch_size")
@@ -61,8 +60,9 @@ class ModelWindow(QWidget):
 
         # Buttons
         btn_file = QPushButton("Select")  # basic
+        btn_file.setToolTip("Select your custom Cellpose model file")
         self.btn_advanced_options = QPushButton(SHOW_OPTIONS_TEXT)  # basic
-        btn_add_model = QPushButton("Add Model")  # basic
+        btn_add_model = QPushButton("Add model")  # basic
         btn_cancel = QPushButton("Cancel")  # basic
 
         btn_file.clicked.connect(self.select_file)
