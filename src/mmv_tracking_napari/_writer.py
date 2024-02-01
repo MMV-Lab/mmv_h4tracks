@@ -52,7 +52,7 @@ def save_zarr(parent, zarr_file, layers, cached_tracks):
         The complete tracks layer
     """
 
-    response = 1    # ?? das wird so passen mit Zeile 64, aber vlt. kannst du mir das nochmal kurz erklären
+    response = 1
     if not np.array_equal(layers[2].data, cached_tracks):
         response = choice_dialog(
             (
@@ -65,7 +65,7 @@ def save_zarr(parent, zarr_file, layers, cached_tracks):
                 QMessageBox.Cancel,  # returns 4194304
             ],
         )
-        if response == 4194304: # ?? ich nehme den return Wert mal so hin :D Aber vlt. gehen wir das trotzdem hier nochmal zusammen durch
+        if response == 4194304:
             return
 
     tracks = cached_tracks

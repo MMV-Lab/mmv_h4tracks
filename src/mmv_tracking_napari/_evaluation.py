@@ -31,6 +31,7 @@ class EvaluationWindow(QWidget):
         self._setup_ui()
 
     def _setup_ui(self):
+        """Setup the UI of the evaluation window."""
         # Labels
         evaluation_label = QLabel("Slices to evaluate:")
 
@@ -127,7 +128,6 @@ class EvaluationWindow(QWidget):
         self.tracking_results.setLayout(tracking_results_layout)
 
         # Build the main layout
-
         content = QWidget()
         content_layout = QVBoxLayout()
         content_layout.addWidget(evaluation)
@@ -139,6 +139,9 @@ class EvaluationWindow(QWidget):
         self.setLayout(layout)
 
     def evaluate_segmentation(self):
+        """
+        Evaluate the segmentation results against the curated segmentation.
+        """
         try:
             gt_seg = grab_layer(
                 self.viewer, self.parent.combobox_segmentation.currentText()
@@ -431,8 +434,7 @@ def get_false_positives(gt_slice, eval_slice):
         if (
             len(iou_scores) < 1
             or iou_scores[0] < 0.4
-            and not (len(iou_scores) > 1
-            and iou_scores[1] < 0.2)
+            and not (len(iou_scores) > 1 and iou_scores[1] < 0.2)
         ):
             fp += 1
     return fp
@@ -605,7 +607,6 @@ def get_matching_cell(base_layer, comparison_layer, base_id, z):
 
 def is_connected(tracks, old_centroid, new_centroid):
     """Check if the old and new centroids are connected in the tracks."""
-    #print(f"checking {old_centroid} and {new_centroid} in {tracks}")
     for i in range(len(tracks) - 1):
         if all(old_centroid[j] == tracks[i, j + 1] for j in range(3)):
             return all(new_centroid[j] == tracks[i + 1, j + 1] for j in range(3))

@@ -226,7 +226,7 @@ class MMVTracking(QWidget):
 
         self.setMinimumWidth(540)
         self.setMinimumHeight(900)
-        
+
         hotkeys = self.viewer.keymap.keys()
         custom_binds = [
             ("E", self.hotkey_next_free),
@@ -250,16 +250,25 @@ class MMVTracking(QWidget):
                 self.rename_entry_in_comboboxes
             )  # doesn't contain index
         self.viewer.layers.events.moving.connect(self.reorder_entry_in_comboboxes)
-        
+
     def hotkey_next_free(self, _):
+        """
+        Hotkey for the next free label id
+        """
         label_layer = grab_layer(self.viewer, self.combobox_segmentation.currentText())
         self.segmentation_window._set_label_id()
         label_layer.mode = "paint"
-    
+
     def hotkey_overlap_single_tracking(self, _):
+        """
+        Hotkey for the overlap single tracking
+        """
         self.tracking_window._add_auto_track_callback()
 
     def add_entry_to_comboboxes(self, event):
+        """
+        Adds a new entry to the comboboxes for the layers
+        """
         if isinstance(event.value, Image):
             self.layer_comboboxes[0].addItem(event.value.name)
         elif isinstance(event.value, Labels):
@@ -274,6 +283,9 @@ class MMVTracking(QWidget):
         )  # contains index
 
     def remove_entry_from_comboboxes(self, event):
+        """
+        Removes an entry from the comboboxes for the layers
+        """
         if isinstance(event.value, Image):
             combobox = self.layer_comboboxes[0]
         elif isinstance(event.value, Labels):
@@ -286,6 +298,9 @@ class MMVTracking(QWidget):
         combobox.removeItem(index)
 
     def rename_entry_in_comboboxes(self, event):
+        """
+        Renames an entry in the comboboxes for the layers
+        """
         if not hasattr(event, "index"):
             event.index = self.viewer.layers.index(event.source.name)
         layer = self.viewer.layers[event.index]
@@ -309,6 +324,9 @@ class MMVTracking(QWidget):
         combobox.setCurrentIndex(current_index)
 
     def reorder_entry_in_comboboxes(self, event):
+        """
+        Reorders an entry in the comboboxes for the layers
+        """
         if event.index < event.new_index:
             target_index = event.new_index - 1
             low_index, high_index = event.index, target_index
@@ -448,6 +466,10 @@ class MMVTracking(QWidget):
         save_zarr(self, self.zarr, layers, self.tracks)
 
     def save_as(self):
+        """
+        Opens a dialog for the user to choose a zarr file to save to.
+        Fails if not all layers exist
+        """
         raw_name = self.combobox_image.currentText()
         raw_data = grab_layer(self.viewer, raw_name).data
         segmentation_name = self.combobox_segmentation.currentText()
@@ -475,47 +497,15 @@ class MMVTracking(QWidget):
             "tracking_data", shape=track_data.shape, dtype="i4", data=track_data
         )
 
-    @napari.Viewer.bind_key("Shift-r")
-    def _hotkey_remove_label(self):
-        if hasattr(MMVTracking.dock, "segmentation_window"):
-            MMVTracking.dock.segmentation_window._add_remove_callback()
-
-    @napari.Viewer.bind_key("Shift-l")
-    def _hotkey_load_label(self):
-        if hasattr(MMVTracking.dock, "segmentation_window"):
-            MMVTracking.dock.segmentation_window._set_label_id()
-
-    @napari.Viewer.bind_key("Shift-c")
-    def _hotkey_separate_label(self):
-        if hasattr(MMVTracking.dock, "segmentation_window"):
-            MMVTracking.dock.segmentation_window._add_replace_callback()
-
-    @napari.Viewer.bind_key("Shift-m")
-    def _hotkey_merge_label(self):
-        if hasattr(MMVTracking.dock, "segmentation_window"):
-            MMVTracking.dock.segmentation_window._add_merge_callback()
-
-    @napari.Viewer.bind_key("Shift-p")
-    def _hotkey_select_label(self):
-        if hasattr(MMVTracking.dock, "segmentation_window"):
-            MMVTracking.dock.segmentation_window._add_select_callback()
-
-    @napari.Viewer.bind_key("Shift-u")
-    def _hotkey_unlink_track(self):
-        if hasattr(MMVTracking.dock, "tracking_window"):
-            MMVTracking.dock.tracking_window._unlink()
-
-    @napari.Viewer.bind_key("l")
-    def _hotkey_link_track(self):
-        if hasattr(MMVTracking.dock, "tracking_window"):
-            MMVTracking.dock.tracking_window._link()
-
-    @napari.Viewer.bind_key("Shift-t")
-    def _hotkey_track_single(self):
-        if hasattr(MMVTracking.dock, "tracking_window"):
-            MMVTracking.dock.tracking_window._add_auto_track_callback()
-
     def get_process_limit(self):
+        """
+        Returns the number of processes to use for computation
+
+        Returns
+        -------
+        int
+            The number of processes to use for computation
+        """
         if self.rb_eco.isChecked():
             return max(1, int(multiprocessing.cpu_count() * 0.4))
         else:

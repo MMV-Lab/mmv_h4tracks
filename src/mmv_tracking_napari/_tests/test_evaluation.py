@@ -1,16 +1,12 @@
 """Module providing tests for the analysis widget"""
-# import os
 from pathlib import Path
 
 import numpy as np
 import pytest
-
-# import tifffile
 from aicsimageio import (
     AICSImage,
-)  # !! imports hinzufügen ist okay, aber dann müssen die auch in die
+)
 
-# !! requirements
 from mmv_tracking_napari import MMVTracking
 
 # this tests if the analysis returns the proper values
@@ -92,6 +88,18 @@ def add_layers(viewer):
 # split in unit & integration tests
 
 
+# test if rounding works correctly
+@pytest.mark.unit
+@pytest.mark.parametrize("value", *[np.linspace(0, 1, 11)])
+def test_round_half_up(set_widget_up, value):
+    from mmv_tracking_napari._evaluation import round_half_up
+
+    if value < 0.5:
+        assert round_half_up(value) == 0
+    else:
+        assert round_half_up(value) == 1
+
+
 # test if iou, dice and f1 are caluculated right for single frame, multiple frames and all frames
 @pytest.mark.eval
 @pytest.mark.eval_seg
@@ -114,8 +122,6 @@ def test_segmentation_evaluation(get_widget, score, area, frames):
     frames : str
         Amount of frames to be analyzed
     """
-    # ?? können wir den Test hier übersichtlicher gestalten?
-    # !! vielleicht, aber ich habe spontan keine schlaue idee wie, ohne die parametrisierung weg zu schmeißen
     widget = get_widget
     viewer = widget.viewer
     window = widget.evaluation_window
@@ -199,8 +205,10 @@ def test_false_positives(set_widget_up, layername, expected_value):
     gt_seg = viewer.layers[viewer.layers.index("GT")].data
     eval_seg = viewer.layers[viewer.layers.index(layername)].data
     from mmv_tracking_napari._evaluation import get_false_positives as func
+
     fp = window.get_segmentation_fault(gt_seg, eval_seg, func)
     assert fp == expected_value
+
 
 @pytest.mark.eval
 @pytest.mark.eval_tracking
@@ -234,8 +242,10 @@ def test_false_negatives(set_widget_up, layername, expected_value, gt):
     gt_seg = viewer.layers[viewer.layers.index(gt)].data
     eval_seg = viewer.layers[viewer.layers.index(layername)].data
     from mmv_tracking_napari._evaluation import get_false_negatives as func
+
     fn = window.get_segmentation_fault(gt_seg, eval_seg, func)
     assert fn == expected_value
+
 
 @pytest.mark.eval
 @pytest.mark.eval_tracking
@@ -261,6 +271,7 @@ def test_split_cells(set_widget_up, layername, expected_value):
     gt_seg = viewer.layers[viewer.layers.index("GT")].data
     eval_seg = viewer.layers[viewer.layers.index(layername)].data
     from mmv_tracking_napari._evaluation import get_split_cells as func
+
     sc = window.get_segmentation_fault(gt_seg, eval_seg, func)
     assert sc == expected_value
 
@@ -370,26 +381,15 @@ def test_fault_value(set_widget_up, layername_seg, layername_tracks, expected_va
     widget = set_widget_up
     viewer = widget.viewer
     window = widget.evaluation_window
-    #gt_seg = viewer.layers[viewer.layers.index("GT")].data
     eval_seg = viewer.layers[viewer.layers.index(layername_seg)].data
-    #gt_tracks = viewer.layers[viewer.layers.index("GT_tracks")].data
     eval_tracks = viewer.layers[viewer.layers.index(layername_tracks)].data
     widget.initial_layers = [eval_seg, eval_tracks]
     widget.combobox_segmentation.setCurrentIndex(
         widget.combobox_segmentation.findText("GT")
     )
-    widget.combobox_tracks.setCurrentIndex(
-        widget.combobox_tracks.findText("GT_tracks")
-    )
+    widget.combobox_tracks.setCurrentIndex(widget.combobox_tracks.findText("GT_tracks"))
     window.evaluate_tracking()
-    fault_value = float(window.tracking_results.layout().itemAt(1).widget().item(4,1).text())
+    fault_value = float(
+        window.tracking_results.layout().itemAt(1).widget().item(4, 1).text()
+    )
     assert fault_value == expected_value
-    
-@pytest.mark.unit
-@pytest.mark.parametrize("value", *[np.linspace(0,1,11)])
-def test_round_half_up(set_widget_up, value):
-    from mmv_tracking_napari._evaluation import round_half_up
-    if value < 0.5:
-        assert round_half_up(value) == 0
-    else:
-        assert round_half_up(value) == 1

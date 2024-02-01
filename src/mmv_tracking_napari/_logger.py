@@ -59,5 +59,8 @@ def choice_dialog(text, choices):
 
 
 def handle_exception(exception):
+    """
+    Handles an exception by showing a notification dialog and restoring the cursor
+    """
     notify(str(exception))
     QApplication.restoreOverrideCursor()

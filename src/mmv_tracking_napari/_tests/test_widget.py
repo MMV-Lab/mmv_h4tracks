@@ -1,6 +1,7 @@
 """Module providing tests for the main widget"""
 import numpy as np
 import pytest
+
 from mmv_tracking_napari import MMVTracking
 
 
@@ -44,21 +45,18 @@ def add_layers(viewer, amount, names=None):
         Names of the added layers
     """
     if names is None:
-        names = range(1,3*amount+1)
+        names = range(1, 3 * amount + 1)
     for i in range(amount):
         viewer.add_image(
-            np.random.randint(256, size = (1,100,100), dtype = int),
-            name = names[i]
+            np.random.randint(256, size=(1, 100, 100), dtype=int), name=names[i]
         )
     for i in range(0, amount):
         viewer.add_labels(
-            np.random.randint(5, size = (1,100,100), dtype = int),
-            name = names[amount+i]
+            np.random.randint(5, size=(1, 100, 100), dtype=int), name=names[amount + i]
         )
     for i in range(0, amount):
         viewer.add_tracks(
-            np.random.randint(5, size = (20,4), dtype = int),
-            name = names[amount*2+i]
+            np.random.randint(5, size=(20, 4), dtype=int), name=names[amount * 2 + i]
         )
 
 
@@ -80,11 +78,11 @@ def test_combobox_add_layer(viewer_with_widget, index):
     widget = viewer_with_widget
     combobox = widget.layer_comboboxes[index]
 
-
-    names = ["IMAGE","LABELS","TRACKS"]
+    names = ["IMAGE", "LABELS", "TRACKS"]
     add_layers(widget.viewer, 1, names)
     assert combobox.findText(names[index]) == combobox.count() - 1
-    
+
+
 @pytest.mark.combobox
 @pytest.mark.unit
 @pytest.mark.parametrize("index", range(AMOUNT_OF_COMBOBOXES))
@@ -222,13 +220,12 @@ def test_moved_layer_order(viewer_with_widget, index, from_index, to_index):
     combobox.setCurrentIndex(5)
     layername = combobox.currentText()
 
-
-    widget.viewer.layers.move(
-        from_index + index * 10,
-        to_index + index * 10
+    widget.viewer.layers.move(from_index + index * 10, to_index + index * 10)
+    assert widget.viewer.layers.index(layername) + 1 - index * 10 == combobox.findText(
+        layername
     )
-    assert widget.viewer.layers.index(layername) + 1 - index * 10 == combobox.findText(layername)
-    
+
+
 @pytest.mark.combobox
 @pytest.mark.unit
 @pytest.mark.parametrize("index", range(AMOUNT_OF_COMBOBOXES))
