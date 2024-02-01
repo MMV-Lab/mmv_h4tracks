@@ -7,7 +7,7 @@ from aicsimageio import (
     AICSImage,
 )
 
-from mmv_tracking_napari import MMVTracking
+from mmv_hitl4trk import MMVHITL4TRK
 
 # this tests if the analysis returns the proper values
 PATH = Path(__file__).parent / "data"

@@ -19,7 +19,7 @@ import pandas as pd
 
 from ._logger import notify, handle_exception
 from ._grabber import grab_layer
-import mmv_tracking_napari._processing as processing
+import mmv_hitl4trk._processing as processing
 from .add_models import ModelWindow
 
 

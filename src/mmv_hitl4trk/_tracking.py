@@ -25,7 +25,7 @@ from scipy import ndimage, stats
 from ._logger import notify, notify_with_delay, choice_dialog, handle_exception
 from ._grabber import grab_layer
 from ._logger import choice_dialog, notify, notify_with_delay
-import mmv_tracking_napari._processing as processing
+import mmv_hitl4trk._processing as processing
 
 LINK_TEXT = "Link tracks"
 UNLINK_TEXT = "Unlink tracks"

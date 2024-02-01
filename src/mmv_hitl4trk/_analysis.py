@@ -24,7 +24,7 @@ import napari
 from skimage import measure
 
 from ._grabber import grab_layer
-from mmv_tracking_napari._logger import handle_exception
+from mmv_hitl4trk._logger import handle_exception
 from ._selector import Selector
 from ._writer import save_csv
 

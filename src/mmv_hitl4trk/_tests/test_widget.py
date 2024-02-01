@@ -2,7 +2,7 @@
 import numpy as np
 import pytest
 
-from mmv_tracking_napari import MMVTracking
+from mmv_hitl4trk import MMVTracking
 
 
 AMOUNT_OF_COMBOBOXES = 3

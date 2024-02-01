@@ -41,7 +41,7 @@ from ._writer import save_zarr
 from ._grabber import grab_layer
 
 
-class MMVTracking(QWidget):
+class MMVHITL4TRK(QWidget):
     """
     The main widget of our application
 
@@ -68,8 +68,6 @@ class MMVTracking(QWidget):
         Opens a window to do analysis
     """
 
-    dock = None
-
     def __init__(self, viewer: napari.Viewer = None, parent=None):
         """
         Parameters
@@ -80,7 +78,6 @@ class MMVTracking(QWidget):
         super().__init__(parent=parent)
         viewer = napari.current_viewer() if viewer is None else viewer
         self.viewer = viewer
-        MMVTracking.dock = self
 
         ### QObjects
 
@@ -100,7 +97,7 @@ class MMVTracking(QWidget):
         logo_label.setMaximumWidth(150)
         logo_label.setScaledContents(True)
         logo_label.setAlignment(Qt.AlignCenter)
-        title = QLabel("<h1><font color='green'>HITL4Trk</font></h1>")
+        title = QLabel("<h1><font color='green'>MMV_HITL4TRK</font></h1>")
         title.setMaximumHeight(100)
         label_image = QLabel("Image:")
         label_segmentation = QLabel("Segmentation:")

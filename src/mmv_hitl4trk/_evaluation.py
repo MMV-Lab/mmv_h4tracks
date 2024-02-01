@@ -18,8 +18,8 @@ from qtpy.QtWidgets import (
 from scipy import ndimage
 
 from ._grabber import grab_layer
-from mmv_tracking_napari._logger import handle_exception
-from mmv_tracking_napari import IOU_THRESHOLD
+from mmv_hitl4trk._logger import handle_exception
+from mmv_hitl4trk import IOU_THRESHOLD
 
 
 class EvaluationWindow(QWidget):
