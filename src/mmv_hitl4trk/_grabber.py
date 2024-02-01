@@ -1,4 +1,6 @@
 """Module providing a function getting a layer from a viewer"""
+
+
 def grab_layer(viewer, layer_name):
     """
     Function to grab a layer with a given name

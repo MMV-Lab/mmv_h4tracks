@@ -34,12 +34,11 @@ class ModelWindow(QWidget):
 
         ## QObjects
         # Labels
-        label_name = QLabel("Name")  # basic
+        label_name = QLabel("Name")
         label_name.setToolTip("The name your model will be displayed as")
-        label_file = QLabel("File")  # basic
-        # self.label_selected_file = QLabel()  # basic
-        label_diameter = QLabel("diameter")  # basic
-        label_channels = QLabel("channels")  # basic
+        label_file = QLabel("File")
+        label_diameter = QLabel("diameter")
+        label_channels = QLabel("channels")
         label_batch_size = QLabel("batch_size")
         self.advanced_options.append(label_batch_size)
         label_channel_axis = QLabel("channel_axis")
@@ -60,10 +59,11 @@ class ModelWindow(QWidget):
         self.advanced_options.append(label_rescale)
 
         # Buttons
-        btn_file = QPushButton("Select")  # basic
-        self.btn_advanced_options = QPushButton(SHOW_OPTIONS_TEXT)  # basic
-        btn_add_model = QPushButton("Add Model")  # basic
-        btn_cancel = QPushButton("Cancel")  # basic
+        btn_file = QPushButton("Select")
+        btn_file.setToolTip("Select your custom Cellpose model file")
+        self.btn_advanced_options = QPushButton(SHOW_OPTIONS_TEXT)
+        btn_add_model = QPushButton("Add model")
+        btn_cancel = QPushButton("Cancel")
 
         btn_file.clicked.connect(self.select_file)
         self.btn_advanced_options.clicked.connect(self.toggle_advanced_options)
@@ -71,10 +71,10 @@ class ModelWindow(QWidget):
         btn_cancel.clicked.connect(self.cancel)
 
         # Lineedits
-        self.lineedit_name = QLineEdit()  # basic
-        self.lineedit_file = QLineEdit()  # basic
-        self.lineedit_diameter = QLineEdit()  # basic
-        self.lineedit_channels = QLineEdit("0, 0")  # basic
+        self.lineedit_name = QLineEdit()
+        self.lineedit_file = QLineEdit()
+        self.lineedit_diameter = QLineEdit()
+        self.lineedit_channels = QLineEdit("0, 0")
         self.lineedit_batch_size = QLineEdit("8")
         self.advanced_options.append(self.lineedit_batch_size)
         self.lineedit_channel_axis = QLineEdit("")
@@ -126,7 +126,13 @@ class ModelWindow(QWidget):
         self.layout().addWidget(self.lineedit_channels, 3, 2, 1, -1)
         self.layout().addWidget(self.btn_advanced_options, 4, 0, 1, -1)
 
-        self.layout().addWidget(label_batch_size, 5, 0, 1, 2,)
+        self.layout().addWidget(
+            label_batch_size,
+            5,
+            0,
+            1,
+            2,
+        )
         self.layout().addWidget(self.lineedit_batch_size, 5, 2, 1, -1)
         self.layout().addWidget(label_channel_axis, 6, 0, 1, 2)
         self.layout().addWidget(self.lineedit_channel_axis, 6, 2, 1, -1)
@@ -158,6 +164,9 @@ class ModelWindow(QWidget):
         [widget.hide() for widget in self.advanced_options]
 
     def select_file(self):
+        """
+        Opens a file dialog to select a custom Cellpose model
+        """
         retval = QFileDialog().getOpenFileName(self, "Select Cellpose Model")
         if retval[0] == "":
             return
@@ -165,6 +174,9 @@ class ModelWindow(QWidget):
         self.lineedit_file.setText(self.model_path)
 
     def add_model(self):
+        """
+        Adds a custom Cellpose model to the list of models
+        """
         QApplication.setOverrideCursor(Qt.WaitCursor)
         params = {
             "diameter": float(self.lineedit_diameter.text()),
@@ -242,24 +254,16 @@ class ModelWindow(QWidget):
         self.close()
 
     def toggle_advanced_options(self):
+        """
+        Toggles the advanced options
+        """
         if self.btn_advanced_options.text() == SHOW_OPTIONS_TEXT:
             self.btn_advanced_options.setText(HIDE_OPTIONS_TEXT)
             [widget.show() for widget in self.advanced_options]
-            # self.advanced_options.show()
-            # self.show_advanced_options()
         else:
             self.btn_advanced_options.setText(SHOW_OPTIONS_TEXT)
             [widget.hide() for widget in self.advanced_options]
-            # self.advanced_options.hide()
             self.adjustSize()
-            # self.hide_advanced_options()
 
     def cancel(self):
         self.close()
-
-    # def show_advanced_options(self):
-    #     self.advanced_options.show()
-    #     pass
-
-    # def hide_advanced_options(self):
-    #     pass

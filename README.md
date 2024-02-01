@@ -1,13 +1,13 @@
 **We are actively working on the documentation**
 
-# mmv-tracking-napari
+# mmv-HITL4TRK
 
-[![License](https://img.shields.io/pypi/l/mmv-tracking-napari.svg?color=green)](https://github.com/MMV-Lab/mmv-tracking-napari/raw/main/LICENSE)
-[![PyPI](https://img.shields.io/pypi/v/mmv-tracking-napari.svg?color=green)](https://pypi.org/project/mmv-tracking-napari)
-[![Python Version](https://img.shields.io/pypi/pyversions/mmv-tracking-napari.svg?color=green)](https://python.org)
-[![tests](https://github.com/MMV-Lab/mmv-tracking-napari/workflows/tests/badge.svg)](https://github.com/MMV-Lab/mmv-tracking-napari/actions)
-[![codecov](https://codecov.io/gh/MMV-Lab/mmv-tracking-napari/branch/main/graph/badge.svg)](https://codecov.io/gh/MMV-Lab/mmv-tracking-napari)
-[![napari hub](https://img.shields.io/endpoint?url=https://api.napari-hub.org/shields/mmv-tracking-napari)](https://napari-hub.org/plugins/mmv-tracking-napari)
+[![License](https://img.shields.io/pypi/l/mmv_hitl4trk.svg?color=green)](https://github.com/MMV-Lab/mmv_hitl4trk/raw/main/LICENSE)
+[![PyPI](https://img.shields.io/pypi/v/mmv_hitl4trk.svg?color=green)](https://pypi.org/project/mmv_hitl4trk)
+[![Python Version](https://img.shields.io/pypi/pyversions/mmv_hitl4trk.svg?color=green)](https://python.org)
+[![tests](https://github.com/MMV-Lab/mmv_hitl4trk/workflows/tests/badge.svg)](https://github.com/MMV-Lab/mmv_hitl4trk/actions)
+[![codecov](https://codecov.io/gh/MMV-Lab/mmv_hitl4trk/branch/main/graph/badge.svg)](https://codecov.io/gh/MMV-Lab/mmv_hitl4trk)
+[![napari hub](https://img.shields.io/endpoint?url=https://api.napari-hub.org/shields/mmv_hitl4trk)](https://napari-hub.org/plugins/mmv_hitl4trk)
 
 A plugin to use with napari to segment and track cells via HumanInTheLoop(HITL)-approach.
 
@@ -20,9 +20,9 @@ Load a zarr-file consisting of Image, Label and Tracks layer.
 
 ## Installation
 
-You can install `mmv-tracking-napari` via [pip]:
+You can install `mmv_hitl4trk` via [pip]:
 
-    pip install mmv-tracking-napari
+    pip install mmv_hitl4trk
 
 
 By default, CPU is used for segmentation computing. We have tried to optimize the CPU computing time, but still recommend GPU computing. For more detailed instructions on how to install GPU support look [here](https://github.com/MouseLand/cellpose#gpu-version-cuda-on-windows-or-linux).
@@ -31,7 +31,7 @@ By default, CPU is used for segmentation computing. We have tried to optimize th
 
 To install latest development version :
 
-    pip install git+https://github.com/MMV-Lab/mmv-tracking-napari.git -->
+    pip install git+https://github.com/MMV-Lab/mmv_hitl4trk.git -->
 
 
 ## Documentation
@@ -159,7 +159,7 @@ the coverage at least stays the same before you submit a pull request.
 ## License
 
 Distributed under the terms of the [BSD-3] license,
-"mmv-tracking-napari" is free and open source software
+"mmv_hitl4trk" is free and open source software
 
 ## Issues
 
@@ -176,7 +176,7 @@ If you encounter any problems, please [file an issue] along with a detailed desc
 [Mozilla Public License 2.0]: https://www.mozilla.org/media/MPL/2.0/index.txt
 [cookiecutter-napari-plugin]: https://github.com/napari/cookiecutter-napari-plugin
 
-[file an issue]: https://github.com/MMV-Lab/mmv-tracking-napari/issues
+[file an issue]: https://github.com/MMV-Lab/mmv_hitl4trk/issues
 
 [napari]: https://github.com/napari/napari
 [tox]: https://tox.readthedocs.io/en/latest/
