@@ -265,7 +265,6 @@ class TrackingWindow(QWidget):
         worker = processing._track_segmentation(self)
         worker.returned.connect(processing._add_tracks_to_viewer)
         worker.yielded.connect(on_yielded)
-        worker.start()
 
     def _filter_tracks(self):
         """
@@ -585,6 +584,8 @@ class TrackingWindow(QWidget):
 
         one_match = False
         for entry in self.track_cells:
+            if tracks_layer.data is None:
+                break
             for track_line in tracks_layer.data:
                 if np.all(entry == track_line[1:4]):
                     if one_match:
@@ -883,7 +884,6 @@ class TrackingWindow(QWidget):
         """
         Calls the proximity tracking function for all cells
         """
-        QApplication.setOverrideCursor(Qt.WaitCursor)
         worker = self._proximity_track_all_worker()
         worker.returned.connect(self._restore_tracks)
 
@@ -917,6 +917,7 @@ class TrackingWindow(QWidget):
             The tracks
         """
         self._update_callbacks()
+        QApplication.setOverrideCursor(Qt.WaitCursor)
         self.parent.tracks = np.empty((1, 4), dtype=np.int8)
         label_layer = grab_layer(
             self.viewer, self.parent.combobox_segmentation.currentText()
