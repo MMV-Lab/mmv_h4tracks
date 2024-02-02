@@ -384,7 +384,6 @@ class TrackingWindow(QWidget):
         """
         Performs the unlink by removing the selected cells from their tracks
         """
-        self.btn_remove_correspondence.setText(UNLINK_TEXT)
         self._update_callbacks()
 
         label_layer = self._get_layer(self.parent.combobox_segmentation.currentText())
@@ -565,7 +564,6 @@ class TrackingWindow(QWidget):
         """
         Performs the link by adding the selected cells to a new track
         """
-        self.btn_insert_correspondence.setText(LINK_TEXT)
         self._update_callbacks()
 
         label_layer = self._get_layer(self.parent.combobox_segmentation.currentText())
@@ -582,18 +580,31 @@ class TrackingWindow(QWidget):
         if not self._validate_track_cells():
             return
 
-        one_match = False
+        matches = 0
+
         for entry in self.track_cells:
             if tracks_layer is None:
                 break
             for track_line in tracks_layer.data:
                 if np.all(entry == track_line[1:4]):
-                    if one_match:
-                        notify(
-                            "Cell is already tracked. Please unlink it first if you want to change anything."
-                        )
-                        return
-                    one_match = True
+                    matches += 1
+                    if matches == 1:
+                        match_id = track_line[0]
+                        
+        if matches > 1:
+            if matches != np.count_nonzero(tracks_layer.data[:,0] == match_id):
+                notify(
+                    "Cell is already tracked. Please unlink it first if you want to change anything."
+                )
+                return
+            
+            mask = tracks_layer.data[:,0] != match_id
+            tracks = tracks_layer.data[mask]
+            if len(tracks) == 0:
+                tracks = np.insert(self.track_cells, 0, np.zeros((1, len(self.track_cells))), axis=1)
+                self.track_cells = []
+                self._update_parent_tracks(tracks, tracks_layer)
+            tracks_layer.data = tracks
 
         track_id, tracks = self._get_track_id_and_tracks(tracks_layer)
         connected_ids = self._get_connected_ids(track_id, tracks)

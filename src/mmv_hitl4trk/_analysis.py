@@ -24,6 +24,7 @@ import napari
 from skimage import measure
 
 from ._grabber import grab_layer
+from ._logger import notify
 from mmv_hitl4trk._logger import handle_exception
 from ._selector import Selector
 from ._writer import save_csv
@@ -712,6 +713,10 @@ class AnalysisWindow(QWidget):
         for checkbox in self.checkboxes:
             if checkbox.checkState():
                 selected_metrics.append(checkbox.text())
+
+        if not np.array_equal(self.parent.tracks, grab_layer(self.viewer, self.parent.combobox_tracks.currentText()).data):
+            notify("Export is not possible if some tracks are hidden!")
+            return
 
         if len(selected_metrics) == 0:
             msg = QMessageBox()
