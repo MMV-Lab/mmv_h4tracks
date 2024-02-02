@@ -584,7 +584,7 @@ class TrackingWindow(QWidget):
 
         one_match = False
         for entry in self.track_cells:
-            if tracks_layer.data is None:
+            if tracks_layer is None:
                 break
             for track_line in tracks_layer.data:
                 if np.all(entry == track_line[1:4]):
