@@ -150,10 +150,10 @@ class EvaluationWindow(QWidget):
         except ValueError as exc:
             handle_exception(exc)
             return
-        try:
-            eval_seg = self.parent.initial_layers[0]
-        except AttributeError:
+        eval_seg = self.parent.initial_layers[0]
+        if eval_seg is None:
             notify("Segmentation and Tracks must be imported from zarr currently! (Drag and drop will be supported in the future). As a work-around for now export your data as zarr and import it.")
+            return
             
         self.evaluate_curated_segmentation(gt_seg, eval_seg)
         content = self.layout().itemAt(0).widget()
@@ -239,11 +239,11 @@ class EvaluationWindow(QWidget):
         except ValueError as exc:
             handle_exception(exc)
             return
-        try:
-            eval_tracks = self.parent.initial_layers[1]
-            eval_seg = self.parent.initial_layers[0]
-        except AttributeError:
+        eval_tracks = self.parent.initial_layers[1]
+        eval_seg = self.parent.initial_layers[0]
+        if eval_tracks is None or eval_seg is None:
             notify("Segmentation and Tracks must be imported from zarr currently! (Drag and drop will be supported in the future). As a work-around for now export your data as zarr and import it.")
+            return
         self.evaluate_curated_tracking(gt_tracks_layer, gt_seg, eval_tracks, eval_seg)
 
         content = self.layout().itemAt(0).widget()

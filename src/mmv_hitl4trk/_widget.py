@@ -78,6 +78,7 @@ class MMVHITL4TRK(QWidget):
         super().__init__(parent=parent)
         viewer = napari.current_viewer() if viewer is None else viewer
         self.viewer = viewer
+        self.initial_layers = [None, None]
 
         ### QObjects
 

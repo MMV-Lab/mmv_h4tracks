@@ -245,7 +245,7 @@ class TrackingWindow(QWidget):
 
     def _run_tracking(self):
         """
-        Calls the centroid bassed tracking function
+        Calls the centroid based tracking function
         """
 
         def on_yielded(value):
