@@ -882,7 +882,7 @@ class TrackingWindow(QWidget):
 
     def _proximity_track_all(self):
         """
-        Calls the proximity tracking function for all cells
+        Calls the overlap based tracking function for all cells
         """
         worker = self._proximity_track_all_worker()
         worker.returned.connect(self._restore_tracks)
@@ -909,7 +909,7 @@ class TrackingWindow(QWidget):
     @thread_worker(connect={"errored": handle_exception})
     def _proximity_track_all_worker(self):
         """
-        Performs the proximity tracking for all cells
+        Performs the overlap based tracking for all cells
 
         Returns
         -------
@@ -953,6 +953,8 @@ class TrackingWindow(QWidget):
         tracks = np.array(tracks)
         df = pd.DataFrame(tracks, columns=["ID", "Z", "Y", "X"])
         df.sort_values(["ID", "Z"], ascending=True, inplace=True)
+        self.parent.tracks = df.values
+        self.parent.initial_layers[1] = df.values
         return df.values
 
     def _update_callbacks(self, callback=None):

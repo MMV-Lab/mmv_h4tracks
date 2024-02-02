@@ -374,6 +374,8 @@ def _add_tracks_to_viewer(params):
             return
     else:
         tracks_layer.data = tracks
+    widget.parent.tracks = tracks
+    widget.parent.initial_layers[1] = tracks
     widget.parent.combobox_tracks.setCurrentText(layername)
 
 

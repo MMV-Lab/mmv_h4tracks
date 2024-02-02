@@ -686,9 +686,9 @@ class AnalysisWindow(QWidget):
             )
 
         elif metric == "Track duration":
-            retval.update({"Name": "Track duration [frames]"})
+            retval.update({"Name": "Track duration"})
             retval.update({"Description": "Scatterplot track ID vs track duration"})
-            retval.update({"x_label": "Track duration", "y_label": "ID"})
+            retval.update({"x_label": "Track duration [frames]", "y_label": "ID"})
             retval.update(
                 {
                     "Results": np.array(
