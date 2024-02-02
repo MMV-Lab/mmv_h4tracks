@@ -300,11 +300,7 @@ def _track_segmentation(widget):
         the widget, the tracks and the name of the tracks layer
     """
     QApplication.setOverrideCursor(Qt.WaitCursor)
-    try:
-        data = _get_segmentation_data(widget)
-    except ValueError as exc:
-        handle_exception(exc)
-        return
+    data = _get_segmentation_data(widget)
 
     # check for tracks layer
     tracks_name, collision = _check_for_tracks_layer(widget)

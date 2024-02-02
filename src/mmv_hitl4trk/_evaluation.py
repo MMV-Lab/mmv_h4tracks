@@ -17,6 +17,7 @@ from qtpy.QtWidgets import (
 )
 from scipy import ndimage
 
+from ._logger import notify
 from ._grabber import grab_layer
 from mmv_hitl4trk._logger import handle_exception
 from mmv_hitl4trk import IOU_THRESHOLD
