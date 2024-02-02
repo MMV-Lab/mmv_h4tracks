@@ -361,6 +361,8 @@ def _add_tracks_to_viewer(params):
         the tracks data to add to the viewer
     """
     # check if tracks are usable
+    if params is None:
+        return
     widget, tracks, layername = params
     try:
         tracks_layer = grab_layer(
