@@ -247,26 +247,32 @@ class SegmentationWindow(QWidget):
         z = int(position[0])
         selected_id = label_layer.data[z, y, x]
         if selected_id == 0:
+            print("no cell")
             return
         centroid = ndimage.center_of_mass(
             label_layer.data[z], labels=label_layer.data[z], index=selected_id
         )
         cell = [z, int(np.rint(centroid[0])), int(np.rint(centroid[1]))]
         try:
-            track_id = self.get_track_id_of_cell(cell)
+            track_id, displayed = self.get_track_id_of_cell(cell)
         except ValueError:
+            print("value error")
             return
 
         tracks_name = self.parent.combobox_tracks.currentText()
         if tracks_name == "":
+            print("no tracks")
             return
         tracks_layer = grab_layer(self.viewer, tracks_name)
         displayed_tracks = tracks_layer.data
 
         next_id = max(self.parent.tracks[:, 0]) + 1
         indices_to_delete = [[], []]
+        all_tracks = [self.parent.tracks]
+        if displayed:
+            all_tracks.append(displayed_tracks)
 
-        for indicator, tracks in enumerate([displayed_tracks, self.parent.tracks]):
+        for indicator, tracks in enumerate(all_tracks):
             # find index of entry in displayed tracks
             for i in range(len(tracks)):
                 if np.all(tracks[i, 1:4] == cell):
@@ -293,8 +299,9 @@ class SegmentationWindow(QWidget):
             indices_to_delete[indicator] = indices
 
         # remove entry (or entries)
-        displayed_tracks = np.delete(displayed_tracks, indices_to_delete[0], 0)
-        self.parent.tracks = np.delete(self.parent.tracks, indices_to_delete[1], 0)
+        if displayed:
+            displayed_tracks = np.delete(displayed_tracks, indices_to_delete[1], 0)
+        self.parent.tracks = np.delete(self.parent.tracks, indices_to_delete[0], 0)
         tracks_layer.data = displayed_tracks
         df = pd.DataFrame(self.parent.tracks, columns=["ID", "Z", "Y", "X"])
         df.sort_values(["ID", "Z"], ascending=True, inplace=True)
@@ -313,6 +320,8 @@ class SegmentationWindow(QWidget):
         -------
         int
             the track id of the cell
+        bool
+            whether the track is displayed or not
         """
         tracks_name = self.parent.combobox_tracks.currentText()
         tracks_layer = grab_layer(self.viewer, tracks_name)
@@ -327,7 +336,14 @@ class SegmentationWindow(QWidget):
                 and tracks[i, 2] == cell[1]
                 and tracks[i, 3] == cell[2]
             ):
-                return tracks[i, 0]
+                return tracks[i, 0], True
+        for i in range(len(self.parent.tracks)):
+            if (
+                self.parent.tracks[i, 1] == cell[0]
+                and self.parent.tracks[i, 2] == cell[1]
+                and self.parent.tracks[i, 3] == cell[2]
+            ):
+                return self.parent.tracks[i, 0], False
         raise ValueError("No matching track found")
 
     def _add_select_callback(self):

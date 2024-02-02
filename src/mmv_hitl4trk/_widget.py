@@ -454,14 +454,16 @@ class MMVHITL4TRK(QWidget):
         if not hasattr(self, "zarr"):
             self.save_as()
             return
-        raw_data = self.combobox_image.currentText()
-        raw_layer = grab_layer(self.viewer, raw_data)
-        segmentation_data = self.combobox_segmentation.currentText()
-        segmentation_layer = grab_layer(self.viewer, segmentation_data)
-        track_data = self.combobox_tracks.currentText()
-        track_layer = grab_layer(self.viewer, track_data)
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        raw_name = self.combobox_image.currentText()
+        raw_layer = grab_layer(self.viewer, raw_name)
+        segmentation_name = self.combobox_segmentation.currentText()
+        segmentation_layer = grab_layer(self.viewer, segmentation_name)
+        track_name = self.combobox_tracks.currentText()
+        track_layer = grab_layer(self.viewer, track_name)
         layers = [raw_layer, segmentation_layer, track_layer]
         save_zarr(self, self.zarr, layers, self.tracks)
+        QApplication.restoreOverrideCursor()
 
     def save_as(self):
         """
@@ -472,15 +474,16 @@ class MMVHITL4TRK(QWidget):
         raw_data = grab_layer(self.viewer, raw_name).data
         segmentation_name = self.combobox_segmentation.currentText()
         segmentation_data = grab_layer(self.viewer, segmentation_name).data
+        tracks_name = self.combobox_tracks.currentText()
         track_data = grab_layer(self.viewer, tracks_name).data
 
         dialog = QFileDialog()
+        QApplication.setOverrideCursor(Qt.WaitCursor)
         path = f"{dialog.getSaveFileName()[0]}"
         if not path.endswith(".zarr"):
             path += ".zarr"
         if path == ".zarr":
             return
-        print(path)
         z = zarr.open(path, mode="w")
         r = z.create_dataset(
             "raw_data", shape=raw_data.shape, dtype="f8", data=raw_data
@@ -494,6 +497,7 @@ class MMVHITL4TRK(QWidget):
         t = z.create_dataset(
             "tracking_data", shape=track_data.shape, dtype="i4", data=track_data
         )
+        QApplication.restoreOverrideCursor()
 
     def get_process_limit(self):
         """
