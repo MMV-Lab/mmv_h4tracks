@@ -1,0 +1,11 @@
+name: mmv_hitl4trk
+display_name: Human in the Loop Cell Tracking Tool
+schema_version: 0.1.0
+contributions:
+  commands: 
+  - id: mmv_hitl4trk.make_qwidget
+    python_name: mmv_hitl4trk._widget:MMVHITL4TRK
+    title: Make tracking widget
+  widgets:
+  - command: mmv_hitl4trk.make_qwidget
+    display_name: MMV_HITL4TRK
