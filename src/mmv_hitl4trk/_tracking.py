@@ -89,7 +89,10 @@ class TrackingWindow(QWidget):
         btn_auto_track = QPushButton(
             "Overlap-based tracking (single cell)"
         )  # TODO: clicking an already tracked cell breaks the onclicks/cursor
-        btn_auto_track.setToolTip("Click on a cell to track based on overlap")
+        btn_auto_track.setToolTip(
+            "Click on a cell to track based on overlap \n\n"
+            "Hotkey: S"
+            )
 
         self.btn_remove_correspondence = QPushButton(UNLINK_TEXT)
         self.btn_remove_correspondence.setToolTip("Remove cells from their tracks")
