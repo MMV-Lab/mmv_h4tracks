@@ -1,6 +1,6 @@
 **We are actively working on the documentation**
 
-# mmv-HITL4TRK
+# MMV_HITL4Trk
 
 [![License](https://img.shields.io/pypi/l/mmv_hitl4trk.svg?color=green)](https://github.com/MMV-Lab/mmv_hitl4trk/raw/main/LICENSE)
 [![PyPI](https://img.shields.io/pypi/v/mmv_hitl4trk.svg?color=green)](https://pypi.org/project/mmv_hitl4trk)
