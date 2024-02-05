@@ -65,7 +65,9 @@ class SegmentationWindow(QWidget):
         )
 
         btn_free_label = QPushButton("Next free ID")
-        btn_free_label.setToolTip("Load next free segmentation label")
+        btn_free_label.setToolTip("Load next free segmentation label \n\n"
+                                  "Hotkey: E"
+        )
 
         btn_false_merge = QPushButton("Separate")
         btn_false_merge.setToolTip(
