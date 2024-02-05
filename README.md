@@ -131,7 +131,8 @@ deleted edge:
 
 Here's an overview of the hotkeys. All of them can also be found in the corresponding tooltips. 
 
-- `?` - ? 
+- `E` - Load next free segmentation ID
+- `S` - Overlap-based single cell tracking
 
 ## Development plan
 
