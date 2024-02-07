@@ -7,7 +7,7 @@
 [![Python Version](https://img.shields.io/pypi/pyversions/mmv_hitl4trk.svg?color=green)](https://python.org)
 [![tests](https://github.com/MMV-Lab/mmv_hitl4trk/workflows/tests/badge.svg)](https://github.com/MMV-Lab/mmv_hitl4trk/actions)
 [![codecov](https://codecov.io/gh/MMV-Lab/mmv_hitl4trk/branch/main/graph/badge.svg)](https://codecov.io/gh/MMV-Lab/mmv_hitl4trk)
-[![napari hub](https://img.shields.io/endpoint?url=https://api.napari-hub.org/shields/mmv_hitl4trk)](https://napari-hub.org/plugins/mmv_hitl4trk)
+[![napari hub](https://img.shields.io/endpoint?url=https://api.napari-hub.org/shields/mmv-hitl4trk)](https://napari-hub.org/plugins/mmv-hitl4trk)
 
 A plugin to use with napari to segment and track cells via HumanInTheLoop(HITL)-approach.
 

@@ -583,31 +583,24 @@ class TrackingWindow(QWidget):
         if not self._validate_track_cells():
             return
 
-        matches = 0
+        matches = []
 
         for entry in self.track_cells:
             if tracks_layer is None:
                 break
             for track_line in tracks_layer.data:
-                if np.all(entry == track_line[1:4]):
-                    matches += 1
-                    if matches == 1:
-                        match_id = track_line[0]
-                        
-        if matches > 1:
-            if matches != np.count_nonzero(tracks_layer.data[:,0] == match_id):
-                notify(
-                    "Cell is already tracked. Please unlink it first if you want to change anything."
-                )
-                return
-            
-            mask = tracks_layer.data[:,0] != match_id
-            tracks = tracks_layer.data[mask]
-            if len(tracks) == 0:
-                tracks = np.insert(self.track_cells, 0, np.zeros((1, len(self.track_cells))), axis=1)
-                self.track_cells = []
-                self._update_parent_tracks(tracks, tracks_layer)
-            tracks_layer.data = tracks
+                if np.all(entry == track_line[1:4]) and not track_line[0] in matches:
+                    matches.append(track_line[0])
+
+        for match_id in matches:
+            track = tracks_layer.data[tracks_layer.data[:,0] == match_id]
+            for entry in self.track_cells:
+                for track_line in track:
+                    if entry[0] == track_line[1] and not np.all(entry[1:3] == track_line[2:4]):
+                        notify(
+                            "Cell is already tracked. Please unlink it first if you want to change anything."
+                        )
+                        return
 
         track_id, tracks = self._get_track_id_and_tracks(tracks_layer)
         connected_ids = self._get_connected_ids(track_id, tracks)
