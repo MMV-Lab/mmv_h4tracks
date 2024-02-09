@@ -261,7 +261,7 @@ def _get_parameters(widget, model: str):
         a dictionary of all the parameters based on selected model
     """
     # Hardcoded models
-    if model == "cellpose_neutrophils":
+    if model == "Neutrophil granulocytes":
         params = {
             "model_path": str(Path(__file__).parent.absolute() / "models" / model),
             "diameter": 15,

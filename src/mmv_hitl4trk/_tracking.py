@@ -601,6 +601,23 @@ class TrackingWindow(QWidget):
                             "Cell is already tracked. Please unlink it first if you want to change anything."
                         )
                         return
+                        
+        # if matches > 1:
+        while len(matches) > 1:
+            mask = tracks_layer.data[:,0] != matches.pop(0)
+            tracks = tracks_layer.data[mask]
+            if len(tracks) == 0:
+                tracks = np.insert(self.track_cells, 0, np.zeros((1, len(self.track_cells))), axis=1)
+                self.track_cells = []
+                self._update_parent_tracks(tracks, tracks_layer)
+            tracks_layer.data = tracks
+        #     mask = tracks_layer.data[:,0] != match_id
+        #     tracks = tracks_layer.data[mask]
+        #     if len(tracks) == 0:
+        #         tracks = np.insert(self.track_cells, 0, np.zeros((1, len(self.track_cells))), axis=1)
+        #         self.track_cells = []
+        #         self._update_parent_tracks(tracks, tracks_layer)
+        #     tracks_layer.data = tracks
 
         track_id, tracks = self._get_track_id_and_tracks(tracks_layer)
         connected_ids = self._get_connected_ids(track_id, tracks)
