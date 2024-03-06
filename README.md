@@ -44,8 +44,8 @@ More detailed information and instructions on each topic can be found in the fol
 ### Get started
 
 To load raw data, you can simply drag & drop them into napari. Ensure that the 'Image' combobox on the right displays the correct layer afterward. 
-![combobox](docs/figures/combobox.png)
-<img src='docs/figures/combobox.png' width='600'>
+
+<img src='docs/figures/combobox.png' width='450'>
 
 To load custom segmentations, you can do equivalent.
 
