@@ -8,6 +8,6 @@ IOU_THRESHOLD = .4
 APPROX_INF = 65535
 MAX_MATCHING_DIST = 45
 
-from ._widget import MMVH4TRKS
+from ._widget import MMVH4TRACKS
 
-__all__ = ["MMVH4TRKS"]
+__all__ = ["MMVH4TRACKS"]
