@@ -40,7 +40,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: pypi
-      url: https://pypi.org/p/mmv_hitl4trk
+      url: https://pypi.org/p/mmv_h4tracks
     permissions:
       id-token: write
 
