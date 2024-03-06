@@ -20,12 +20,12 @@ Load a zarr-file consisting of Image, Label and Tracks layer.
 
 ## Installation
 
-You can install `mmv_hitl4trk` via [pip]:
+You can install `mmv_h4tracks` via [pip]:
 
-    pip install mmv_hitl4trk
+    pip install mmv_h4tracks
 
 
-By default, CPU is used for segmentation computing. We have tried to optimize the CPU computing time, but still recommend GPU computing. For more detailed instructions on how to install GPU support look [here](https://github.com/MouseLand/cellpose#gpu-version-cuda-on-windows-or-linux).
+By default, CPU is used for segmentation computing. We did our best to optimize the CPU computing time, but still recommend GPU computing. For more detailed instructions on how to install GPU support look [here](https://github.com/MouseLand/cellpose#gpu-version-cuda-on-windows-or-linux).
 
 <!-- 
 
@@ -43,7 +43,10 @@ More detailed information and instructions on each topic can be found in the fol
 
 ### Get started
 
-To load raw data, you can simply drag & drop them into napari. Ensure that the 'Image' combobox on the right displays the correct layer afterward. To load custom segmentations, you can do equivalent.
+To load raw data, you can simply drag & drop them into napari. Ensure that the 'Image' combobox on the right displays the correct layer afterward. 
+![combobox](docs/figures/combobox.png)
+
+To load custom segmentations, you can do equivalent.
 
 The "save as" button can be used to save the existing layers (raw, segmentation, tracks) in a single .zarr file, which can be loaded again later using the "load" button. The "save" button overwrites the loaded .zarr file.
 
@@ -52,7 +55,7 @@ The computation mode is used to set how many of the available CPU cores (40% or 
 
 ### Segmentation
 
-For segmentation, we use the state of the art instance segmentation method Cellpose. We provide one (/several??) model that we trained and has proven successful for our data ([see more information](https://doi.org/10.1038/s41467-023-43765-3)).
+For segmentation, we use the state of the art instance segmentation method Cellpose. We provide a model that we trained and has proven successful for our application ([see more information](https://doi.org/10.1038/s41467-023-43765-3)).
 
 (...)
 
