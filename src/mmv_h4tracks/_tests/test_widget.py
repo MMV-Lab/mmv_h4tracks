@@ -2,7 +2,7 @@
 import numpy as np
 import pytest
 
-from mmv_hitl4trk import MMVHITL4TRK
+from mmv_h4tracks import MMVH4TRACKS
 
 
 AMOUNT_OF_COMBOBOXES = 3
@@ -26,7 +26,7 @@ def viewer_with_widget(make_napari_viewer):
         Instance of the main widget
     """
     viewer = make_napari_viewer()
-    my_widget = MMVHITL4TRK(viewer)
+    my_widget = MMVH4TRACKS(viewer)
     add_layers(viewer, 10)
     yield my_widget
 
