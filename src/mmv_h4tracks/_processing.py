@@ -25,7 +25,7 @@ from qtpy.QtWidgets import (
 from scipy import ndimage, optimize, spatial
 import torch
 
-from mmv_hitl4trk import APPROX_INF, MAX_MATCHING_DIST
+from mmv_h4tracks import APPROX_INF, MAX_MATCHING_DIST
 from ._grabber import grab_layer
 from ._logger import choice_dialog, notify, handle_exception
 

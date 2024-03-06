@@ -2,7 +2,7 @@
 import numpy as np
 import pytest
 
-from mmv_hitl4trk import MMVHITL4TRK
+from mmv_h4tracks import MMVH4TRACKS
 
 
 AMOUNT_OF_COMBOBOXES = 3
@@ -11,7 +11,7 @@ AMOUNT_OF_COMBOBOXES = 3
 
 @pytest.fixture
 def create_widget(make_napari_viewer):
-    yield MMVHITL4TRK(make_napari_viewer())
+    yield MMVH4TRACKS(make_napari_viewer())
 
 @pytest.fixture
 def viewer_with_widget(create_widget):
@@ -20,7 +20,7 @@ def viewer_with_widget(create_widget):
 
     Parameters
     ----------
-    create_widget : MMVHITL4TRK
+    create_widget : MMVH4TRACKS
         Instance of the main widget
 
     Yields
@@ -67,14 +67,14 @@ def add_layers(viewer, amount, names=None):
 def test_widget_creation(create_widget):
     """
     Test if the widget is created correctly
-    Widget should be an instance of MMVHITL4TRK
+    Widget should be an instance of MMVH4TRACKS
 
     Parameters
     ----------
-    create_widget : MMVHITL4TRK
+    create_widget : MMVH4TRACKS
         Instance of the main widget
     """
-    assert isinstance(create_widget, MMVHITL4TRK)
+    assert isinstance(create_widget, MMVH4TRACKS)
 
 @pytest.mark.combobox
 @pytest.mark.unit

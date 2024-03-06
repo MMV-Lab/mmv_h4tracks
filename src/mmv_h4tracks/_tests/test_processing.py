@@ -3,12 +3,12 @@ import numpy as np
 import pytest
 from pathlib import Path
 
-from mmv_hitl4trk import _processing as processing, MMVHITL4TRK
-from mmv_hitl4trk._segmentation import SegmentationWindow
+from mmv_h4tracks import _processing as processing, MMVH4TRACKS
+from mmv_h4tracks._segmentation import SegmentationWindow
 
 @pytest.fixture
 def create_widget(make_napari_viewer):
-    return MMVHITL4TRK(make_napari_viewer())
+    return MMVH4TRACKS(make_napari_viewer())
 
 pytestmark = pytest.mark.processing
 

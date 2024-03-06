@@ -7,14 +7,14 @@ from aicsimageio import (
     AICSImage,
 )
 
-from mmv_hitl4trk import MMVHITL4TRK
+from mmv_h4tracks import MMVH4TRACKS
 
 # this tests if the analysis returns the proper values
 PATH = Path(__file__).parent / "data"
 
 @pytest.fixture
 def create_widget(make_napari_viewer):
-    yield MMVHITL4TRK(make_napari_viewer())
+    yield MMVH4TRACKS(make_napari_viewer())
 
 
 @pytest.fixture
@@ -96,7 +96,7 @@ def add_layers(viewer):
 @pytest.mark.unit
 @pytest.mark.parametrize("value", *[np.linspace(0, 1, 11)])
 def test_round_half_up(set_widget_up, value):
-    from mmv_hitl4trk._evaluation import round_half_up
+    from mmv_h4tracks._evaluation import round_half_up
 
     if value < 0.5:
         assert round_half_up(value) == 0
@@ -208,7 +208,7 @@ def test_false_positives(set_widget_up, layername, expected_value):
     window = widget.evaluation_window
     gt_seg = viewer.layers[viewer.layers.index("GT")].data
     eval_seg = viewer.layers[viewer.layers.index(layername)].data
-    from mmv_hitl4trk._evaluation import get_false_positives as func
+    from mmv_h4tracks._evaluation import get_false_positives as func
 
     fp = window.get_segmentation_fault(gt_seg, eval_seg, func)
     assert fp == expected_value
@@ -245,7 +245,7 @@ def test_false_negatives(set_widget_up, layername, expected_value, gt):
     window = widget.evaluation_window
     gt_seg = viewer.layers[viewer.layers.index(gt)].data
     eval_seg = viewer.layers[viewer.layers.index(layername)].data
-    from mmv_hitl4trk._evaluation import get_false_negatives as func
+    from mmv_h4tracks._evaluation import get_false_negatives as func
 
     fn = window.get_segmentation_fault(gt_seg, eval_seg, func)
     assert fn == expected_value
@@ -274,7 +274,7 @@ def test_split_cells(set_widget_up, layername, expected_value):
     window = widget.evaluation_window
     gt_seg = viewer.layers[viewer.layers.index("GT")].data
     eval_seg = viewer.layers[viewer.layers.index(layername)].data
-    from mmv_hitl4trk._evaluation import get_split_cells as func
+    from mmv_h4tracks._evaluation import get_split_cells as func
 
     sc = window.get_segmentation_fault(gt_seg, eval_seg, func)
     assert sc == expected_value
