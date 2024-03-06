@@ -12,9 +12,13 @@ from mmv_hitl4trk import MMVHITL4TRK
 # this tests if the analysis returns the proper values
 PATH = Path(__file__).parent / "data"
 
+@pytest.fixture
+def create_widget(make_napari_viewer):
+    yield MMVHITL4TRK(make_napari_viewer())
+
 
 @pytest.fixture
-def set_widget_up(make_napari_viewer):
+def set_widget_up(create_widget):
     """
     Creates an instance of the plugin and adds all layers of testdata to the viewer
 
@@ -29,8 +33,8 @@ def set_widget_up(make_napari_viewer):
         Instance of the main widget
     """
     SEGMENTATION_GT = "GT"
-    viewer = make_napari_viewer()
-    my_widget = MMVHITL4TRK(viewer)
+    my_widget = create_widget
+    viewer = my_widget.viewer
     for file in list(Path(PATH / "segmentation").iterdir()):
         print(file.stem)
         segmentation = AICSImage(file).get_image_data("ZYX")
@@ -48,7 +52,7 @@ def set_widget_up(make_napari_viewer):
 
 
 @pytest.fixture
-def get_widget(make_napari_viewer):
+def get_widget(create_widget):
     """
     Creates an instance of the plugin and adds sample layers
 
@@ -62,8 +66,8 @@ def get_widget(make_napari_viewer):
     my_widget
         Instance of the main widget
     """
-    viewer = make_napari_viewer()
-    my_widget = MMVHITL4TRK(viewer)
+    my_widget = create_widget
+    viewer = my_widget.viewer
     add_layers(viewer)
     yield my_widget
 

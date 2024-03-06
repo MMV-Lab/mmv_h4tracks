@@ -9,24 +9,27 @@ AMOUNT_OF_COMBOBOXES = 3
 
 # make_napari_viewer is a pytest fixture that returns a napari viewer object
 
+@pytest.fixture
+def create_widget(make_napari_viewer):
+    yield MMVHITL4TRK(make_napari_viewer())
 
 @pytest.fixture
-def viewer_with_widget(make_napari_viewer):
+def viewer_with_widget(create_widget):
     """
     Creates a viewer with the plugin and 10 label layers
 
     Parameters
     ----------
-    make_napari_viewer : fixture
-        Pytest fixture that creates a napari viewer
+    create_widget : MMVHITL4TRK
+        Instance of the main widget
 
     Yields
     ------
     my_widget
         Instance of the main widget
     """
-    viewer = make_napari_viewer()
-    my_widget = MMVHITL4TRK(viewer)
+    my_widget = create_widget
+    viewer = my_widget.viewer
     add_layers(viewer, 10)
     yield my_widget
 
@@ -59,6 +62,19 @@ def add_layers(viewer, amount, names=None):
             np.random.randint(5, size=(20, 4), dtype=int), name=names[amount * 2 + i]
         )
 
+@pytest.mark.widget
+@pytest.mark.system
+def test_widget_creation(create_widget):
+    """
+    Test if the widget is created correctly
+    Widget should be an instance of MMVHITL4TRK
+
+    Parameters
+    ----------
+    create_widget : MMVHITL4TRK
+        Instance of the main widget
+    """
+    assert isinstance(create_widget, MMVHITL4TRK)
 
 @pytest.mark.combobox
 @pytest.mark.unit

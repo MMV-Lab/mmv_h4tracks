@@ -47,9 +47,11 @@ def segment_slice_cpu(layer_slice, parameters):
         the segmentation mask for the slice
     """
     model = models.CellposeModel(
-        gpu=False, pretrained_model=parameters.pop("model_path")
+        gpu=False, pretrained_model=parameters["model_path"]
     )
-    mask, _, _ = model.eval(layer_slice, **parameters)
+    eval_params = parameters
+    eval_params.pop("model_path", None)
+    mask, _, _ = model.eval(layer_slice, **eval_params)
     return mask
 
 
@@ -136,32 +138,38 @@ def match_centroids(
 
     return matched_pairs
 
+def read_custom_model_dict(widget):
+    """
+    Reads the parameters of the custom models from the 'custom_models.json' file and returns them
+    """
+    with open(Path(__file__).parent / "custom_models.json", "r") as file:
+        return json.load(file)
+
 
 def read_models(widget):
     """
-    Reads the available models from the 'models' directory and adds them to the segmentation combobox.
+    Reads the available models from the 'models' and 'custom models' directory and returns them
     """
-    widget.combobox_segmentation.clear()
-    with open(Path(__file__).parent / "custom_models.json", "r") as file:
-        widget.custom_models = json.load(file)
-
     path = Path(__file__).parent / "models"
 
+    hardcoded_models = [file.name for file in path.iterdir() if not file.is_dir()]
     custom_models = []
-
-    for file in path.iterdir():
-        if not file.is_dir():
-            widget.combobox_segmentation.addItem(file.name)
 
     p = Path(__file__).parent / "models" / "custom_models"
     custom_model_filenames = [file.name for file in p.glob("*") if file.is_file()]
     for custom_model in widget.custom_models:
         if widget.custom_models[custom_model]["filename"] in custom_model_filenames:
             custom_models.append(CUSTOM_MODEL_PREFIX + custom_model)
-    if len(custom_models) < 1:
-        return
+    return hardcoded_models, custom_models
+
+def display_models(widget, hardcoded_models, custom_models):
+    """
+    Adds the passed models to the segmentation combobox.
+    """
+    hardcoded_models.sort()
     custom_models.sort()
-    widget.combobox_segmentation.addItem("select model")
+    widget.combobox_segmentation.clear()
+    widget.combobox_segmentation.addItems(hardcoded_models)
     widget.combobox_segmentation.addItems(custom_models)
 
 

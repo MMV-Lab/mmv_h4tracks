@@ -52,6 +52,7 @@ class SegmentationWindow(QWidget):
         except TypeError:
             self.setStyleSheet(napari.qt.get_stylesheet(theme_id="dark"))
 
+        self.custom_models = processing.read_custom_model_dict(self)
         # Used to cach the callback on the label layer
         self.cached_callback = None
 
@@ -107,7 +108,8 @@ class SegmentationWindow(QWidget):
         # QComboBoxes
         self.combobox_segmentation = QComboBox()
         self.combobox_segmentation.setToolTip("select model")
-        processing.read_models(self)
+        hardcoded_models, custom_models = processing.read_models(self)
+        processing.display_models(self, hardcoded_models, custom_models)
         self.combobox_segmentation.currentTextChanged.connect(
             self.toggle_segmentation_button
         )
