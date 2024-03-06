@@ -43,11 +43,11 @@ More detailed information and instructions on each topic can be found in the fol
 
 ### Get started
 
-To load raw data, you can simply drag & drop them into napari. Ensure that the 'Image' combobox on the right displays the correct layer afterward. 
+To load your raw data, you can simply drag & drop them into napari. Ensure that the 'Image' combobox displays the correct layer afterward, see example: 
 
 <img src='docs/figures/combobox.png' width='450'>
 
-To load custom segmentations, you can do equivalent.
+To load your own segmentation, you can do equivalent.
 
 The "save as" button can be used to save the existing layers (raw, segmentation, tracks) in a single .zarr file, which can be loaded again later using the "load" button. The "save" button overwrites the loaded .zarr file.
 
@@ -64,31 +64,44 @@ For segmentation, we use the state of the art instance segmentation method Cellp
 
 #### Automatic instance segmentation
 
-(...)
+To start automatic segmentation, a model must first be selected (default is ??). Automatic segmentation can then be started via "Run Segmentation". The "Preview" option offers the possibility of automatically segmenting the first 5 frames first in order to obtain an estimate of the expected results, as the computation - depending on the data and hardware - can be time-consuming.
+
 
 ##### Custom models
 
-The plugin supports loading custom Cellpose models. To train your own Cellpose model, [this](https://cellpose.readthedocs.io/en/latest/train.html) might be helpful.
+The plugin supports adding custom Cellpose models. To do so, simply click on "Add custom Cellpose model", enter a name to be displayed, select the model path and pass the required parameters. Click [here](https://cellpose.readthedocs.io/en/latest/api.html#id0) for more information about the parameters.
 
+
+To train your own Cellpose model, [this](https://cellpose.readthedocs.io/en/latest/train.html) might be helpful.
 In future versions, we plan to support fine-tuning of Cellpose models within the plugin. 
 
 
 #### Manual curation
 
-Be aware that removing a cell cuts the track the cell is on. Resulting tracks shorter than two timesteps will be removed
+We provide different options to correct the automatic segmentation:
 
-(...)
+- `Remove cell` - Click on a cell to remove it. Be aware that removing a cell cuts the track the cell is on.
+- `Next free ID` - Loads the next free label ID, then a false negative cell can be manually annotated using the paint mode.
+- `Select ID` - Click on a cell to load its ID, then this cell can be corrected manually using the paint mode.
+- `Merge cell` - Click on 2 different fragments of the same cell to harmonize their ID. Note: This has no effect on the annotation itself.
+- `Separate` - Click on a cell to assign a new ID to it.
+
 
 ### Tracking
 
-The plugin supports both coordinate-based and overlap-based tracking. Overlap-based tracking requires more computation, but can also be used in particularly complicated data for individual cells.
+The plugin supports both coordinate-based (LAP) and overlap-based tracking. Overlap-based tracking requires more computation, but can also be used in particularly complicated data for individual cells.
 In our experience, coordinate-based tracking has proven itself in cases with reliable segmentation. Overlap-based tracking serves as a useful complement in cases where the segmentation is not of sufficient quality.
 
-(...)
+If necessary, overlap-based tracking can also be used for single cells. To do this, simply click on the cell after clicking the button.
 
 #### Manual curation
 
-(...)
+To correct tracks, the plugin allows you to link or unlink them. For both options, first click on the corresponding button and then on the cell in the respective frame. The action must then be confirmed using the previously clicked button, which now displays "confirm".
+
+To unlink, all you need to do is click on the cell in the first and last frame. So if the cell is tracked from frame 1-100 and the track between frames 1-10 is to be deleted, it is sufficient to click on the cell in frames 1 and 10. If the track is to be deleted between frames 40-60, it is sufficient to click in frames 40 and 60. In this scenario, the rest of the track is then split, i.e. once into a track from frame 1-40 and once into a track from frame 60-100.
+
+In contrast, to link cells, the corresponding cell in each frame must be clicked. This must be done for all frames, so the track must be gapless.
+
 
 ### Analysis
 
