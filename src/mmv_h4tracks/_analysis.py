@@ -25,7 +25,7 @@ from skimage import measure
 
 from ._grabber import grab_layer
 from ._logger import notify
-from mmv_hitl4trk._logger import handle_exception
+from mmv_h4tracks._logger import handle_exception
 from ._selector import Selector
 from ._writer import save_csv
 

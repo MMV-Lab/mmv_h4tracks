@@ -1,11 +1,11 @@
-site_name: mmv-HITL_4TRK
+site_name: mmv-H4TRACKS
 site_description: A simple plugin to use with napari
 site_author: lennart kowitz
 
 theme: readthedocs
 
 
-repo_url: https://github.com/MMV-Lab/mmv_hitl4trk
+repo_url: https://github.com/MMV-Lab/mmv_h4tracks
 
 pages:
 - Home: index.md

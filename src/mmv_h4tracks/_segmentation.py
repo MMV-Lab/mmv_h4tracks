@@ -19,7 +19,7 @@ import pandas as pd
 
 from ._logger import notify, handle_exception
 from ._grabber import grab_layer
-import mmv_hitl4trk._processing as processing
+import mmv_h4tracks._processing as processing
 from .add_models import ModelWindow
 
 

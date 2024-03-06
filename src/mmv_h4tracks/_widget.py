@@ -41,7 +41,7 @@ from ._writer import save_zarr
 from ._grabber import grab_layer
 
 
-class MMVHITL4TRK(QWidget):
+class MMVH4TRACKS(QWidget):
     """
     The main widget of our application
 
@@ -98,7 +98,7 @@ class MMVHITL4TRK(QWidget):
         logo_label.setMaximumWidth(150)
         logo_label.setScaledContents(True)
         logo_label.setAlignment(Qt.AlignCenter)
-        title = QLabel("<h1><font color='green'>MMV_HITL4TRK</font></h1>")
+        title = QLabel("<h1><font color='green'>MMV_H4TRACKS</font></h1>")
         title.setMaximumHeight(100)
         label_image = QLabel("Image:")
         label_segmentation = QLabel("Segmentation:")
