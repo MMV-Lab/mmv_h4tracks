@@ -2,12 +2,12 @@
 
 # MMV_H4Tracks
 
-[![License](https://img.shields.io/pypi/l/mmv_hitl4trk.svg?color=green)](https://github.com/MMV-Lab/mmv_hitl4trk/raw/main/LICENSE)
-[![PyPI](https://img.shields.io/pypi/v/mmv_hitl4trk.svg?color=green)](https://pypi.org/project/mmv_hitl4trk)
-[![Python Version](https://img.shields.io/pypi/pyversions/mmv_hitl4trk.svg?color=green)](https://python.org)
-[![tests](https://github.com/MMV-Lab/mmv_hitl4trk/workflows/tests/badge.svg)](https://github.com/MMV-Lab/mmv_hitl4trk/actions)
-[![codecov](https://codecov.io/gh/MMV-Lab/mmv_hitl4trk/branch/main/graph/badge.svg)](https://codecov.io/gh/MMV-Lab/mmv_hitl4trk)
-[![napari hub](https://img.shields.io/endpoint?url=https://api.napari-hub.org/shields/mmv_hitl4trk)](https://napari-hub.org/plugins/mmv_hitl4trk)
+[![License](https://img.shields.io/pypi/l/mmv_h4tracks.svg?color=green)](https://github.com/MMV-Lab/mmv_h4tracks/raw/main/LICENSE)
+[![PyPI](https://img.shields.io/pypi/v/mmv_h4tracks.svg?color=green)](https://pypi.org/project/mmv_h4tracks)
+[![Python Version](https://img.shields.io/pypi/pyversions/mmv_h4tracks.svg?color=green)](https://python.org)
+[![tests](https://github.com/MMV-Lab/mmv_h4tracks/workflows/tests/badge.svg)](https://github.com/MMV-Lab/mmv_h4tracks/actions)
+[![codecov](https://codecov.io/gh/MMV-Lab/mmv_h4tracks/branch/main/graph/badge.svg)](https://codecov.io/gh/MMV-Lab/mmv_h4tracks)
+[![napari hub](https://img.shields.io/endpoint?url=https://api.napari-hub.org/shields/mmv_h4tracks)](https://napari-hub.org/plugins/mmv_h4tracks)
 
 A plugin to use with napari to segment and track cells via HumanInTheLoop(HITL)-approach.
 
@@ -31,7 +31,7 @@ By default, CPU is used for segmentation computing. We did our best to optimize 
 
 To install latest development version :
 
-    pip install git+https://github.com/MMV-Lab/mmv_hitl4trk.git -->
+    pip install git+https://github.com/MMV-Lab/mmv_h4tracks.git -->
 
 
 ## Documentation
@@ -59,8 +59,6 @@ The computation mode is used to set how many of the available CPU cores (40% or 
 For segmentation, we use the state of the art instance segmentation method Cellpose. We provide a model that we trained and has proven successful for our application ([see more information](https://doi.org/10.1038/s41467-023-43765-3)).
 
 (...)
-
-
 
 #### Automatic instance segmentation
 
@@ -105,13 +103,17 @@ In contrast, to link cells, the corresponding cell in each frame must be clicked
 
 ### Analysis
 
-The plugin supports the calculation of various metrics, which can be divided into two categories: migration-based (such as speed, direction, ...) and cell-based (such as size, eccentricity, ...). Through the use of these metrics, a comprehensive understanding of the available data can be obtained.
+The plugin supports the calculation of various metrics, which can be divided into two categories: migration-based (such as speed, direction, ...) and shape-based (such as size, eccentricity, ...). Through the use of these metrics, a comprehensive understanding of the available data can be obtained.
+
+All these metrics can be exported to a .csv file. In addition, the tracks can be filtered with a movement minimum (in pixels) and a minimum track length (in frames). Note: All existing tracks are exported in any case, but their results are presented separately.
+ 
+The plugin offers the option of filtering the existing tracks according to the metrics. To do this, the corresponding metric can be selected in the plot area and a scatter plot of the data points will be generated using the plot button. Individual data points (/tracks) that are to be displayed can be circled with the mouse and all tracks that are not circled will be hidden. Note: No tracks are deleted in this process. Hiding tracks triggers the filter function in the tracking section. In combination with this, entire tracks can be deleted as described above.
 
 (...)
 
 ### Evaluation
 
-To be aware of the accuracy of your automatic tracking and segmentation results, we have implemented an evaluation function based on [this manuscript](https://doi.org/10.1371/journal.pone.0144959). Evaluation is always carried out against the latest results of automatic segmentation and automatic tracking or previously created results loaded via the plugin's own load function. We may implement the option to evaluate external segmentations in the future, but for now you can use save and load as a workaround.
+To be aware of the accuracy of your automatic tracking and segmentation results, we have implemented an option to evaluate your automatic results. Evaluation is always carried out against the latest results of automatic segmentation and automatic tracking or previously created results loaded via the plugin's own load function. We may implement the option to evaluate external segmentations in the future, but for now you can use save and load as a workaround.
 
 To evaluate results, at least 2 consecutive frames must first be corrected manually. The plugin saves the previously mentioned automatic or loaded results in the background, so no activation via button or similar is necessary before manual correction.
 
@@ -120,28 +122,11 @@ To evaluate results, at least 2 consecutive frames must first be corrected manua
 
 #### Segmentation evaluation
 
-(...)
+In order to evaluate the segmentation results, a segmentation must first be loaded either via the load function of the plugin (drag&drop via napari is not sufficient) or computed within the plugin. This can then be corrected manually. For IoU, Dice and F1 scores are then calculated for the slices specified by the user. These results are not exported automatically and must therefore be noted down by users themselves.
 
 #### Tracking evaluation
 
-(...)
-
-false positives:
-	check if cell from eval has a match > .4 IoU. If no, check if cell has second highest match >= .2 IoU. If no, then fp
-	
-false negatives:
-	check if cell from gt has a match > .4. If no, then fn.
-	check if matched cell maxIoU is higher than match. If yes, then fn.
-	check if matched cell top 2 maxIoU are equal. If yes, then half fn (this will apply for both cells)
-	
-split cell:
-	check if cell from eval has more than one match, and if second highest match is >= .2 IoU. If yes, then sc
-	
-added edge:
-	check if a connection in gt has both cells matched in eval & the matched cells are connected. if no, then ae
-	
-deleted edge:
-	check if a connection in eval has both cells matched in gt & the matched cells are connected. if no, then de
+As for the evaluation of the segmentation, tracking results loaded via the plugin or obtained within the plugin are required. At least 2 consecutive slices must be corrected manually so that a score can be calculated for the quality of the tracking results. More information can be found [here](https://doi.org/10.1371/journal.pone.0144959).
 
 
 ## Hotkeys
@@ -167,7 +152,8 @@ If you have a feature request, please [file an issue].
 
 The following resources may be of interest:
 
-- [Cellpose]()
+- [napari](https://napari.org/)
+- [Cellpose](https://doi.org/10.1038/s41592-020-01018-x)
 
 ## Contributing
 
@@ -177,7 +163,7 @@ the coverage at least stays the same before you submit a pull request.
 ## License
 
 Distributed under the terms of the [BSD-3] license,
-"mmv_hitl4trk" is free and open source software
+"mmv_h4tracks" is free and open source software
 
 ## Issues
 
@@ -194,7 +180,7 @@ If you encounter any problems, please [file an issue] along with a detailed desc
 [Mozilla Public License 2.0]: https://www.mozilla.org/media/MPL/2.0/index.txt
 [cookiecutter-napari-plugin]: https://github.com/napari/cookiecutter-napari-plugin
 
-[file an issue]: https://github.com/MMV-Lab/mmv_hitl4trk/issues
+[file an issue]: https://github.com/MMV-Lab/mmv_h4tracks/issues
 
 [napari]: https://github.com/napari/napari
 [tox]: https://tox.readthedocs.io/en/latest/
