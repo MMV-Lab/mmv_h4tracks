@@ -34,7 +34,7 @@ class EvaluationWindow(QWidget):
     def _setup_ui(self):
         """Setup the UI of the evaluation window."""
         # Labels
-        evaluation_label = QLabel("Slices to evaluate:")
+        evaluation_label = QLabel("Frames to evaluate:")
 
         # Buttons
         evaluate_segmentation = QPushButton("Evaluate Segmentation")

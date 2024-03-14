@@ -311,7 +311,7 @@ def _track_segmentation(widget):
     data = _get_segmentation_data(widget)
 
     # check for tracks layer
-    tracks_name, collision = _check_for_tracks_layer(widget)
+    _, collision = _check_for_tracks_layer(widget)
     if collision:
         QApplication.restoreOverrideCursor()
         yield "Replace tracks layer"
@@ -330,7 +330,7 @@ def _track_segmentation(widget):
     tracks = _process_matches(matches)
 
     QApplication.restoreOverrideCursor()
-    return widget, tracks, tracks_name
+    return tracks
 
 
 def _get_segmentation_data(widget):

@@ -49,11 +49,12 @@ def save_zarr(parent, zarr_file, layers, cached_tracks):
     layers : list of layer
         The layers raw image, segmentation, tracks in order
     cached_tracks : array
-        The complete tracks layer
+        The cached tracks layer, can be None
     """
 
-    response = 1
-    if not np.array_equal(layers[2].data, cached_tracks):
+    response = 0
+    if not cached_tracks is None:
+    # if not np.array_equal(layers[2].data, cached_tracks):
         response = choice_dialog(
             (
                 "It looks like you have selected only some of the tracks from your tracks layer. "
@@ -68,9 +69,11 @@ def save_zarr(parent, zarr_file, layers, cached_tracks):
         if response == 4194304:
             return
 
-    tracks = cached_tracks
-    if response == 0:
-        tracks = layers[2]
+    tracks = layers[2].data
+    if response == 1:
+        tracks = cached_tracks
+    # if response == 0:
+    #     tracks = layers[2]
 
     if zarr_file == None:
         file = save_dialog(parent, "*.zarr")

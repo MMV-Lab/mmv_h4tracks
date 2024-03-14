@@ -186,7 +186,7 @@ def test_index_consistent_on_layer_remove(viewer_with_widget, index, removal_ind
     widget = viewer_with_widget
     combobox = widget.layer_comboboxes[index]
     combobox.setCurrentIndex(5)
-    widget.viewer.layers.pop(removal_index + index * 10)
+    widget.viewer.layers.pop(removal_index + 1 + index * 10)
     if removal_index < 4:
         assert combobox.currentIndex() == 4
     else:
@@ -237,7 +237,7 @@ def test_moved_layer_order(viewer_with_widget, index, from_index, to_index):
     layername = combobox.currentText()
 
     widget.viewer.layers.move(from_index + index * 10, to_index + index * 10)
-    assert widget.viewer.layers.index(layername) + 1 - index * 10 == combobox.findText(
+    assert widget.viewer.layers.index(layername) - index * 10 == combobox.findText(
         layername
     )
 
@@ -261,9 +261,9 @@ def test_moved_layer_index_moved(viewer_with_widget, index):
     # current index should be updated to new index of moved item
     widget = viewer_with_widget
     combobox = widget.layer_comboboxes[index]
-    combobox.setCurrentIndex(5)
+    combobox.setCurrentIndex(4)
     widget.viewer.layers.move(index * 10 + 4, index * 10 + 2)
-    assert combobox.currentIndex() == 3
+    assert combobox.currentIndex() == 2
 
 
 @pytest.mark.combobox
