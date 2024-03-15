@@ -138,13 +138,15 @@ def match_centroids(
 
     return matched_pairs
 
-def read_custom_model_dict(widget):
+def read_custom_model_dict():
     """
     Reads the parameters of the custom models from the 'custom_models.json' file and returns them
     """
-    with open(Path(__file__).parent / "custom_models.json", "r") as file:
-        return json.load(file)
-
+    try:
+        with open(Path(__file__).parent / "custom_models.json", "r") as file:
+            return json.load(file)
+    except FileNotFoundError:
+        return {}
 
 def read_models(widget):
     """

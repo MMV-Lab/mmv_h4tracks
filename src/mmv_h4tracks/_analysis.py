@@ -694,7 +694,7 @@ class AnalysisWindow(QWidget):
                 {
                     "Results": np.array(
                         [
-                            [None, np.count_nonzero(tracks_layer.data[:, 0] == i), i]
+                            [i, np.count_nonzero(tracks_layer.data[:, 0] == i), i]
                             for i in np.unique(tracks_layer.data[:, 0])
                         ]
                     )
@@ -714,7 +714,7 @@ class AnalysisWindow(QWidget):
             if checkbox.checkState():
                 selected_metrics.append(checkbox.text())
 
-        if not np.array_equal(self.parent.tracks, grab_layer(self.viewer, self.parent.combobox_tracks.currentText()).data):
+        if self.parent.tracking_window.cached_tracks is not None:
             notify("Export is not possible if some tracks are hidden!")
             return
 

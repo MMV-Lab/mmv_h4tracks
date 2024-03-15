@@ -255,7 +255,8 @@ class EvaluationWindow(QWidget):
     def evaluate_curated_tracking(self, gt_tracks_layer, gt_seg, eval_tracks, eval_seg):
         """Evaluate the curated ground truth tracking against the automatically generated tracking."""
         self.adjust_centroids(gt_seg, gt_tracks_layer)
-
+        gt_seg_complete = gt_seg
+        eval_seg_complete = eval_seg
         try:
             lower_bound = int(self.evaluation_limit_lower.text())
             upper_bound = int(self.evaluation_limit_upper.text())
@@ -270,16 +271,16 @@ class EvaluationWindow(QWidget):
             upper_bound = gt_seg.shape[0]
 
         gt_tracks = gt_tracks_layer.data
-        mask = (gt_tracks[:, 0] >= lower_bound) & (gt_tracks[:, 0] < upper_bound)
+        mask = (gt_tracks[:, 1] >= lower_bound) & (gt_tracks[:, 1] < upper_bound)
         gt_tracks = gt_tracks[mask]
         gt_seg = gt_seg[lower_bound : upper_bound + 1]
-        mask = (eval_tracks[:, 0] >= lower_bound) & (eval_tracks[:, 0] < upper_bound)
+        mask = (eval_tracks[:, 1] >= lower_bound) & (eval_tracks[:, 1] < upper_bound)
         eval_tracks = eval_tracks[mask]
         eval_seg = eval_seg[lower_bound : upper_bound + 1]
         fp = self.get_segmentation_fault(gt_seg, eval_seg, get_false_positives)
         fn = self.get_segmentation_fault(gt_seg, eval_seg, get_false_negatives)
         sc = self.get_segmentation_fault(gt_seg, eval_seg, get_split_cells)
-        de, ae = self.get_track_fault(gt_seg, gt_tracks, eval_seg, eval_tracks)
+        de, ae = self.get_track_fault(gt_seg_complete, gt_tracks, eval_seg_complete, eval_tracks)
 
         fv = fp + fn * 10 + sc * 5 + de + ae * 1.5
 

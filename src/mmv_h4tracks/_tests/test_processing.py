@@ -39,8 +39,7 @@ def test_calculate_centroid():
 @pytest.mark.unit
 def test_read_custom_model_dict(create_widget):
     widget = create_widget
-    segmentation_widget = SegmentationWindow(widget)
-    model_dict = processing.read_custom_model_dict(segmentation_widget)
+    model_dict = processing.read_custom_model_dict()
     assert model_dict == {}
 
 @pytest.mark.unit

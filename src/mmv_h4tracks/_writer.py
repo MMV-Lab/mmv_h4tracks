@@ -1,7 +1,9 @@
 import csv
+import locale
 
 import numpy as np
 import zarr
+import pandas as pd
 from qtpy.QtWidgets import QFileDialog, QMessageBox
 
 from ._logger import choice_dialog, notify
@@ -112,7 +114,23 @@ def save_csv(file, data):
     data : list
         CSV data to write to disk
     """
+    default_locale = locale.getdefaultlocale()[0]
+    if default_locale.startswith("de"):
+        data = [convert_np64_to_string(sublist) for sublist in data]
+        delimiter = ";"
+    else:
+        delimiter = ","
     csvfile = open(file[0], "w", newline="")
-    writer = csv.writer(csvfile)
+    writer = csv.writer(csvfile, delimiter = delimiter)
     [writer.writerow(row) for row in data]
     csvfile.close()
+    print("CSV file has been saved.")
+
+def convert_np64_to_string(sublist):
+    converted_sublist = []
+    for item in sublist:
+        if isinstance(item, np.float64):
+            converted_sublist.append(str(item).replace(".", ","))
+        else:
+            converted_sublist.append(item)
+    return converted_sublist
