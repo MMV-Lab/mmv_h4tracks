@@ -70,6 +70,9 @@ class TrackingWindow(QWidget):
 
         # Labels
         label_display_ids = QLabel("Enter specific track IDs to display:")
+        label_display_ids.setToolTip(
+            "In order to display all tracks, clear the filter field and click 'Filter'"
+        )
         label_delete_specific_ids = QLabel("Delete specified tracks:")
 
         # Buttons
@@ -103,6 +106,9 @@ class TrackingWindow(QWidget):
 
         btn_delete_displayed_tracks = QPushButton("Delete all displayed tracks")
         btn_filter_tracks = QPushButton("Filter")
+        btn_filter_tracks.setToolTip(
+            "In order to display all tracks, clear the filter field and click here"
+        )
         btn_delete_selected_tracks = QPushButton("Delete")
 
         btn_centroid_tracking.clicked.connect(self.coordinate_tracking_on_click)

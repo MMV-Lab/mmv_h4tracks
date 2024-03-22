@@ -166,33 +166,38 @@ class EvaluationWindow(QWidget):
         """Evaluate the curated ground truth segmentation against the automatically generated segmentation."""
         try:
             lower_bound = int(self.evaluation_limit_lower.text())
-            upper_bound = int(self.evaluation_limit_upper.text())
-        except ValueError as exc:
+        except ValueError:
             lower_bound = 0
-            upper_bound = gt_seg.shape[0]
+        try:
+            upper_bound = int(self.evaluation_limit_upper.text())
+        except ValueError:
+            upper_bound = gt_seg.shape[0] - 1
         if lower_bound > upper_bound:
             lower_bound, upper_bound = upper_bound, lower_bound
         if lower_bound < 0:
             lower_bound = 0
-        if upper_bound > gt_seg.shape[0]:
-            upper_bound = gt_seg.shape[0]
+        if upper_bound >= gt_seg.shape[0]:
+            upper_bound = gt_seg.shape[0] - 1
+
+        if lower_bound == upper_bound:
+            return
 
         ### Calculate the scores
         # IoU
         range_iou = self._calculate_iou(
-            gt_seg[lower_bound:upper_bound], eval_seg[lower_bound:upper_bound]
+            gt_seg[lower_bound:upper_bound + 1], eval_seg[lower_bound:upper_bound + 1]
         )
         all_iou = self._calculate_iou(gt_seg, eval_seg)
 
         # DICE
         range_dice = self._calculate_dice(
-            gt_seg[lower_bound:upper_bound], eval_seg[lower_bound:upper_bound]
+            gt_seg[lower_bound:upper_bound + 1], eval_seg[lower_bound:upper_bound + 1]
         )
         all_dice = self._calculate_dice(gt_seg, eval_seg)
 
         # F1
         range_f1 = self._calculate_f1(
-            gt_seg[lower_bound:upper_bound], eval_seg[lower_bound:upper_bound]
+            gt_seg[lower_bound:upper_bound + 1], eval_seg[lower_bound:upper_bound + 1]
         )
         all_f1 = self._calculate_f1(gt_seg, eval_seg)
 
@@ -256,16 +261,21 @@ class EvaluationWindow(QWidget):
         """Evaluate the curated ground truth tracking against the automatically generated tracking."""
         try:
             lower_bound = int(self.evaluation_limit_lower.text())
-            upper_bound = int(self.evaluation_limit_upper.text())
         except ValueError:
             lower_bound = 0
-            upper_bound = gt_seg.shape[0]
+        try:
+            upper_bound = int(self.evaluation_limit_upper.text())
+        except ValueError:
+            upper_bound = gt_seg.shape[0] - 1
         if lower_bound > upper_bound:
             lower_bound, upper_bound = upper_bound, lower_bound
         if lower_bound < 0:
             lower_bound = 0
-        if upper_bound > gt_seg.shape[0]:
-            upper_bound = gt_seg.shape[0]
+        if upper_bound >= gt_seg.shape[0]:
+            upper_bound = gt_seg.shape[0] -1
+
+        if lower_bound == upper_bound:
+            return
 
         self.adjust_centroids(gt_seg, gt_tracks_layer, (lower_bound, upper_bound))
 
@@ -294,7 +304,7 @@ class EvaluationWindow(QWidget):
         table.item(1, 4).setText(str(de))
 
         table.item(4, 1).setText(str(fv))
-        table.item(4, 3).setText(f"for slices {lower_bound} - {upper_bound - 1}")
+        table.item(4, 3).setText(f"for slices {lower_bound} - {upper_bound}")
 
     def adjust_centroids(self, segmentation, tracks_layer, bounds):
         """Adjust the centroids of the tracks to the current segmentation."""
