@@ -825,6 +825,7 @@ class TrackingWindow(QWidget):
             or self.cached_tracks is not None
             and track_id in self.cached_tracks[:, 0]
         ]
+        tracks_to_display.sort()
         if len(tracks_to_display) < 1:
             self.lineedit_filter.clear()
             return
