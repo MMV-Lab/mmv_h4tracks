@@ -6,7 +6,6 @@ from qtpy.QtWidgets import (
     QCheckBox,
     QComboBox,
     QVBoxLayout,
-    QLabel,
     QPushButton,
     QGridLayout,
     QSizePolicy,
@@ -52,6 +51,7 @@ class SegmentationWindow(QWidget):
         except TypeError:
             self.setStyleSheet(napari.qt.get_stylesheet(theme_id="dark"))
 
+        self.custom_models = processing.read_custom_model_dict()
         # Used to cach the callback on the label layer
         self.cached_callback = None
 
@@ -65,10 +65,7 @@ class SegmentationWindow(QWidget):
         )
 
         btn_free_label = QPushButton("Next free ID")
-        btn_free_label.setToolTip(
-            "Load next free segmentation label \n\n"
-            "Hotkey: E"                          
-        )
+        btn_free_label.setToolTip("Load next free segmentation label \n\n" "Hotkey: E")
 
         btn_false_merge = QPushButton("Separate")
         btn_false_merge.setToolTip(
@@ -107,7 +104,8 @@ class SegmentationWindow(QWidget):
         # QComboBoxes
         self.combobox_segmentation = QComboBox()
         self.combobox_segmentation.setToolTip("select model")
-        processing.read_models(self)
+        hardcoded_models, custom_models = processing.read_models(self)
+        processing.display_models(self, hardcoded_models, custom_models)
         self.combobox_segmentation.currentTextChanged.connect(
             self.toggle_segmentation_button
         )
@@ -197,7 +195,7 @@ class SegmentationWindow(QWidget):
             handle_exception(exc)
             return
 
-        def _remove_label(layer, event):
+        def _remove_label(_, event):
             """
             Removes the cell at the given position from the segmentation layer and updates the callbacks
 
@@ -256,10 +254,11 @@ class SegmentationWindow(QWidget):
             label_layer.data[z], labels=label_layer.data[z], index=selected_id
         )
         cell = [z, int(np.rint(centroid[0])), int(np.rint(centroid[1]))]
+
         try:
             track_id, displayed = self.get_track_id_of_cell(cell)
         except ValueError:
-            print("value error")
+            print("cell untracked")
             return
 
         tracks_name = self.parent.combobox_tracks.currentText()
@@ -268,12 +267,14 @@ class SegmentationWindow(QWidget):
             return
         tracks_layer = grab_layer(self.viewer, tracks_name)
         displayed_tracks = tracks_layer.data
+        all_tracks = [displayed_tracks]
 
-        next_id = max(self.parent.tracks[:, 0]) + 1
+        if self.parent.tracking_window.cached_tracks is not None:
+            next_id = max(self.parent.tracking_window.cached_tracks[:, 0]) + 1
+            all_tracks.append(self.parent.tracking_window.cached_tracks)
+        else:
+            next_id = max(displayed_tracks[:, 0]) + 1
         indices_to_delete = [[], []]
-        all_tracks = [self.parent.tracks]
-        if displayed:
-            all_tracks.append(displayed_tracks)
 
         for indicator, tracks in enumerate(all_tracks):
             # find index of entry in displayed tracks
@@ -286,6 +287,9 @@ class SegmentationWindow(QWidget):
 
             # find first and last index of that track id
             indices = np.where(tracks[:, 0] == track_id)[0]
+            if len(indices) == 0:
+                indices_to_delete[indicator] = []
+                continue
             first = min(indices)
             last = max(indices)
 
@@ -303,12 +307,17 @@ class SegmentationWindow(QWidget):
 
         # remove entry (or entries)
         if displayed:
-            displayed_tracks = np.delete(displayed_tracks, indices_to_delete[1], 0)
-        self.parent.tracks = np.delete(self.parent.tracks, indices_to_delete[0], 0)
-        tracks_layer.data = displayed_tracks
-        df = pd.DataFrame(self.parent.tracks, columns=["ID", "Z", "Y", "X"])
-        df.sort_values(["ID", "Z"], ascending=True, inplace=True)
-        self.parent.tracks = df.values
+            displayed_tracks = np.delete(displayed_tracks, indices_to_delete[0], 0)
+            tracks_layer.data = displayed_tracks
+        if self.parent.tracking_window.cached_tracks is not None:
+            self.parent.tracking_window.cached_tracks = np.delete(
+                self.parent.tracking_window.cached_tracks, indices_to_delete[1], 0
+            )
+            df = pd.DataFrame(
+                self.parent.tracking_window.cached_tracks, columns=["ID", "Z", "Y", "X"]
+            )
+            df.sort_values(["ID", "Z"], ascending=True, inplace=True)
+            self.parent.tracking_window.cached_tracks = df.values
 
     def get_track_id_of_cell(self, cell):
         """
@@ -331,22 +340,14 @@ class SegmentationWindow(QWidget):
         if tracks_layer is None:
             return
         tracks = tracks_layer.data
-        new_track_id = np.amax(tracks[:, 0]) + 1
 
-        for i in range(len(tracks)):
-            if (
-                tracks[i, 1] == cell[0]
-                and tracks[i, 2] == cell[1]
-                and tracks[i, 3] == cell[2]
-            ):
-                return tracks[i, 0], True
-        for i in range(len(self.parent.tracks)):
-            if (
-                self.parent.tracks[i, 1] == cell[0]
-                and self.parent.tracks[i, 2] == cell[1]
-                and self.parent.tracks[i, 3] == cell[2]
-            ):
-                return self.parent.tracks[i, 0], False
+        for track in tracks:
+            if np.all(track[1:4] == cell):
+                return track[0], True
+        if self.parent.tracking_window.cached_tracks is not None:
+            for track in self.parent.tracking_window.cached_tracks:
+                if np.all(track[1:4] == cell):
+                    return track[0], False
         raise ValueError("No matching track found")
 
     def _add_select_callback(self):
@@ -361,7 +362,7 @@ class SegmentationWindow(QWidget):
             handle_exception(exc)
             return
 
-        def _select_label(layer, event):
+        def _select_label(_, event):
             """
             Selects the label at the given position and updates the callbacks
 
@@ -432,7 +433,7 @@ class SegmentationWindow(QWidget):
             handle_exception(exc)
             return
 
-        def _replace_label(layer, event):
+        def _replace_label(_, event):
             """
             Replaces the label at the given position with the currently selected one and updates the callbacks
 
@@ -478,7 +479,7 @@ class SegmentationWindow(QWidget):
             """
             id = self._read_label_id(event)
 
-            def _assimilate_label(layer, event):
+            def _assimilate_label(_, event):
                 """
                 Assimilates the label at the given position with the currently selected one and updates the callbacks
 

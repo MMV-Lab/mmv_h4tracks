@@ -8,4 +8,4 @@ contributions:
     title: Make tracking widget
   widgets:
   - command: mmv_h4tracks.make_qwidget
-    display_name: MMV_H4TRACKS
+    display_name: MMV_H4Tracks

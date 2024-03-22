@@ -1,8 +1,10 @@
 import csv
+import locale
 
 import numpy as np
 import zarr
-from qtpy.QtWidgets import QFileDialog, QMessageBox
+import pandas as pd
+from qtpy.QtWidgets import QFileDialog, QMessageBox, QApplication
 
 from ._logger import choice_dialog, notify
 
@@ -36,24 +38,23 @@ def save_dialog(parent, filetype="*.zarr", directory=""):
     return filepath
 
 
-def save_zarr(parent, zarr_file, layers, cached_tracks):
+def save_zarr( zarr_file, layers, cached_tracks):
     """
     Saves the (changed) layers to a zarr file. Fails if required layers are missing
 
     Parameters
     ----------
-    parent : QWidget
-        Parent widget for the dialog
     zarr_file : zarr
         The zarr file to which to save the layers
     layers : list of layer
         The layers raw image, segmentation, tracks in order
     cached_tracks : array
-        The complete tracks layer
+        The cached tracks layer, can be None
     """
 
-    response = 1
-    if not np.array_equal(layers[2].data, cached_tracks):
+    response = 0
+    if not cached_tracks is None:
+    # if not np.array_equal(layers[2].data, cached_tracks):
         response = choice_dialog(
             (
                 "It looks like you have selected only some of the tracks from your tracks layer. "
@@ -68,13 +69,13 @@ def save_zarr(parent, zarr_file, layers, cached_tracks):
         if response == 4194304:
             return
 
-    tracks = cached_tracks
-    if response == 0:
-        tracks = layers[2]
+    tracks = layers[2].data
+    if response == 1:
+        tracks = cached_tracks
+    # if response == 0:
+    #     tracks = layers[2]
 
-    if zarr_file == None:
-        file = save_dialog(parent, "*.zarr")
-        zarr_file = zarr.open(file, mode="w")
+    if not "raw_data" in zarr_file:
         zarr_file.create_dataset(
             "raw_data",
             shape=layers[0].data.shape,
@@ -95,6 +96,7 @@ def save_zarr(parent, zarr_file, layers, cached_tracks):
         zarr_file["segmentation_data"][:] = layers[1].data
         zarr_file["tracking_data"].resize(tracks.shape[0], tracks.shape[1])
         zarr_file["tracking_data"][:] = tracks
+    QApplication.restoreOverrideCursor()
     notify("Zarr file has been saved.")
 
 
@@ -109,7 +111,23 @@ def save_csv(file, data):
     data : list
         CSV data to write to disk
     """
+    default_locale = locale.getdefaultlocale()[0]
+    if default_locale.startswith("de"):
+        data = [convert_np64_to_string(sublist) for sublist in data]
+        delimiter = ";"
+    else:
+        delimiter = ","
     csvfile = open(file[0], "w", newline="")
-    writer = csv.writer(csvfile)
+    writer = csv.writer(csvfile, delimiter = delimiter)
     [writer.writerow(row) for row in data]
     csvfile.close()
+    print("CSV file has been saved.")
+
+def convert_np64_to_string(sublist):
+    converted_sublist = []
+    for item in sublist:
+        if isinstance(item, np.float64):
+            converted_sublist.append(str(item).replace(".", ","))
+        else:
+            converted_sublist.append(item)
+    return converted_sublist
