@@ -796,6 +796,10 @@ class TrackingWindow(QWidget):
             except ValueError:
                 notify("Please use a comma separated list of integers (whole numbers).")
                 return
+            print(tracks_to_display)
+            if len(tracks_to_display) < 1:
+                self.lineedit_filter.clear()
+                return
             self.display_selected_tracks(tracks_to_display)
 
     def delete_listed_tracks_on_click(self):
@@ -930,9 +934,10 @@ class TrackingWindow(QWidget):
         tracks : np.ndarray
             The tracks to process
         """
-        assert type(tracks) == np.ndarray, "Tracks are not numpy array."
         if tracks is None:
+            QApplication.restoreOverrideCursor()
             return
+        assert type(tracks) == np.ndarray, "Tracks are not numpy array."
         self.cached_tracks = None
         tracks_layer = self.get_tracks_layer()
         if tracks_layer is None:
@@ -940,6 +945,7 @@ class TrackingWindow(QWidget):
         else:
             tracks_layer.data = tracks
         self.parent.initial_layers[1] = tracks
+        QApplication.restoreOverrideCursor()
 
     def remove_entries_from_tracks(self, cells: list):
         """
@@ -1016,8 +1022,8 @@ class TrackingWindow(QWidget):
         if len(cells) == 0:
             msg = QMessageBox()
             msg.setIcon(QMessageBox.Warning)
-            msg.setText("No cells to add.")
-            msg.setWindowTitle("All selected cells are already tracked.")
+            msg.setText("All selected cells are already tracked.")
+            msg.setWindowTitle("No cells to add.")
             msg.setStandardButtons(QMessageBox.Ok)
             msg.exec_()
             return

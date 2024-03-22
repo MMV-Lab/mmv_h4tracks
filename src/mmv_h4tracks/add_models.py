@@ -14,6 +14,8 @@ from qtpy.QtWidgets import (
 from qtpy.QtCore import Qt
 import napari
 
+import mmv_h4tracks._processing as processing
+
 SHOW_OPTIONS_TEXT = "Show advanced options"
 HIDE_OPTIONS_TEXT = "Hide advanced options"
 
@@ -251,7 +253,8 @@ class ModelWindow(QWidget):
         new_path = Path(__file__).parent / "models" / "custom_models" / old_path.name
         shutil.copy(old_path, new_path)
 
-        self.parent.read_models()
+        hardcoded_models, custom_models = processing.read_models(self.parent)
+        processing.display_models(self.parent, hardcoded_models, custom_models)
         QApplication.restoreOverrideCursor()
         self.close()
 
