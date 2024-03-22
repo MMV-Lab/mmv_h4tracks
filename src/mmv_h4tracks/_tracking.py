@@ -517,8 +517,15 @@ class TrackingWindow(QWidget):
         # check if button text is confirm or link
         if self.btn_insert_correspondence.text() == LINK_TEXT:
             if self.cached_tracks is not None:
-                notify("New tracks can only be added if all tracks are displayed.")
-                return
+                msg = QMessageBox()
+                msg.setWindowTitle("napari")
+                msg.setText("New tracks can only be added if all tracks are displayed! Display all now?")
+                msg.addButton("Display all", QMessageBox.AcceptRole)
+                msg.addButton(QMessageBox.Cancel)
+                retval = msg.exec()
+                if retval != 0:
+                    return
+                self.parent.tracking_window.display_cached_tracks()
             self.reset_button_labels()
             self.selected_cells = []
             self.btn_insert_correspondence.setText(CONFIRM_TEXT)
@@ -529,8 +536,15 @@ class TrackingWindow(QWidget):
             self.restore_callbacks()
             QApplication.restoreOverrideCursor()
             if self.cached_tracks is not None:
-                notify("New tracks can only be added if all tracks are displayed.")
-                return
+                msg = QMessageBox()
+                msg.setWindowTitle("napari")
+                msg.setText("New tracks can only be added if all tracks are displayed! Display all now?")
+                msg.addButton("Display all", QMessageBox.AcceptRole)
+                msg.addButton(QMessageBox.Cancel)
+                retval = msg.exec()
+                if retval != 0:
+                    return
+                self.parent.tracking_window.display_cached_tracks()
             self.link_stored_cells()
 
     def link_stored_cells(self):
@@ -796,7 +810,6 @@ class TrackingWindow(QWidget):
             except ValueError:
                 notify("Please use a comma separated list of integers (whole numbers).")
                 return
-            print(tracks_to_display)
             if len(tracks_to_display) < 1:
                 self.lineedit_filter.clear()
                 return

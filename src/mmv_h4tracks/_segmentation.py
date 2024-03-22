@@ -287,6 +287,9 @@ class SegmentationWindow(QWidget):
 
             # find first and last index of that track id
             indices = np.where(tracks[:, 0] == track_id)[0]
+            if len(indices) == 0:
+                indices_to_delete[indicator] = []
+                continue
             first = min(indices)
             last = max(indices)
 

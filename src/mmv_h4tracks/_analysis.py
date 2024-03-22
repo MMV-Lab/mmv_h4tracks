@@ -715,8 +715,15 @@ class AnalysisWindow(QWidget):
                 selected_metrics.append(checkbox.text())
 
         if self.parent.tracking_window.cached_tracks is not None:
-            notify("Export is not possible if some tracks are hidden!")
-            return
+            msg = QMessageBox()
+            msg.setWindowTitle("napari")
+            msg.setText("Export is only possible if all tracks are displayed! Display all now?")
+            msg.addButton("Display all && export", QMessageBox.AcceptRole)
+            msg.addButton(QMessageBox.Cancel)
+            retval = msg.exec()
+            if retval != 0:
+                return
+            self.parent.tracking_window.display_cached_tracks()
 
         if len(selected_metrics) == 0:
             msg = QMessageBox()
