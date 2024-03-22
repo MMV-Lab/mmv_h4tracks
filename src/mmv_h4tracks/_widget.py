@@ -98,7 +98,7 @@ class MMVH4TRACKS(QWidget):
         logo_label.setMaximumWidth(150)
         logo_label.setScaledContents(True)
         logo_label.setAlignment(Qt.AlignCenter)
-        title = QLabel("<h1><font color='green'>MMV_H4TRACKS</font></h1>")
+        title = QLabel("<h1><font color='green'>MMV_H4Tracks</font></h1>")
         title.setMaximumHeight(100)
         label_image = QLabel("Image:")
         label_segmentation = QLabel("Segmentation:")
@@ -123,11 +123,8 @@ class MMVH4TRACKS(QWidget):
 
         # Comboboxes
         self.combobox_image = QComboBox()
-        self.combobox_image.addItem("")
         self.combobox_segmentation = QComboBox()
-        self.combobox_segmentation.addItem("")
         self.combobox_tracks = QComboBox()
-        self.combobox_tracks.addItem("")
         self.layer_comboboxes = [
             self.combobox_image,
             self.combobox_segmentation,
@@ -247,6 +244,9 @@ class MMVH4TRACKS(QWidget):
             layer.events.name.connect(
                 self.rename_entry_in_comboboxes
             )  # doesn't contain index
+        for combobox in self.layer_comboboxes:
+            if combobox.count() == 0:
+                combobox.addItem("")
         self.viewer.layers.events.moving.connect(self.reorder_entry_in_comboboxes)
 
     def hotkey_next_free(self, _):
@@ -268,14 +268,18 @@ class MMVH4TRACKS(QWidget):
         Adds a new entry to the comboboxes for the layers
         """
         if isinstance(event.value, Image):
-            self.layer_comboboxes[0].addItem(event.value.name)
+            combobox = self.layer_comboboxes[0]
         elif isinstance(event.value, Labels):
-            self.layer_comboboxes[1].addItem(event.value.name)
+            combobox = self.layer_comboboxes[1]
         elif isinstance(event.value, Tracks):
-            self.layer_comboboxes[2].addItem(event.value.name)
+            combobox = self.layer_comboboxes[2]
         else:
             return
 
+        combobox.addItem(event.value.name)
+        empty_index = combobox.findText("")
+        if empty_index != -1:
+            combobox.removeItem(empty_index)
         event.value.events.name.connect(
             self.rename_entry_in_comboboxes
         )  # contains index
@@ -294,6 +298,8 @@ class MMVH4TRACKS(QWidget):
             return
         index = combobox.findText(event.value.name)
         combobox.removeItem(index)
+        if combobox.count() == 0:
+            combobox.addItem("")
 
     def rename_entry_in_comboboxes(self, event):
         """
@@ -435,7 +441,6 @@ class MMVH4TRACKS(QWidget):
         self.viewer.add_tracks(filtered_tracks, name="Tracks")
 
         self.zarr = zarr_file
-        self.tracks = filtered_tracks
         self.initial_layers = [
             copy.deepcopy(segmentation),
             copy.deepcopy(filtered_tracks),
@@ -462,8 +467,7 @@ class MMVH4TRACKS(QWidget):
         track_name = self.combobox_tracks.currentText()
         track_layer = grab_layer(self.viewer, track_name)
         layers = [raw_layer, segmentation_layer, track_layer]
-        save_zarr(self, self.zarr, layers, self.tracks)
-        QApplication.restoreOverrideCursor()
+        save_zarr(self.zarr, layers, self.tracking_window.cached_tracks)
 
     def save_as(self):
         """
@@ -471,10 +475,13 @@ class MMVH4TRACKS(QWidget):
         Fails if not all layers exist
         """
         raw_name = self.combobox_image.currentText()
+        raw_layer = grab_layer(self.viewer, raw_name)
         raw_data = grab_layer(self.viewer, raw_name).data
         segmentation_name = self.combobox_segmentation.currentText()
+        segmentation_layer = grab_layer(self.viewer, segmentation_name)
         segmentation_data = grab_layer(self.viewer, segmentation_name).data
         tracks_name = self.combobox_tracks.currentText()
+        tracks_layer = grab_layer(self.viewer, tracks_name)
         track_data = grab_layer(self.viewer, tracks_name).data
 
         dialog = QFileDialog()
@@ -484,20 +491,10 @@ class MMVH4TRACKS(QWidget):
             path += ".zarr"
         if path == ".zarr":
             return
-        z = zarr.open(path, mode="w")
-        r = z.create_dataset(
-            "raw_data", shape=raw_data.shape, dtype="f8", data=raw_data
-        )
-        s = z.create_dataset(
-            "segmentation_data",
-            shape=segmentation_data.shape,
-            dtype="i4",
-            data=segmentation_data,
-        )
-        t = z.create_dataset(
-            "tracking_data", shape=track_data.shape, dtype="i4", data=track_data
-        )
-        QApplication.restoreOverrideCursor()
+        layers = [raw_layer, segmentation_layer, tracks_layer]
+
+        zarrfile = zarr.open(path, mode="w")
+        save_zarr(zarrfile, layers, self.tracking_window.cached_tracks)
 
     def get_process_limit(self):
         """

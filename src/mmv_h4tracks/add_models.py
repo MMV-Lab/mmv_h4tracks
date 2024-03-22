@@ -246,6 +246,8 @@ class ModelWindow(QWidget):
             json.dump(self.parent.custom_models, file)
 
         old_path = Path(self.model_path)
+        path = Path(__file__).parent / "models" / "custom_models"
+        path.mkdir(parents=True, exist_ok=True)
         new_path = Path(__file__).parent / "models" / "custom_models" / old_path.name
         shutil.copy(old_path, new_path)
 

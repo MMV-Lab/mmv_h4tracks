@@ -12,9 +12,13 @@ from mmv_h4tracks import MMVH4TRACKS
 # this tests if the analysis returns the proper values
 PATH = Path(__file__).parent / "data"
 
+@pytest.fixture
+def create_widget(make_napari_viewer):
+    yield MMVH4TRACKS(make_napari_viewer())
+
 
 @pytest.fixture
-def set_widget_up(make_napari_viewer):
+def set_widget_up(create_widget):
     """
     Creates an instance of the plugin and adds all layers of testdata to the viewer
 
@@ -29,8 +33,8 @@ def set_widget_up(make_napari_viewer):
         Instance of the main widget
     """
     SEGMENTATION_GT = "GT"
-    viewer = make_napari_viewer()
-    my_widget = MMVH4TRACKS(viewer)
+    my_widget = create_widget
+    viewer = my_widget.viewer
     for file in list(Path(PATH / "segmentation").iterdir()):
         print(file.stem)
         segmentation = AICSImage(file).get_image_data("ZYX")
@@ -48,7 +52,7 @@ def set_widget_up(make_napari_viewer):
 
 
 @pytest.fixture
-def get_widget(make_napari_viewer):
+def get_widget(create_widget):
     """
     Creates an instance of the plugin and adds sample layers
 
@@ -62,8 +66,8 @@ def get_widget(make_napari_viewer):
     my_widget
         Instance of the main widget
     """
-    viewer = make_napari_viewer()
-    my_widget = MMVH4TRACKS(viewer)
+    my_widget = create_widget
+    viewer = my_widget.viewer
     add_layers(viewer)
     yield my_widget
 
@@ -310,7 +314,8 @@ def test_added_edges(set_widget_up, layername, expected_value):
     gt_tracks = viewer.layers[viewer.layers.index("GT_tracks")].data
     eval_tracks_layer = viewer.layers[viewer.layers.index(layername)]
     widget.combobox_tracks.setCurrentIndex(widget.combobox_tracks.findText(layername))
-    window.adjust_centroids(gt_seg, eval_tracks_layer)
+    bounds = (0, gt_seg.shape[0])
+    window.adjust_centroids(gt_seg, eval_tracks_layer, bounds)
     eval_tracks = eval_tracks_layer.data
     _, ae = window.get_track_fault(gt_seg, gt_tracks, eval_seg, eval_tracks)
     assert ae == expected_value
@@ -350,7 +355,8 @@ def test_deleted_edges(set_widget_up, layername, expected_value):
     gt_tracks = viewer.layers[viewer.layers.index("GT_tracks")].data
     eval_tracks_layer = viewer.layers[viewer.layers.index(layername)]
     widget.combobox_tracks.setCurrentIndex(widget.combobox_tracks.findText(layername))
-    window.adjust_centroids(gt_seg, eval_tracks_layer)
+    bounds = (0, gt_seg.shape[0])
+    window.adjust_centroids(gt_seg, eval_tracks_layer, bounds)
     eval_tracks = eval_tracks_layer.data
     de, _ = window.get_track_fault(gt_seg, gt_tracks, eval_seg, eval_tracks)
     assert de == expected_value

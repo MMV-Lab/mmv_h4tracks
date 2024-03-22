@@ -34,7 +34,7 @@ class EvaluationWindow(QWidget):
     def _setup_ui(self):
         """Setup the UI of the evaluation window."""
         # Labels
-        evaluation_label = QLabel("Slices to evaluate:")
+        evaluation_label = QLabel("Frames to evaluate:")
 
         # Buttons
         evaluate_segmentation = QPushButton("Evaluate Segmentation")
@@ -254,12 +254,10 @@ class EvaluationWindow(QWidget):
 
     def evaluate_curated_tracking(self, gt_tracks_layer, gt_seg, eval_tracks, eval_seg):
         """Evaluate the curated ground truth tracking against the automatically generated tracking."""
-        self.adjust_centroids(gt_seg, gt_tracks_layer)
-
         try:
             lower_bound = int(self.evaluation_limit_lower.text())
             upper_bound = int(self.evaluation_limit_upper.text())
-        except ValueError as exc:
+        except ValueError:
             lower_bound = 0
             upper_bound = gt_seg.shape[0]
         if lower_bound > upper_bound:
@@ -269,17 +267,21 @@ class EvaluationWindow(QWidget):
         if upper_bound > gt_seg.shape[0]:
             upper_bound = gt_seg.shape[0]
 
+        self.adjust_centroids(gt_seg, gt_tracks_layer, (lower_bound, upper_bound))
+
         gt_tracks = gt_tracks_layer.data
-        mask = (gt_tracks[:, 0] >= lower_bound) & (gt_tracks[:, 0] < upper_bound)
+        mask = (gt_tracks[:, 1] >= lower_bound) & (gt_tracks[:, 1] < upper_bound)
         gt_tracks = gt_tracks[mask]
+        gt_tracks[:,1] -= lower_bound
         gt_seg = gt_seg[lower_bound : upper_bound + 1]
-        mask = (eval_tracks[:, 0] >= lower_bound) & (eval_tracks[:, 0] < upper_bound)
+        mask = (eval_tracks[:, 1] >= lower_bound) & (eval_tracks[:, 1] < upper_bound)
         eval_tracks = eval_tracks[mask]
+        eval_tracks[:,1] -= lower_bound
         eval_seg = eval_seg[lower_bound : upper_bound + 1]
         fp = self.get_segmentation_fault(gt_seg, eval_seg, get_false_positives)
         fn = self.get_segmentation_fault(gt_seg, eval_seg, get_false_negatives)
         sc = self.get_segmentation_fault(gt_seg, eval_seg, get_split_cells)
-        de, ae = self.get_track_fault(gt_seg, gt_tracks, eval_seg, eval_tracks)
+        de, ae = self.get_track_fault(gt_seg, gt_tracks, eval_seg, eval_tracks, lower_bound)
 
         fv = fp + fn * 10 + sc * 5 + de + ae * 1.5
 
@@ -294,11 +296,13 @@ class EvaluationWindow(QWidget):
         table.item(4, 1).setText(str(fv))
         table.item(4, 3).setText(f"for slices {lower_bound} - {upper_bound - 1}")
 
-    def adjust_centroids(self, segmentation, tracks_layer):
+    def adjust_centroids(self, segmentation, tracks_layer, bounds):
         """Adjust the centroids of the tracks to the current segmentation."""
         tracks = tracks_layer.data
         for row in tracks:
             _, z, y, x = row
+            if z < bounds[0] or z >= bounds[1]:
+                continue
             segmentation_id = segmentation[z, y, x]
             if segmentation_id == 0:
                 continue
@@ -326,9 +330,11 @@ class EvaluationWindow(QWidget):
 
         return faults
 
-    def get_track_fault(self, gt_seg, gt_tracks, eval_seg, eval_tracks):
-        """Calculate the track fault value.
-        Calculates both deleted edges and added edges."""
+    def get_track_fault(self, gt_seg, gt_tracks, eval_seg, eval_tracks, lower_bound=0):
+        """
+        Calculate the track fault value.
+        Calculates both deleted edges and added edges.
+        """
         de, ae = 0, 0
         if np.array_equal(gt_tracks, eval_tracks):
             return de, ae
