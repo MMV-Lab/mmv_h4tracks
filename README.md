@@ -15,8 +15,8 @@ A plugin to use with napari to segment and track cells via HumanInTheLoop(HITL)-
 
 This [napari] plugin was generated with [Cookiecutter] using [@napari]'s [cookiecutter-napari-plugin] template.
 
-## Usage
-Load a zarr-file consisting of Image, Label and Tracks layer.
+<!-- ## Usage
+Load a zarr-file consisting of Image, Label and Tracks layer. -->
 
 ## Installation
 
