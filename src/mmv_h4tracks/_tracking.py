@@ -1027,6 +1027,7 @@ class TrackingWindow(QWidget):
         else:
             tracks_layer.data = self.cached_tracks
         self.cached_tracks = None
+        self.lineedit_delete.clear()
 
     def display_selected_tracks(self, track_ids: list):
         """
@@ -1045,6 +1046,7 @@ class TrackingWindow(QWidget):
             np.isin(self.cached_tracks[:, 0], track_ids)
         ]
         tracks_layer.data = selected_tracks
+        self.lineedit_delete.clear()
 
     def add_entries_to_tracks(self, cells: list, track_id: int):
         """
