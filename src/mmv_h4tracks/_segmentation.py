@@ -269,9 +269,9 @@ class SegmentationWindow(QWidget):
         displayed_tracks = tracks_layer.data
         all_tracks = [displayed_tracks]
 
-        if self.parent.track_window.cached_tracks is not None:
-            next_id = max(self.parent.track_window.cached_tracks[:, 0]) + 1
-            all_tracks.append(self.parent.track_window.cached_tracks)
+        if self.parent.tracking_window.cached_tracks is not None:
+            next_id = max(self.parent.tracking_window.cached_tracks[:, 0]) + 1
+            all_tracks.append(self.parent.tracking_window.cached_tracks)
         else:
             next_id = max(displayed_tracks[:, 0]) + 1
         indices_to_delete = [[], []]
@@ -306,15 +306,15 @@ class SegmentationWindow(QWidget):
         if displayed:
             displayed_tracks = np.delete(displayed_tracks, indices_to_delete[0], 0)
             tracks_layer.data = displayed_tracks
-        if self.parent.track_window.cached_tracks is not None:
-            self.parent.track_window.cached_tracks = np.delete(
-                self.parent.track_window.cached_tracks, indices_to_delete[1], 0
+        if self.parent.tracking_window.cached_tracks is not None:
+            self.parent.tracking_window.cached_tracks = np.delete(
+                self.parent.tracking_window.cached_tracks, indices_to_delete[1], 0
             )
             df = pd.DataFrame(
-                self.parent.track_window.cached_tracks, columns=["ID", "Z", "Y", "X"]
+                self.parent.tracking_window.cached_tracks, columns=["ID", "Z", "Y", "X"]
             )
             df.sort_values(["ID", "Z"], ascending=True, inplace=True)
-            self.parent.track_window.cached_tracks = df.values
+            self.parent.tracking_window.cached_tracks = df.values
 
     def get_track_id_of_cell(self, cell):
         """
@@ -341,8 +341,8 @@ class SegmentationWindow(QWidget):
         for track in tracks:
             if np.all(track[1:4] == cell):
                 return track[0], True
-        if self.parent.track_window.cached_tracks is not None:
-            for track in self.parent.track_window.cached_tracks:
+        if self.parent.tracking_window.cached_tracks is not None:
+            for track in self.parent.tracking_window.cached_tracks:
                 if np.all(track[1:4] == cell):
                     return track[0], False
         raise ValueError("No matching track found")

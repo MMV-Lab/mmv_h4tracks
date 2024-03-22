@@ -4,7 +4,7 @@ import locale
 import numpy as np
 import zarr
 import pandas as pd
-from qtpy.QtWidgets import QFileDialog, QMessageBox
+from qtpy.QtWidgets import QFileDialog, QMessageBox, QApplication
 
 from ._logger import choice_dialog, notify
 
@@ -38,14 +38,12 @@ def save_dialog(parent, filetype="*.zarr", directory=""):
     return filepath
 
 
-def save_zarr(parent, zarr_file, layers, cached_tracks):
+def save_zarr( zarr_file, layers, cached_tracks):
     """
     Saves the (changed) layers to a zarr file. Fails if required layers are missing
 
     Parameters
     ----------
-    parent : QWidget
-        Parent widget for the dialog
     zarr_file : zarr
         The zarr file to which to save the layers
     layers : list of layer
@@ -77,9 +75,7 @@ def save_zarr(parent, zarr_file, layers, cached_tracks):
     # if response == 0:
     #     tracks = layers[2]
 
-    if zarr_file == None:
-        file = save_dialog(parent, "*.zarr")
-        zarr_file = zarr.open(file, mode="w")
+    if not "raw_data" in zarr_file:
         zarr_file.create_dataset(
             "raw_data",
             shape=layers[0].data.shape,
@@ -100,6 +96,7 @@ def save_zarr(parent, zarr_file, layers, cached_tracks):
         zarr_file["segmentation_data"][:] = layers[1].data
         zarr_file["tracking_data"].resize(tracks.shape[0], tracks.shape[1])
         zarr_file["tracking_data"][:] = tracks
+    QApplication.restoreOverrideCursor()
     notify("Zarr file has been saved.")
 
 

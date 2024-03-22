@@ -65,3 +65,4 @@ class Selector:
             selected_text = ", ".join(map(str, highlighted_int))
             widget.tracking_window.display_selected_tracks(highlighted_int)
         widget.tracking_window.lineedit_filter.setText(selected_text)
+        widget.plot_window.close()

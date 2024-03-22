@@ -126,6 +126,19 @@ def test_link_stored_cells_enclosed(create_widget):
     expected_result = np.array([[1,0,1,1], [1,1,1,1], [1,2,1,1], [1,3,1,1]])
     assert np.array_equal(post_tracks, expected_result)
 
+# @pytest.mark.integration
+# @pytest.mark.misc
+# def test_link_stored_cells_existing(create_widget):
+#     widget = create_widget
+#     initial_tracks = np.array([[0,1,1,1], [0,2,1,1], [0,3,1,1], [0,4,1,1]])
+#     widget.viewer.add_tracks(initial_tracks, name="Tracks")
+#     window = widget.tracking_window
+#     window.selected_cells = [[1,1,1], [2,1,1]]
+#     window.link_stored_cells()
+#     post_tracks = widget.viewer.layers["Tracks"].data
+#     expected_result = np.array([[0,1,1,1], [0,2,1,1], [0,3,1,1], [0,4,1,1]])
+#     assert np.array_equal(post_tracks, expected_result)
+
 @pytest.mark.integration
 @pytest.mark.misc
 def test_evaluate_proposed_track_no_layer(create_widget):

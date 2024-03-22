@@ -550,7 +550,17 @@ class TrackingWindow(QWidget):
             - np.min(np.asarray(self.selected_cells)[:, 0])
             != len(self.selected_cells) - 1
         ):
-            notify("Please select cells that are directly connected in z!")
+            missing_slices = [
+                i
+                for i in range(
+                    np.min(np.asarray(self.selected_cells)[:, 0]),
+                    np.max(np.asarray(self.selected_cells)[:, 0]),
+                )
+                if i not in np.asarray(self.selected_cells)[:, 0]
+            ]
+            notify(
+                f"Gaps in the tracks are not supported yet. Please also select cells in frames {missing_slices}."
+            )
             return
 
         tracks_layer = self.get_tracks_layer()
@@ -775,7 +785,7 @@ class TrackingWindow(QWidget):
         else:
             try:
                 tracks_to_display = [
-                    int(track_id) for track_id in input_text.split(",")
+                    int(track_id) for track_id in input_text.split(",") if track_id != ""
                 ]
             except ValueError:
                 notify("Please use a comma separated list of integers (whole numbers).")
@@ -790,7 +800,7 @@ class TrackingWindow(QWidget):
         if input_text == "":
             return
         try:
-            tracks_to_delete = [int(track_id) for track_id in input_text.split(",")]
+            tracks_to_delete = [int(track_id) for track_id in input_text.split(",") if track_id != ""]
         except ValueError:
             notify("Please use a comma separated list of integers (whole numbers).")
             return
@@ -799,6 +809,9 @@ class TrackingWindow(QWidget):
 
         # filter out the track ids that do not exist
         if self.cached_tracks is not None:
+            non_existing_tracks = [
+                track_id for track_id in tracks_to_delete if track_id not in self.cached_tracks[:, 0]
+            ]
             tracks_to_delete = [
                 track_id
                 for track_id in tracks_to_delete
@@ -808,6 +821,9 @@ class TrackingWindow(QWidget):
             if tracks_layer is None:
                 notify("Please select a valid tracks layer.")
                 return
+            non_existing_tracks = [
+                track_id for track_id in tracks_to_delete if track_id not in tracks_layer.data[:, 0]
+            ]
             tracks_to_delete = [
                 track_id
                 for track_id in tracks_to_delete
@@ -832,7 +848,8 @@ class TrackingWindow(QWidget):
                 msg.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
                 ret = msg.exec_()
                 if ret == QMessageBox.Yes:
-                    tracks_layer.data = np.array([[]])
+                    self.viewer.layers.remove(tracks_layer.name)
+                    self.viewer.layers.select_next()
                 return
             # remove selected tracks from the cached tracks
             self.cached_tracks = np.delete(
@@ -852,6 +869,11 @@ class TrackingWindow(QWidget):
                     np.isin(self.cached_tracks[:, 0], tracks_to_delete),
                     0,
                 )
+        if len(non_existing_tracks) > 0:
+            message = f"Tracks {non_existing_tracks} do not exist and were not deleted."
+            if len(tracks_to_delete) > 0:
+                message += f" Tracks {tracks_to_delete} were removed successfully."
+            notify(message)
         self.lineedit_delete.clear()
 
     def delete_displayed_tracks_on_click(self):
@@ -875,7 +897,8 @@ class TrackingWindow(QWidget):
             ret = msg.exec_()
             if ret == QMessageBox.No:
                 return
-            tracks_layer.data = np.array([[]])
+            self.viewer.layers.remove(tracks_layer.name)
+            self.viewer.layers.select_next()
         else:
             cached_tracks_view = self.cached_tracks.view(
                 [("", self.cached_tracks.dtype)] * self.cached_tracks.shape[1]
@@ -933,7 +956,11 @@ class TrackingWindow(QWidget):
             tracks = np.delete(tracks, np.isin(tracks[:, 1:4], cells).all(axis=1), 0)
             track_results.append(tracks)
         if len(track_results[0]) < 1:
-            self.viewer.layers.remove(tracks_layer.name)
+            if len(track_results) > 1 and len(track_results[1]) > 1:
+                tracks_layer.data = track_results[1]
+            else:
+                self.viewer.layers.remove(tracks_layer.name)
+                self.viewer.layers.select_next()
             self.cached_tracks = None
         else:
             tracks_layer.data = track_results[0]
@@ -980,12 +1007,22 @@ class TrackingWindow(QWidget):
         track_id : int
             The track id of the cells
         """
+        if len(cells) == 0:
+            msg = QMessageBox()
+            msg.setIcon(QMessageBox.Warning)
+            msg.setText("No cells to add.")
+            msg.setWindowTitle("All selected cells are already tracked.")
+            msg.setStandardButtons(QMessageBox.Ok)
+            msg.exec_()
+            return
         # if self.cached_tracks is not None:
         #     raise ValueError("Can't add to tracks if there are cached tracks")
         # assume that a track is being reassigned if cache exists
         tracks_layer = self.get_tracks_layer()
         if tracks_layer is None:
-            raise ValueError("Can't add to tracks if there are no tracks")
+            tracks_layer = self.viewer.add_tracks(cells, name="Tracks")
+            return
+            # raise ValueError("Can't add to tracks if there are no tracks")
         tracks_objects = [tracks_layer.data]
         results_tracks = []
         if self.cached_tracks is not None:

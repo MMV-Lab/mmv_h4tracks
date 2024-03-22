@@ -98,7 +98,7 @@ class MMVH4TRACKS(QWidget):
         logo_label.setMaximumWidth(150)
         logo_label.setScaledContents(True)
         logo_label.setAlignment(Qt.AlignCenter)
-        title = QLabel("<h1><font color='green'>MMV_H4TRACKS</font></h1>")
+        title = QLabel("<h1><font color='green'>MMV_H4Tracks</font></h1>")
         title.setMaximumHeight(100)
         label_image = QLabel("Image:")
         label_segmentation = QLabel("Segmentation:")
@@ -467,11 +467,7 @@ class MMVH4TRACKS(QWidget):
         track_name = self.combobox_tracks.currentText()
         track_layer = grab_layer(self.viewer, track_name)
         layers = [raw_layer, segmentation_layer, track_layer]
-        tracks = self.tracking_window.cached_tracks if hasattr(
-            self.tracking_window, "cached_tracks"
-        ) else None
-        save_zarr(self, self.zarr, layers, tracks)
-        QApplication.restoreOverrideCursor()
+        save_zarr(self.zarr, layers, self.tracking_window.cached_tracks)
 
     def save_as(self):
         """
@@ -479,10 +475,13 @@ class MMVH4TRACKS(QWidget):
         Fails if not all layers exist
         """
         raw_name = self.combobox_image.currentText()
+        raw_layer = grab_layer(self.viewer, raw_name)
         raw_data = grab_layer(self.viewer, raw_name).data
         segmentation_name = self.combobox_segmentation.currentText()
+        segmentation_layer = grab_layer(self.viewer, segmentation_name)
         segmentation_data = grab_layer(self.viewer, segmentation_name).data
         tracks_name = self.combobox_tracks.currentText()
+        tracks_layer = grab_layer(self.viewer, tracks_name)
         track_data = grab_layer(self.viewer, tracks_name).data
 
         dialog = QFileDialog()
@@ -492,20 +491,10 @@ class MMVH4TRACKS(QWidget):
             path += ".zarr"
         if path == ".zarr":
             return
-        z = zarr.open(path, mode="w")
-        r = z.create_dataset(
-            "raw_data", shape=raw_data.shape, dtype="f8", data=raw_data
-        )
-        s = z.create_dataset(
-            "segmentation_data",
-            shape=segmentation_data.shape,
-            dtype="i4",
-            data=segmentation_data,
-        )
-        t = z.create_dataset(
-            "tracking_data", shape=track_data.shape, dtype="i4", data=track_data
-        )
-        QApplication.restoreOverrideCursor()
+        layers = [raw_layer, segmentation_layer, tracks_layer]
+
+        zarrfile = zarr.open(path, mode="w")
+        save_zarr(zarrfile, layers, self.tracking_window.cached_tracks)
 
     def get_process_limit(self):
         """
