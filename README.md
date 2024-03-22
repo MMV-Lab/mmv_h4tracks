@@ -62,7 +62,7 @@ For segmentation, we use the state of the art instance segmentation method Cellp
 
 #### Automatic instance segmentation
 
-To start automatic segmentation, a model must first be selected (default is ??). Automatic segmentation can then be started via "Run Segmentation". The "Preview" option offers the possibility of automatically segmenting the first 5 frames first in order to obtain an estimate of the expected results, as the computation - depending on the data and hardware - can be time-consuming.
+To start automatic segmentation, a model must first be selected. Automatic segmentation can then be started via "Run Segmentation". The "Preview" option offers the possibility of segmenting the first 5 frames first in order to obtain an estimate of the expected results, as the computation - depending on the data and hardware - can be time-consuming.
 
 
 ##### Custom models
@@ -100,6 +100,11 @@ To unlink, all you need to do is click on the cell in the first and last frame. 
 
 In contrast, to link cells, the corresponding cell in each frame must be clicked. This must be done for all frames, so the track must be gapless.
 
+#### Visualize & filter tracks
+
+The displayed tracks can be filtered by entering specific track IDs. An empty entry and subsequent click on the "Filter" button resets the track layer and all existing tracks are displayed.
+
+Individual tracks can be deleted using the delete function. Note: These are permanently deleted and cannot be restored without re-tracking. In addition, all displayed tracks can be deleted.
 
 ### Analysis
 
