@@ -1,5 +1,9 @@
 include LICENSE
 include README.md
 
+include models/Neutrophil_granulocytes
+include models/custom_models/.gitkeep
+include ressources/*.jpg
+
 recursive-exclude * __pycache__
 recursive-exclude * *.py[co]

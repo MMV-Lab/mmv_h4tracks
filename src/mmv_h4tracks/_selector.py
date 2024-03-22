@@ -57,14 +57,12 @@ class Selector:
         """
         widget = self.parent.parent
         if len(self.highlighted) == 0:
-            self.hightlighted = -1
+            selected_text = ""
+            widget.tracking_window.display_cached_tracks()
         else:
-            self.hightlighted = self.track_ids[self.highlighted]
-        remove_window = False
-        if not hasattr(widget, "tracking_window"):
-            widget._tracking()
-            remove_window = True
-        widget.tracking_window._replace_tracks(self.highlighted)
-        if remove_window:
-            widget.tracking_window.close()
+            highlighted_float = self.track_ids[self.highlighted]
+            highlighted_int = [int(i) for i in highlighted_float]
+            selected_text = ", ".join(map(str, highlighted_int))
+            widget.tracking_window.display_selected_tracks(highlighted_int)
+        widget.tracking_window.lineedit_filter.setText(selected_text)
         widget.plot_window.close()

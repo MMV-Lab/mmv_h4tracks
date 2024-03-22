@@ -9,24 +9,27 @@ AMOUNT_OF_COMBOBOXES = 3
 
 # make_napari_viewer is a pytest fixture that returns a napari viewer object
 
+@pytest.fixture
+def create_widget(make_napari_viewer):
+    yield MMVH4TRACKS(make_napari_viewer())
 
 @pytest.fixture
-def viewer_with_widget(make_napari_viewer):
+def viewer_with_widget(create_widget):
     """
     Creates a viewer with the plugin and 10 label layers
 
     Parameters
     ----------
-    make_napari_viewer : fixture
-        Pytest fixture that creates a napari viewer
+    create_widget : MMVH4TRACKS
+        Instance of the main widget
 
     Yields
     ------
     my_widget
         Instance of the main widget
     """
-    viewer = make_napari_viewer()
-    my_widget = MMVH4TRACKS(viewer)
+    my_widget = create_widget
+    viewer = my_widget.viewer
     add_layers(viewer, 10)
     yield my_widget
 
@@ -59,6 +62,19 @@ def add_layers(viewer, amount, names=None):
             np.random.randint(5, size=(20, 4), dtype=int), name=names[amount * 2 + i]
         )
 
+@pytest.mark.widget
+@pytest.mark.system
+def test_widget_creation(create_widget):
+    """
+    Test if the widget is created correctly
+    Widget should be an instance of MMVH4TRACKS
+
+    Parameters
+    ----------
+    create_widget : MMVH4TRACKS
+        Instance of the main widget
+    """
+    assert isinstance(create_widget, MMVH4TRACKS)
 
 @pytest.mark.combobox
 @pytest.mark.unit
@@ -170,7 +186,7 @@ def test_index_consistent_on_layer_remove(viewer_with_widget, index, removal_ind
     widget = viewer_with_widget
     combobox = widget.layer_comboboxes[index]
     combobox.setCurrentIndex(5)
-    widget.viewer.layers.pop(removal_index + index * 10)
+    widget.viewer.layers.pop(removal_index + 1 + index * 10)
     if removal_index < 4:
         assert combobox.currentIndex() == 4
     else:
@@ -221,7 +237,7 @@ def test_moved_layer_order(viewer_with_widget, index, from_index, to_index):
     layername = combobox.currentText()
 
     widget.viewer.layers.move(from_index + index * 10, to_index + index * 10)
-    assert widget.viewer.layers.index(layername) + 1 - index * 10 == combobox.findText(
+    assert widget.viewer.layers.index(layername) - index * 10 == combobox.findText(
         layername
     )
 
@@ -245,9 +261,9 @@ def test_moved_layer_index_moved(viewer_with_widget, index):
     # current index should be updated to new index of moved item
     widget = viewer_with_widget
     combobox = widget.layer_comboboxes[index]
-    combobox.setCurrentIndex(5)
+    combobox.setCurrentIndex(4)
     widget.viewer.layers.move(index * 10 + 4, index * 10 + 2)
-    assert combobox.currentIndex() == 3
+    assert combobox.currentIndex() == 2
 
 
 @pytest.mark.combobox
