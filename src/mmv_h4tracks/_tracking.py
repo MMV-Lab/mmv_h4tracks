@@ -419,9 +419,9 @@ class TrackingWindow(QWidget):
             else:
                 if track_id is None:
                     track_id = existing_entry[0][0]
-                    existing_track = np.array([
-                        track for track in tracks_layer.data if track[0] == track_id
-                    ])
+                    existing_track = np.array(
+                        [track for track in tracks_layer.data if track[0] == track_id]
+                    )
                     if np.min(existing_track[:, 1]) < existing_entry[0][1]:
                         # Converging tracks
                         track_id = None
@@ -431,15 +431,18 @@ class TrackingWindow(QWidget):
                     existing_entry[0][0] != track_id
                     and not existing_entry[0][0] in ids_to_change
                 ):
-                    existing_track = np.array([
-                        track for track in tracks_layer.data if track[0] == existing_entry[0][0]
-                    ])
+                    existing_track = np.array(
+                        [
+                            track
+                            for track in tracks_layer.data
+                            if track[0] == existing_entry[0][0]
+                        ]
+                    )
                     if np.min(existing_track[:, 1]) < existing_entry[0][1]:
                         # Converging tracks
                         break
                     else:
                         ids_to_change.append(existing_entry[0][0])
-
 
         if track_id is None:
             track_id = np.amax(tracks_layer.data[:, 0]) + 1
@@ -448,7 +451,9 @@ class TrackingWindow(QWidget):
             self.assign_new_track_id(tracks_layer, old_id, track_id)
 
         if entries_to_add:
-            if len(entries_to_add) < self.MIN_TRACK_LENGTH and track_id == np.amax(tracks_layer.data[:, 0] + 1):
+            if len(entries_to_add) < self.MIN_TRACK_LENGTH and track_id == np.amax(
+                tracks_layer.data[:, 0] + 1
+            ):
                 QApplication.restoreOverrideCursor()
                 notify_with_delay("Could not find a track of sufficient length.")
                 return
@@ -456,7 +461,6 @@ class TrackingWindow(QWidget):
                 self.add_track_to_tracks(np.array(proposed_track))
             else:
                 self.add_entries_to_tracks(entries_to_add, track_id)
-
 
         QApplication.restoreOverrideCursor()
 
@@ -519,7 +523,9 @@ class TrackingWindow(QWidget):
             if self.cached_tracks is not None:
                 msg = QMessageBox()
                 msg.setWindowTitle("napari")
-                msg.setText("New tracks can only be added if all tracks are displayed! Display all now?")
+                msg.setText(
+                    "New tracks can only be added if all tracks are displayed! Display all now?"
+                )
                 msg.addButton("Display all", QMessageBox.AcceptRole)
                 msg.addButton(QMessageBox.Cancel)
                 retval = msg.exec()
@@ -538,7 +544,9 @@ class TrackingWindow(QWidget):
             if self.cached_tracks is not None:
                 msg = QMessageBox()
                 msg.setWindowTitle("napari")
-                msg.setText("New tracks can only be added if all tracks are displayed! Display all now?")
+                msg.setText(
+                    "New tracks can only be added if all tracks are displayed! Display all now?"
+                )
                 msg.addButton("Display all", QMessageBox.AcceptRole)
                 msg.addButton(QMessageBox.Cancel)
                 retval = msg.exec()
@@ -799,21 +807,31 @@ class TrackingWindow(QWidget):
         """
         input_text = self.lineedit_filter.text()
         if input_text == "":
-            if self.cached_tracks is None:
-                return
-            self.display_cached_tracks()
-        else:
-            try:
-                tracks_to_display = [
-                    int(track_id) for track_id in input_text.split(",") if track_id != ""
-                ]
-            except ValueError:
-                notify("Please use a comma separated list of integers (whole numbers).")
-                return
-            if len(tracks_to_display) < 1:
-                self.lineedit_filter.clear()
-                return
-            self.display_selected_tracks(tracks_to_display)
+            if self.cached_tracks is not None:
+                self.display_cached_tracks()
+            return
+        try:
+            tracks_to_display = [
+                int(track_id) for track_id in input_text.split(",") if track_id != ""
+            ]
+        except ValueError:
+            notify("Please use a comma separated list of integers (whole numbers).")
+            return
+        tracks_to_display = list(set(tracks_to_display))
+        tracks_to_display = [
+            track_id
+            for track_id in tracks_to_display
+            if track_id in self.get_tracks_layer().data[:, 0]
+            or self.cached_tracks is not None
+            and track_id in self.cached_tracks[:, 0]
+        ]
+        if len(tracks_to_display) < 1:
+            self.lineedit_filter.clear()
+            return
+        self.lineedit_filter.setText(
+            ", ".join([str(track_id) for track_id in tracks_to_display])
+        )
+        self.display_selected_tracks(tracks_to_display)
 
     def delete_listed_tracks_on_click(self):
         """
@@ -823,7 +841,9 @@ class TrackingWindow(QWidget):
         if input_text == "":
             return
         try:
-            tracks_to_delete = [int(track_id) for track_id in input_text.split(",") if track_id != ""]
+            tracks_to_delete = [
+                int(track_id) for track_id in input_text.split(",") if track_id != ""
+            ]
         except ValueError:
             notify("Please use a comma separated list of integers (whole numbers).")
             return
@@ -833,7 +853,9 @@ class TrackingWindow(QWidget):
         # filter out the track ids that do not exist
         if self.cached_tracks is not None:
             non_existing_tracks = [
-                track_id for track_id in tracks_to_delete if track_id not in self.cached_tracks[:, 0]
+                track_id
+                for track_id in tracks_to_delete
+                if track_id not in self.cached_tracks[:, 0]
             ]
             tracks_to_delete = [
                 track_id
@@ -845,7 +867,9 @@ class TrackingWindow(QWidget):
                 notify("Please select a valid tracks layer.")
                 return
             non_existing_tracks = [
-                track_id for track_id in tracks_to_delete if track_id not in tracks_layer.data[:, 0]
+                track_id
+                for track_id in tracks_to_delete
+                if track_id not in tracks_layer.data[:, 0]
             ]
             tracks_to_delete = [
                 track_id
