@@ -367,14 +367,12 @@ class EvaluationWindow(QWidget):
                     comparison_segmentation,
                     old_cell_base,
                     connection[0][0],
-                    lower_bound,
                 )
                 new_cell_comparison = get_matching_cell(
                     base_segmentation,
                     comparison_segmentation,
                     new_cell_base,
                     connection[1][0],
-                    lower_bound,
                 )
 
                 if old_cell_comparison == 0 or new_cell_comparison == 0:

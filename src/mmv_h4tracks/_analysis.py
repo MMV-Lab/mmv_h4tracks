@@ -767,7 +767,6 @@ class AnalysisWindow(QWidget):
         duration = np.array(
             [[i, np.count_nonzero(tracks[:, 0] == i)] for i in np.unique(tracks[:, 0])]
         )
-
         data = self._compose_csv_data(
             tracks, duration, filtered_mask, min_movement, min_duration, metrics
         )
@@ -915,7 +914,6 @@ class AnalysisWindow(QWidget):
             valid_values, invalid_values = self._individual_metric_values(
                 tracks, filtered_mask, metrics_dict
             )
-
             rows.append(["Cells matching the filters"])
             for value in valid_values:
                 rows.append(value)
@@ -1276,30 +1274,30 @@ class AnalysisWindow(QWidget):
         Calculate each selected metric for both valid tracks that match the filter criteria and invalid tracks that do not match the filter criteria
         """
         valid_values, invalid_values = [[], []]
-        for id in np.unique(tracks[:, 0]):
+        for i, id in enumerate(np.unique(tracks[:, 0])):
             value = [id]
             value.append(np.count_nonzero(tracks[:, 0] == id))
             if "Speed" in metrics:
-                value.extend([metrics["Speed"][id][1], metrics["Speed"][id][2]])
+                value.extend([metrics["Speed"][i][1], metrics["Speed"][i][2]])
             if "Size" in metrics:
-                value.extend([metrics["Size"][id][1], metrics["Size"][id][2]])
+                value.extend([metrics["Size"][i][1], metrics["Size"][i][2]])
             if "Direction" in metrics:
                 value.extend(
-                    [metrics["Direction"][id][3]]
+                    [metrics["Direction"][i][3]]
                 )  # using index 3 as 1 and 2 are solely used for plotting
             if "Euclidean distance" in metrics:
-                value.append(metrics["Euclidean distance"][id][1])
+                value.append(metrics["Euclidean distance"][i][1])
             if "Velocity" in metrics:
-                value.append(metrics["Velocity"][id][1])
+                value.append(metrics["Velocity"][i][1])
             if "Accumulated distance" in metrics:
-                value.append(metrics["Accumulated distance"][id][1])
+                value.append(metrics["Accumulated distance"][i][1])
             if "Directness" in metrics:
-                value.append(metrics["Directness"][id][1])
+                value.append(metrics["Directness"][i][1])
             if "Perimeter" in metrics:
-                value.extend([metrics["Perimeter"][id][1], metrics["Perimeter"][id][2]])
+                value.extend([metrics["Perimeter"][i][1], metrics["Perimeter"][i][2]])
             if "Eccentricity" in metrics:
                 value.extend(
-                    [metrics["Eccentricity"][id][1], metrics["Eccentricity"][id][2]]
+                    [metrics["Eccentricity"][i][1], metrics["Eccentricity"][i][2]]
                 )
 
             if id in filtered_mask:

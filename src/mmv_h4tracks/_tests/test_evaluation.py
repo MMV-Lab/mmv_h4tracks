@@ -314,7 +314,8 @@ def test_added_edges(set_widget_up, layername, expected_value):
     gt_tracks = viewer.layers[viewer.layers.index("GT_tracks")].data
     eval_tracks_layer = viewer.layers[viewer.layers.index(layername)]
     widget.combobox_tracks.setCurrentIndex(widget.combobox_tracks.findText(layername))
-    window.adjust_centroids(gt_seg, eval_tracks_layer)
+    bounds = (0, gt_seg.shape[0])
+    window.adjust_centroids(gt_seg, eval_tracks_layer, bounds)
     eval_tracks = eval_tracks_layer.data
     _, ae = window.get_track_fault(gt_seg, gt_tracks, eval_seg, eval_tracks)
     assert ae == expected_value
@@ -354,7 +355,8 @@ def test_deleted_edges(set_widget_up, layername, expected_value):
     gt_tracks = viewer.layers[viewer.layers.index("GT_tracks")].data
     eval_tracks_layer = viewer.layers[viewer.layers.index(layername)]
     widget.combobox_tracks.setCurrentIndex(widget.combobox_tracks.findText(layername))
-    window.adjust_centroids(gt_seg, eval_tracks_layer)
+    bounds = (0, gt_seg.shape[0])
+    window.adjust_centroids(gt_seg, eval_tracks_layer, bounds)
     eval_tracks = eval_tracks_layer.data
     de, _ = window.get_track_fault(gt_seg, gt_tracks, eval_seg, eval_tracks)
     assert de == expected_value

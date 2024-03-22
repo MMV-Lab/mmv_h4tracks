@@ -48,7 +48,7 @@ def test_read_models(create_widget):
     segmentation_widget = SegmentationWindow(widget)
     hardcoded_models, custom_models = processing.read_models(segmentation_widget)
     
-    assert hardcoded_models == ["Neutrophil granulocytes"]
+    assert hardcoded_models == ["Neutrophil_granulocytes"]
     assert custom_models == []
 
 @pytest.mark.unit
@@ -58,4 +58,4 @@ def test_display_models(create_widget):
     hardcoded_models, custom_models = processing.read_models(segmentation_widget)
     processing.display_models(segmentation_widget, hardcoded_models, custom_models)
     assert segmentation_widget.combobox_segmentation.count() == 1
-    assert segmentation_widget.combobox_segmentation.currentText() == "Neutrophil granulocytes"
+    assert segmentation_widget.combobox_segmentation.currentText() == "Neutrophil_granulocytes"
