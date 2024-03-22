@@ -122,11 +122,11 @@ To evaluate results, at least 2 consecutive frames must first be corrected manua
 
 #### Segmentation evaluation
 
-In order to evaluate the segmentation results, a segmentation must first be loaded either via the load function of the plugin (drag&drop via napari is not sufficient) or computed within the plugin. This can then be corrected manually. For IoU, Dice and F1 scores are then calculated for the slices specified by the user. These results are not exported automatically and must therefore be noted down by users themselves.
+In order to evaluate the segmentation results, a segmentation must first be loaded either via the load function of the plugin (drag&drop via napari is not sufficient) or computed within the plugin. This can then be corrected manually. For IoU, Dice and F1 scores are then calculated for the frames specified by the user. These results are not exported automatically and must therefore be noted down by users themselves.
 
 #### Tracking evaluation
 
-As for the evaluation of the segmentation, tracking results loaded via the plugin or obtained within the plugin are required. At least 2 consecutive slices must be corrected manually so that a score can be calculated for the quality of the tracking results. More information can be found [here](https://doi.org/10.1371/journal.pone.0144959).
+As for the evaluation of the segmentation, tracking results loaded via the plugin or obtained within the plugin are required. At least 2 consecutive frames must be corrected manually so that a score can be calculated for the quality of the tracking results. More information can be found [here](https://doi.org/10.1371/journal.pone.0144959).
 
 
 ## Hotkeys
