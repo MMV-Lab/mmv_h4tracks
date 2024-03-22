@@ -195,7 +195,7 @@ class SegmentationWindow(QWidget):
             handle_exception(exc)
             return
 
-        def _remove_label(layer, event):
+        def _remove_label(_, event):
             """
             Removes the cell at the given position from the segmentation layer and updates the callbacks
 
@@ -359,7 +359,7 @@ class SegmentationWindow(QWidget):
             handle_exception(exc)
             return
 
-        def _select_label(layer, event):
+        def _select_label(_, event):
             """
             Selects the label at the given position and updates the callbacks
 
@@ -430,7 +430,7 @@ class SegmentationWindow(QWidget):
             handle_exception(exc)
             return
 
-        def _replace_label(layer, event):
+        def _replace_label(_, event):
             """
             Replaces the label at the given position with the currently selected one and updates the callbacks
 
@@ -476,7 +476,7 @@ class SegmentationWindow(QWidget):
             """
             id = self._read_label_id(event)
 
-            def _assimilate_label(layer, event):
+            def _assimilate_label(_, event):
                 """
                 Assimilates the label at the given position with the currently selected one and updates the callbacks
 
