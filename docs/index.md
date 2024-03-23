@@ -1,3 +1,3 @@
 # Welcome to mmv-tracking-napari
 
-A simple plugin to use with napari
+Human in the loop 2d cell migration analysis
