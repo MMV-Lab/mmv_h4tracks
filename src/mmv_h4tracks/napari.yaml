@@ -1,5 +1,4 @@
 name: mmv_h4tracks
-display_name: Human in the Loop Cell Tracking Tool
 schema_version: 0.1.0
 contributions:
   commands: 

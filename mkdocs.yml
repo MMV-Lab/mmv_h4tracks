@@ -1,5 +1,5 @@
 site_name: mmv-H4TRACKS
-site_description: A simple plugin to use with napari
+site_description: Human in the loop 2d cell migration analysis
 site_author: lennart kowitz
 
 theme: readthedocs
