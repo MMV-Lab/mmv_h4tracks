@@ -45,7 +45,7 @@ More detailed information and instructions on each topic can be found in the fol
 
 To load your raw data, you can simply drag & drop them into napari. Ensure that the 'Image' combobox displays the correct layer afterward, see example: 
 
-<img src='docs/figures/combobox.png' width='450'>
+![Comboboxes](https://github.com/MMV-Lab/mmv_h4tracks/blob/main/docs/figures/combobox.png?raw=true)
 
 To load your own segmentation, you can do equivalent.
 
