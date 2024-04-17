@@ -1,4 +1,5 @@
 name: mmv_h4tracks
+display_name: MMV_H4Tracks
 schema_version: 0.1.0
 contributions:
   commands: 

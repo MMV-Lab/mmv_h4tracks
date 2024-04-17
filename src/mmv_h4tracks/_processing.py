@@ -1,35 +1,37 @@
 import multiprocessing
-import os
-import platform
-from multiprocessing import Pool, Manager
-from threading import Event
+from multiprocessing import Pool
 import json
+import logging
 from pathlib import Path
+import time
 
-import napari
 import numpy as np
 from cellpose import models, core
 from napari.qt.threading import thread_worker
 from qtpy.QtCore import Qt
-from qtpy.QtWidgets import (
-    QApplication,
-    QComboBox,
-    QGridLayout,
-    QLabel,
-    QMessageBox,
-    QPushButton,
-    QSizePolicy,
-    QVBoxLayout,
-    QWidget,
-)
+from qtpy.QtWidgets import QApplication
 from scipy import ndimage, optimize, spatial
-import torch
 
 from mmv_h4tracks import APPROX_INF, MAX_MATCHING_DIST
 from ._grabber import grab_layer
-from ._logger import choice_dialog, notify, handle_exception
+from ._logger import handle_exception
 
 CUSTOM_MODEL_PREFIX = "custom_"
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+logger.propagate = False
+for handler in logger.handlers:
+    logger.removeHandler(handler)
+handler = logging.StreamHandler()
+handler.setFormatter(
+    logging.Formatter(
+        fmt="%(asctime)s - %(levelname)s - %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+)
+logger.addHandler(handler)
+logger.debug("logger initialized")
 
 
 def segment_slice_cpu(layer_slice, parameters):
@@ -46,12 +48,18 @@ def segment_slice_cpu(layer_slice, parameters):
     nd array
         the segmentation mask for the slice
     """
+    starttime = time.time()
+    logger.debug("Starting pid: " + str(multiprocessing.current_process().pid) + " for slice at " + str(starttime))
+    logger.info("Segmentation process started")
     model = models.CellposeModel(
         gpu=False, pretrained_model=parameters["model_path"]
     )
     eval_params = parameters
     eval_params.pop("model_path", None)
     mask, _, _ = model.eval(layer_slice, **eval_params)
+    endtime = time.time()
+    logger.debug("Ending pid: " + str(multiprocessing.current_process().pid) + " for slice at " + str(endtime) + " after " + str(endtime - starttime) + " seconds")
+    logger.info("Segmentation process finished with runtime: " + str(endtime - starttime))
     return mask
 
 
@@ -219,6 +227,7 @@ def _segment_image(widget, demo=False):
     widget, mask
         the widget and the segmentation mask
     """
+    logger.info("Starting segmentation")
     QApplication.setOverrideCursor(Qt.WaitCursor)
 
     viewer = widget.viewer
@@ -232,6 +241,7 @@ def _segment_image(widget, demo=False):
     parameters = _get_parameters(widget, selected_model)
 
     if core.use_gpu():
+        logger.info("Using GPU for segmentation")
         model = models.CellposeModel(
             gpu=True, pretrained_model=parameters.pop("model_path")
         )
@@ -241,8 +251,10 @@ def _segment_image(widget, demo=False):
             mask.append(layer_mask)
         mask = np.array(mask)
     else:
+        logger.info("Using CPU for segmentation")
         # set process limit
         AMOUNT_OF_PROCESSES = widget.parent.get_process_limit()
+        logger.debug("Amount of processes: " + str(AMOUNT_OF_PROCESSES))
 
         data_with_parameters = [(layer_slice, parameters) for layer_slice in data]
 
@@ -253,6 +265,7 @@ def _segment_image(widget, demo=False):
     if not demo:
         widget.parent.initial_layers[0] = mask
     QApplication.restoreOverrideCursor()
+    logger.info("Segmentation finished")
     return widget, mask
 
 
