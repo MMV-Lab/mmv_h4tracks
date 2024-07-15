@@ -291,7 +291,7 @@ class EvaluationWindow(QWidget):
         fp = self.get_segmentation_fault(gt_seg, eval_seg, get_false_positives)
         fn = self.get_segmentation_fault(gt_seg, eval_seg, get_false_negatives)
         sc = self.get_segmentation_fault(gt_seg, eval_seg, get_split_cells)
-        de, ae = self.get_track_fault(gt_seg, gt_tracks, eval_seg, eval_tracks, lower_bound)
+        de, ae = self.get_track_fault(gt_seg, gt_tracks, eval_seg, eval_tracks)
 
         fv = fp + fn * 10 + sc * 5 + de + ae * 1.5
 
@@ -340,7 +340,7 @@ class EvaluationWindow(QWidget):
 
         return faults
 
-    def get_track_fault(self, gt_seg, gt_tracks, eval_seg, eval_tracks, lower_bound=0):
+    def get_track_fault(self, gt_seg, gt_tracks, eval_seg, eval_tracks):
         """
         Calculate the track fault value.
         Calculates both deleted edges and added edges.
