@@ -234,6 +234,8 @@ class SegmentationWindow(QWidget):
         position : list
             the position of the cell to remove
         """
+        if len(position) < 3:
+            return
         label_layer = grab_layer(
             self.viewer, self.parent.combobox_segmentation.currentText()
         )
@@ -243,17 +245,29 @@ class SegmentationWindow(QWidget):
             notify("No segmentation layer found")
             return
 
-        x = int(round(position[2]))
-        y = int(round(position[1]))
-        z = int(position[0])
-        selected_id = label_layer.data[z, y, x]
+        position = [int(round(p)) for p in position]
+        # x = int(round(position[2]))
+        # y = int(round(position[1]))
+        # z = int(position[0])
+        # selected_id = label_layer.data[z, y, x]
+        selected_id = label_layer.data[tuple(position)]
         if selected_id == 0:
             print("no cell")
             return
+        cell = []
+        if len(position) == 2:
+            data = label_layer.data
+        else:
+            data = label_layer.data[position[0]]
+            cell.append(position[0])
         centroid = ndimage.center_of_mass(
-            label_layer.data[z], labels=label_layer.data[z], index=selected_id
+            data, labels=data, index=selected_id
         )
-        cell = [z, int(np.rint(centroid[0])), int(np.rint(centroid[1]))]
+        # centroid = ndimage.center_of_mass(
+        #     label_layer.data[z], labels=label_layer.data[z], index=selected_id
+        # )
+        cell.extend([int(np.rint(centroid[0])), int(np.rint(centroid[1]))])
+        # cell = [z, int(np.rint(centroid[0])), int(np.rint(centroid[1]))]
 
         try:
             track_id, displayed = self.get_track_id_of_cell(cell)
@@ -355,7 +369,7 @@ class SegmentationWindow(QWidget):
         Adds the callback to select the label at the given position
         """
         try:
-            segmentation_layer = grab_layer(
+            _ = grab_layer(
                 self.viewer, self.parent.combobox_segmentation.currentText()
             )
         except ValueError as exc:
@@ -466,7 +480,7 @@ class SegmentationWindow(QWidget):
             handle_exception(exc)
             return
 
-        def _pick_merge_label(layer, event):
+        def _pick_merge_label(_, event):
             """
             Picks the label to merge with and updates the callbacks
 
@@ -517,19 +531,21 @@ class SegmentationWindow(QWidget):
             notify("Please make sure the label layer exists!")
             return
 
-        x = int(round(event.position[2]))
-        y = int(round(event.position[1]))
-        z = int(round(event.position[0]))
+        position = [int(round(p)) for p in event.position]
+        # x = int(round(event.position[2]))
+        # y = int(round(event.position[1]))
+        # z = int(round(event.position[0]))
 
         if id == -1:
             id = self._get_free_label_id(label_layer)
 
         # Replace the ID with the new id
-        old_id = label_layer.data[z, y, x]
+        # old_id = label_layer.data[z, y, x]
         """if old_id == 0:
             notify("Can't change ID of background, please make sure to select a cell!")
             return"""
-        label_layer.fill((z, y, x), id)
+        label_layer.fill(tuple(position), id)
+        # label_layer.fill((z, y, x), id)
 
         # set the label layer as currently selected layer
         self.viewer.layers.select_all()
@@ -556,11 +572,13 @@ class SegmentationWindow(QWidget):
             notify("Please make sure the label layer exists!")
             return
 
-        x = int(round(event.position[2]))
-        y = int(round(event.position[1]))
-        z = int(round(event.position[0]))
+        position = [int(round(p)) for p in event.position]
+        # x = int(round(event.position[2]))
+        # y = int(round(event.position[1]))
+        # z = int(round(event.position[0]))
 
-        return label_layer.data[z, y, x]
+        return label_layer.data[tuple(position)]
+        # return label_layer.data[z, y, x]
 
     def _update_callbacks(self, callback=None):
         """

@@ -283,6 +283,9 @@ class TrackingWindow(QWidget):
             """
             Callback for the overlap based tracking
             """
+            if len(event.position) == 2:
+                notify_with_delay("2D image can not be tracked.")
+
             try:
                 label_layer = grab_layer(
                     self.viewer, self.parent.combobox_segmentation.currentText()
@@ -492,6 +495,9 @@ class TrackingWindow(QWidget):
             """
             Callback for the unlink function to store the selected cells
             """
+            if len(event.position) == 2:
+                notify_with_delay("2D image can not be tracked.")
+
             try:
                 label_layer = grab_layer(
                     self.viewer, self.parent.combobox_segmentation.currentText()
@@ -692,6 +698,9 @@ class TrackingWindow(QWidget):
             """
             Callback for the unlink function to store the selected cells
             """
+            if len(event.position) == 2:
+                notify_with_delay("2D image can not be tracked.")
+                
             try:
                 label_layer = grab_layer(
                     self.viewer, self.parent.combobox_segmentation.currentText()
