@@ -226,6 +226,8 @@ class MMVH4TRACKS(QWidget):
         custom_binds = [
             ("E", self.hotkey_next_free),
             ("S", self.hotkey_overlap_single_tracking),
+            ("R", self.hotkey_separate),
+            ("T", self.hotkey_select_id),
         ]
         for custom_bind in custom_binds:
             if not custom_bind[0] in hotkeys:
@@ -262,6 +264,18 @@ class MMVH4TRACKS(QWidget):
         Hotkey for the overlap single tracking
         """
         self.tracking_window._add_auto_track_callback()
+
+    def hotkey_separate(self, _):
+        """
+        Hotkey for separate
+        """
+        self.segmentation_window._add_replace_callback()
+
+    def hotkey_select_id(self, _):
+        """
+        Hotkey for select ID
+        """
+        self.segmentation_window._add_select_callback()        
 
     def add_entry_to_comboboxes(self, event):
         """
