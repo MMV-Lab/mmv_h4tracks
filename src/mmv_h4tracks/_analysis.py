@@ -22,6 +22,7 @@ from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from napari.qt.threading import thread_worker
 import napari
 from skimage import measure
+import math
 
 from ._grabber import grab_layer
 from ._logger import notify
@@ -206,23 +207,24 @@ class AnalysisWindow(QWidget):
         Returns
         -------
         nd array
-            (N,3) shape array, which contains the ID, average speed and standard deviation of speed
+            (N,4) shape array, which contains the ID, average speed, standard deviation of speed and max speed
         """
         for unique_id in np.unique(tracks[:, 0]):
             track = np.delete(tracks, np.where(tracks[:, 0] != unique_id), 0)
             accumulated_distance = []
+            max_speed = 0
             for i in range(0, len(track) - 1):
-                accumulated_distance.append(
-                    np.hypot(
-                        track[i, 2] - track[i + 1, 2], track[i, 3] - track[i + 1, 3]
-                    )
+                distance = np.hypot(
+                    track[i, 2] - track[i + 1, 2], track[i, 3] - track[i + 1, 3]
                 )
+                accumulated_distance.append(distance)
+                max_speed = max(max_speed, distance)
             average = np.around(np.average(accumulated_distance), 3)
             std_deviation = np.around(np.std(accumulated_distance), 3)
             try:
-                speeds = np.append(speeds, [[unique_id, average, std_deviation]], 0)
+                speeds = np.append(speeds, [[unique_id, average, std_deviation, max_speed]], 0)
             except UnboundLocalError:
-                speeds = np.array([[unique_id, average, std_deviation]])
+                speeds = np.array([[unique_id, average, std_deviation, max_speed]])
         return speeds
 
     def _calculate_size(self, tracks, segmentation):
@@ -1329,14 +1331,20 @@ def calculate_size_single_track(track, segmentation):
     Returns
     -------
     sizes: nd array
-        (N,3) shape array, which contains the ID, average size and standard deviation of size
+        (N,5) shape array, which contains the ID, average size standard deviation of size, min size and max size
     """
     id = track[0, 0]
     sizes = []
+    max_size = 0
+    min_size = math.inf
     for line in track:
         _, z, y, x = line
         seg_id = segmentation[z, y, x]
-        sizes.append(len(np.where(segmentation[z] == seg_id)[0]))
+        size = len(np.where(segmentation[z] == seg_id)[0])
+        sizes.append(size)
+        max_size = max(max_size, size)
+        min_size = min(min_size, size)
+        # sizes.append(len(np.where(segmentation[z] == seg_id)[0]))
     average = np.around(np.average(sizes), 3)
     std_deviation = np.around(np.std(sizes), 3)
-    return [id, average, std_deviation]
+    return [id, average, std_deviation, min_size, max_size]
