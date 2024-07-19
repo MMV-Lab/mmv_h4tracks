@@ -16,8 +16,8 @@ from tqdm import tqdm
 
 from ._grabber import grab_layer
 
-DEFAULT_SPEED_THRESHOLD = 5
-DEFAULT_SIZE_THRESHOLD = 2.5
+DEFAULT_SPEED_THRESHOLD = 10
+DEFAULT_SIZE_THRESHOLD = 5
 DEFAULT_DISTANCE_THRESHOLD = 50
 
 
@@ -103,11 +103,15 @@ class AssistantWindow(QWidget):
             threshold = float(self.speed_lineedit.text())
         except ValueError:
             threshold = DEFAULT_SPEED_THRESHOLD
-        speeds = self.parent.analysis_window._get_speeds(tracks)
+        speeds = self.parent.analysis_window._calculate_speed(tracks)
         for result in speeds:
+            if result[1] == 0:
+                print(f"avoiding division by zero. would divide {result[3]}")
+                continue
             if result[3] / result[1] > threshold:
-                outliers.append(result[0])
+                outliers.append(int(result[0]))
         print(outliers)
+        print(len(outliers))
         self.display_outliers(outliers)
 
     def show_size_outliers_on_click(self):
@@ -132,11 +136,12 @@ class AssistantWindow(QWidget):
             threshold = float(self.size_lineedit.text())
         except ValueError:
             threshold = DEFAULT_SIZE_THRESHOLD
-        sizes = self.parent.analysis_window._get_sizes(tracks, segmentation)
+        sizes = self.parent.analysis_window._calculate_size(tracks, segmentation)
         for result in sizes:
             if result[4] / result[3] > threshold:
-                outliers.append(result[0])
+                outliers.append(int(result[0]))
         print(outliers)
+        print(len(outliers))
         self.display_outliers(outliers)
 
     def show_abrupt_tracks_on_click(self):
@@ -166,21 +171,22 @@ class AssistantWindow(QWidget):
 
         for id_ in np.unique(tracks[:, 0]):
             track = tracks[tracks[:, 0] == id_]
-            if track[0, 1] > 0 and not self.close_to_edges(
+            if track[0, 1] > 0 and not self.close_to_edge(
                 track[0, 2], track[0, 3], shape, threshold
             ):
                 outliers.append(id_)
-            elif track[-1, 1] < frames - 1 and not self.close_to_edges(
+            elif track[-1, 1] < frames - 1 and not self.close_to_edge(
                 track[-1, 2], track[-1, 3], shape, threshold
             ):
                 outliers.append(id_)
         print(outliers)
+        print(len(outliers))
         self.display_outliers(outliers)
 
-    def close_to_edges(self, y, x, shape, threshold):
+    def close_to_edge(self, y, x, shape, threshold):
         y_edge = y < threshold or y > shape[0] - threshold
         x_edge = x < threshold or x > shape[1] - threshold
-        return y_edge and x_edge
+        return y_edge or x_edge
 
     def display_outliers(self, outliers):
         self.parent.tracking_window.display_selected_tracks(outliers)
