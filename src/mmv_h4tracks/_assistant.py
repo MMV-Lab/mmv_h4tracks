@@ -48,24 +48,35 @@ class AssistantWindow(QWidget):
         btn_distance = QPushButton("Show tracks starting/ending abruptly")
         btn_relabel = QPushButton("Relabel cells")
         btn_align_ids = QPushButton("Less flashing")
+        btn_untracked = QPushButton("Show untracked cells")
+        btn_tiny = QPushButton("Show small cells")
+        btn_delete_id = QPushButton("Delete ID")
 
         btn_relabel.setToolTip("Make sure that each cell has a unique ID")
         btn_align_ids.setToolTip("Align the IDs of the tracks with the segmentation")
+        btn_delete_id.setToolTip("Delete a specific ID from the whole movie")
 
         btn_speed.clicked.connect(self.show_speed_outliers_on_click)
         btn_size.clicked.connect(self.show_size_outliers_on_click)
         btn_distance.clicked.connect(self.show_abrupt_tracks_on_click)
         btn_relabel.clicked.connect(self.relabel_cells_on_click)
         btn_align_ids.clicked.connect(self.align_ids_on_click)
+        btn_untracked.clicked.connect(self.show_untracked_cells_on_click)
+        btn_tiny.clicked.connect(self.show_tiny_cells_on_click)
+        btn_delete_id.clicked.connect(self.delete_id_on_click)
 
         # LineEdits
         self.speed_lineedit = QLineEdit()
         self.size_lineedit = QLineEdit()
         self.distance_lineedit = QLineEdit()
+        self.tiny_lineedit = QLineEdit()
+        self.delete_id_lineedit = QLineEdit()
 
         self.speed_lineedit.setPlaceholderText(str(DEFAULT_SPEED_THRESHOLD))
         self.size_lineedit.setPlaceholderText(str(DEFAULT_SIZE_THRESHOLD))
         self.distance_lineedit.setPlaceholderText(str(DEFAULT_DISTANCE_THRESHOLD))
+        self.tiny_lineedit.setPlaceholderText("10")
+        self.delete_id_lineedit.setPlaceholderText("ID to delete")
 
         # QGroupBoxes
         filters = QGroupBox("Filters")
@@ -79,8 +90,13 @@ class AssistantWindow(QWidget):
         filters_layout.addWidget(label_distance, 2, 0)
         filters_layout.addWidget(self.distance_lineedit, 2, 1)
         filters_layout.addWidget(btn_distance, 2, 2)
-        filters_layout.addWidget(btn_align_ids, 3, 0)
-        filters_layout.addWidget(btn_relabel, 3, 2)
+        filters_layout.addWidget(self.tiny_lineedit, 3, 0, 1, 2)
+        filters_layout.addWidget(btn_tiny, 3, 2)
+        filters_layout.addWidget(self.delete_id_lineedit, 4, 0, 1, 2)
+        filters_layout.addWidget(btn_delete_id, 4, 2)
+        filters_layout.addWidget(btn_untracked, 5, 0)
+        filters_layout.addWidget(btn_align_ids, 5, 1)
+        filters_layout.addWidget(btn_relabel, 5, 2)
         filters.setLayout(filters_layout)
 
         ### Layout
@@ -289,3 +305,136 @@ class AssistantWindow(QWidget):
                     segmentation[track[1]] == segmentation[track[1], track[2], track[3]]
                 ] = track[0]
         return segmentation
+    
+    def show_untracked_cells_on_click(self):
+        try:
+            label_layer = grab_layer(
+                self.viewer, self.parent.combobox_segmentation.currentText()
+            )
+        except ValueError:
+            print("No segmentation layer found")
+            return
+        segmentation = label_layer.data
+        try:
+            tracks_layer = grab_layer(
+                self.viewer, self.parent.combobox_tracks.currentText()
+            )
+        except ValueError:
+            print("No tracks layer found")
+            return
+        tracks = tracks_layer.data
+        untracked = []
+        for frame in range(segmentation.shape[0]):
+            for id_ in set(np.unique(segmentation[frame])) - {0}:
+                centroid = center_of_mass(
+                    label_layer.data[frame],
+                    labels=label_layer.data[frame],
+                    index=id_,
+                )
+                centroid = [
+                    frame,
+                    int(np.rint(centroid[0])),
+                    int(np.rint(centroid[1])),
+                ]
+                if not any(
+                    np.all(centroid == track[1:4]) for track in tracks
+                ):
+                    untracked.append(centroid)
+
+        print(untracked)
+        self.mark_outliers(untracked, "Untracked cells")
+
+    def show_tiny_cells_on_click(self):
+        try:
+            label_layer = grab_layer(
+                self.viewer, self.parent.combobox_segmentation.currentText()
+            )
+        except ValueError:
+            print("No segmentation layer found")
+            return
+        segmentation = label_layer.data
+        try:
+            threshold = float(self.tiny_lineedit.text())
+        except ValueError:
+            threshold = 10
+        tiny = []
+        for frame in range(segmentation.shape[0]):
+            for id_ in set(np.unique(segmentation[frame])) - {0}:
+                if np.sum(segmentation[frame] == id_) < threshold:
+                    centroid = center_of_mass(
+                        label_layer.data[frame],
+                        labels=label_layer.data[frame],
+                        index=id_,
+                    )
+                    centroid = [
+                        frame,
+                        int(np.rint(centroid[0])),
+                        int(np.rint(centroid[1])),
+                    ]
+                    tiny.append(centroid)
+
+        print(tiny)
+        self.mark_outliers(tiny, "Tiny cells")
+
+    def delete_id_on_click(self):
+        try:
+            label_layer = grab_layer(
+                self.viewer, self.parent.combobox_segmentation.currentText()
+            )
+        except ValueError:
+            print("No segmentation layer found")
+            return
+        segmentation = label_layer.data
+        try:
+            id_ = int(self.delete_id_lineedit.text())
+        except ValueError:
+            print("Invalid ID")
+            return
+        segmentation[segmentation == id_] = 0
+        label_layer.data = segmentation
+        print(f"Deleted ID {id_}")
+        self.delete_id_lineedit.clear()
+
+    def mark_outliers(self, outliers, layername):
+        try:
+            label_layer = grab_layer(
+                self.viewer, self.parent.combobox_segmentation.currentText()
+            )
+        except ValueError:
+            print("No segmentation layer found")
+            return
+        data = np.zeros_like(label_layer.data)
+        indices = []
+        for outlier in outliers:
+            indices.extend(self.get_cross(outlier))
+        indices = np.array(indices)
+        indices = tuple(indices.T)
+        data[indices] = 1
+        try:
+            layer = self.viewer.layers[self.viewer.layers.index(layername)]
+            layer.data = data
+        except:
+            self.viewer.add_labels(data, name=layername)
+
+    def get_cross(self, centroid):
+        try:
+            label_layer = grab_layer(
+                self.viewer, self.parent.combobox_segmentation.currentText()
+            )
+        except ValueError:
+            print("No segmentation layer found")
+            return
+        _, max_y, max_x = label_layer.data.shape
+        z, y, x = centroid
+        cross = []
+        for i in range(26):
+            if 0 < x - i < max_x and 0 < y - i < max_y:
+                cross.append([z, y - i, x - i])
+            if 0 < x + i < max_x and 0 < y - i < max_y:
+                cross.append([z, y - i, x + i])
+            if 0 < x - i < max_x and 0 < y + i < max_y:
+                cross.append([z, y + i, x - i])
+            if 0 < x + i < max_x and 0 < y + i < max_y:
+                cross.append([z, y + i, x + i])
+
+        return cross
