@@ -234,7 +234,7 @@ class SegmentationWindow(QWidget):
         position : list
             the position of the cell to remove
         """
-        if len(position) < 3:
+        if len(position) < 2:
             return
         label_layer = grab_layer(
             self.viewer, self.parent.combobox_segmentation.currentText()
@@ -281,57 +281,24 @@ class SegmentationWindow(QWidget):
             return
         tracks_layer = grab_layer(self.viewer, tracks_name)
         displayed_tracks = tracks_layer.data
-        all_tracks = [displayed_tracks]
 
+        tracks = tracks_layer.data
+        filter_values = None
         if self.parent.tracking_window.cached_tracks is not None:
-            next_id = max(self.parent.tracking_window.cached_tracks[:, 0]) + 1
-            all_tracks.append(self.parent.tracking_window.cached_tracks)
+            filter_values = np.unique(tracks[:, 0])
+            tracks = self.parent.tracking_window.cached_tracks
+
+        tracks = processing.remove_frame_from_track(tracks, [track_id, *cell])
+
+        df = pd.DataFrame(tracks, columns=["ID", "Z", "Y", "X"])
+        df.sort_values(["ID", "Z"], ascending=True, inplace=True)
+        tracks = df.values
+
+        if filter_values is not None:
+            self.parent.tracking_window.cached_tracks = tracks
+            self.parent.tracking_window.display_selected_tracks(filter_values)
         else:
-            next_id = max(displayed_tracks[:, 0]) + 1
-        indices_to_delete = [[], []]
-
-        for indicator, tracks in enumerate(all_tracks):
-            # find index of entry in displayed tracks
-            for i in range(len(tracks)):
-                if np.all(tracks[i, 1:4] == cell):
-                    index = i
-                    # get track id of that entry
-                    track_id = tracks[i][0]
-                    break
-
-            # find first and last index of that track id
-            indices = np.where(tracks[:, 0] == track_id)[0]
-            if len(indices) == 0:
-                indices_to_delete[indicator] = []
-                continue
-            first = min(indices)
-            last = max(indices)
-
-            # if index != first and != last index change id of all entries after index
-            if index > first + 1:
-                indices = indices[indices >= index]
-            if index < last - 1:
-                indices = indices[indices <= index]
-
-            if len(indices) == 1:
-                for i in range(index + 1, last + 1):
-                    tracks[i][0] = next_id
-
-            indices_to_delete[indicator] = indices
-
-        # remove entry (or entries)
-        if displayed:
-            displayed_tracks = np.delete(displayed_tracks, indices_to_delete[0], 0)
-            tracks_layer.data = displayed_tracks
-        if self.parent.tracking_window.cached_tracks is not None:
-            self.parent.tracking_window.cached_tracks = np.delete(
-                self.parent.tracking_window.cached_tracks, indices_to_delete[1], 0
-            )
-            df = pd.DataFrame(
-                self.parent.tracking_window.cached_tracks, columns=["ID", "Z", "Y", "X"]
-            )
-            df.sort_values(["ID", "Z"], ascending=True, inplace=True)
-            self.parent.tracking_window.cached_tracks = df.values
+            tracks_layer.data = tracks
 
     def get_track_id_of_cell(self, cell):
         """

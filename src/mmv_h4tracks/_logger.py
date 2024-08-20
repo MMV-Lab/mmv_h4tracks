@@ -1,8 +1,6 @@
-import sys
 import time
-from pathlib import Path
 
-from qtpy.QtWidgets import QMessageBox, QInputDialog, QApplication
+from qtpy.QtWidgets import QMessageBox, QApplication
 from napari.qt.threading import thread_worker
 
 
