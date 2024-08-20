@@ -343,7 +343,6 @@ def _track_segmentation(widget):
     matches = _match_centroids_parallel(widget, extended_centroids)
 
     tracks = _process_matches(matches)
-
     QApplication.restoreOverrideCursor()
     return tracks
 
@@ -556,3 +555,102 @@ def _process_matches(matches):
         next_id += 1
 
     return tracks.astype(int)
+
+def remove_frame_from_track(tracks, track_entry):
+    """Handles the logic for removing a frame from a track.
+    Includes splitting the track if necessary."""
+    # get index, track id and frame of track entry
+    index = np.where(tracks == track_entry)[0][0]
+    track_id, frame, _, _ = track_entry
+    indices_to_remove = [index]
+
+    # get all track entries with the same track id
+    track = tracks[tracks[:, 0] == track_id]
+
+    # if entries with lower and higher frame exist, split the track
+    if np.any(track[:, 1] < frame) and np.any(track[:, 1] > frame):
+        # get new track id
+
+        # get the entries with lower and higher frame
+        lower_indices = np.where(track[:, 1] < frame)[0]
+        higher_indices = np.where(track[:, 1] > frame)[0]
+
+        # if only one entry with either lower or higher exists, find index
+        # and queue for removal
+        if len(lower_indices) == 1:
+            indices_to_remove.append(lower_indices[0])
+        if len(higher_indices) == 1:
+            indices_to_remove.append(higher_indices[0])
+
+    # if more than the one entry needs to be removed no splitting
+    # is necessary
+    if len(indices_to_remove) < 2:
+        # remove only the one entry, relabel the following frames
+        new_track_id = lowest_missing_int(tracks[:, 0])
+        tracks[higher_indices, 0] = new_track_id
+        tracks = np.delete(tracks, indices_to_remove, axis=0)
+    else:
+        tracks = np.delete(tracks, indices_to_remove, axis=0)
+
+    return tracks
+
+def lowest_missing_int(arr):
+    num_set = set(arr)
+    i = 1
+    while i in num_set:
+        i += 1
+    return i
+
+def split_noncontinuous_tracks(tracks):
+    """Splits noncontinuous tracks into separate tracks."""
+    # get unique track ids
+    unique_track_ids = np.unique(tracks[:, 0])
+
+    # iterate through all unique track ids
+    for track_id in unique_track_ids:
+        # get all entries with the current track id
+        current_track = tracks[tracks[:, 0] == track_id]
+
+        # if the track is not continuous, split it
+        if not np.all(np.diff(current_track[:, 1]) == 1):
+            print(f"Splitting track {track_id}")
+            print(f"Current track: {current_track}")
+            # get the indices of the noncontinuous entries
+            jumped_indices = np.where(np.diff(current_track[:, 1]) != 1)[0] + 1
+            print(f"Jumped indices: {jumped_indices}")
+            # get lists of indices to update
+            # each list starts at the first entry and goes to the
+            # end of the track
+            indices_to_update = []
+            # TODO: indices are not assigned correctly
+            for index in jumped_indices:
+                index_in_tracks = np.where(np.all(tracks == current_track[index], axis=1))[0][0]
+                print(f"index_in_tracks: {index_in_tracks}")
+                indices_to_update.append(np.arange(len(current_track) - index) + index_in_tracks)
+            print(f"Indices to update: {indices_to_update}")
+            
+            for index_list in indices_to_update:
+                # get the new track id
+                new_track_id = lowest_missing_int(unique_track_ids)
+
+                # set the new track id for the split entries
+                tracks[index_list, 0] = new_track_id
+                unique_track_ids = np.unique(tracks[:, 0])
+
+    return tracks
+
+def remove_dot_tracks(tracks):
+    """Remove tracks that are only one frame long."""
+    # get unique track ids
+    unique_track_ids = np.unique(tracks[:, 0])
+
+    # iterate through all unique track ids
+    for track_id in unique_track_ids:
+        # get all entries with the current track id
+        current_track = tracks[tracks[:, 0] == track_id]
+
+        # if the track is only one frame long, remove it
+        if len(current_track) == 1:
+            tracks = np.delete(tracks, np.where(tracks[:, 0] == track_id), axis=0)
+
+    return tracks
