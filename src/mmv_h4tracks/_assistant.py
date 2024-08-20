@@ -324,7 +324,7 @@ class AssistantWindow(QWidget):
             return
         tracks = tracks_layer.data
         untracked = []
-        for frame in range(segmentation.shape[0]):
+        for frame in tqdm(range(segmentation.shape[0])):
             for id_ in set(np.unique(segmentation[frame])) - {0}:
                 centroid = center_of_mass(
                     label_layer.data[frame],
@@ -358,22 +358,27 @@ class AssistantWindow(QWidget):
         except ValueError:
             threshold = 10
         tiny = []
-        for frame in range(segmentation.shape[0]):
+        for frame in tqdm(range(segmentation.shape[0])):
             for id_ in set(np.unique(segmentation[frame])) - {0}:
                 if np.sum(segmentation[frame] == id_) < threshold:
-                    centroid = center_of_mass(
-                        label_layer.data[frame],
-                        labels=label_layer.data[frame],
-                        index=id_,
-                    )
-                    centroid = [
-                        frame,
-                        int(np.rint(centroid[0])),
-                        int(np.rint(centroid[1])),
-                    ]
-                    tiny.append(centroid)
+                    # centroid = center_of_mass(
+                    #     label_layer.data[frame],
+                    #     labels=label_layer.data[frame],
+                    #     index=id_,
+                    # )
+                    # centroid = [
+                    #     frame,
+                    #     int(np.rint(centroid[0])),
+                    #     int(np.rint(centroid[1])),
+                    # ]
+                    all_pixels = np.where(segmentation[frame] == id_)
+                    for y, x in zip(all_pixels[0], all_pixels[1]):
+                        tiny.append([frame, y, x])
+                    # tiny.append(centroid)
 
-        print(tiny)
+        unique_frames = set([coord[0] for coord in tiny])
+        print(f"Found {len(tiny)} tiny cells in frames {unique_frames}")
+        
         self.mark_outliers(tiny, "Tiny cells")
 
     def delete_id_on_click(self):
@@ -406,7 +411,8 @@ class AssistantWindow(QWidget):
         data = np.zeros_like(label_layer.data)
         indices = []
         for outlier in outliers:
-            indices.extend(self.get_cross(outlier))
+            # indices.extend(self.get_cross(outlier))
+            indices.extend(self.get_circle(outlier))
         indices = np.array(indices)
         indices = tuple(indices.T)
         data[indices] = 1
@@ -438,3 +444,26 @@ class AssistantWindow(QWidget):
                 cross.append([z, y + i, x + i])
 
         return cross
+
+    def get_circle(self, centroid, R=10):
+        try:
+            label_layer = grab_layer(
+                self.viewer, self.parent.combobox_segmentation.currentText()
+            )
+        except ValueError:
+            print("No segmentation layer found")
+            return
+
+        _, max_y, max_x = label_layer.data.shape
+        z, y, x = centroid
+        circle = []
+        R_squared = R * R
+
+        for dy in range(-R, R + 1):
+            dx_limit = int((R_squared - dy**2) ** 0.5)
+            for dx in range(-dx_limit, dx_limit + 1):
+                new_x, new_y = x + dx, y + dy
+                if 0 <= new_x < max_x and 0 <= new_y < max_y:
+                    circle.append([z, new_y, new_x])
+
+        return circle
