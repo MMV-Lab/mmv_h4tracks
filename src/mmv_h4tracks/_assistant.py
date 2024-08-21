@@ -258,7 +258,7 @@ class AssistantWindow(QWidget):
             tracks[:, 0] = tracks[:, 0] + 1
 
         new_segmentation[segmentation > 0] = segmentation[segmentation > 0] + np.max(
-            segmentation
+            [np.max(segmentation), np.max(tracks[:,0])]
         )
         # segmentation[segmentation > 0] = segmentation[segmentation > 0] + np.max(
         #     segmentation
