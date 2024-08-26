@@ -567,6 +567,10 @@ class TestUnlink:
                 check_schema(widget)
                 mock_notify.assert_called_once_with("Please select cells from the same track to disconnect.")
 
+class TestUpdateSingleCentroid:
+    # TODO: Justin
+    pass
+
 # @pytest.mark.integration
 # @pytest.mark.misc
 # @pytest.mark.broken

@@ -560,20 +560,23 @@ def remove_frame_from_track(tracks, track_entry):
     """Handles the logic for removing a frame from a track.
     Includes splitting the track if necessary."""
     # get index, track id and frame of track entry
-    index = np.where(tracks == track_entry)[0][0]
+    index = np.where(np.all(tracks == track_entry, axis=1))[0][0]
     track_id, frame, _, _ = track_entry
     indices_to_remove = [index]
 
     # get all track entries with the same track id
     track = tracks[tracks[:, 0] == track_id]
+    print(f"track: {track}")
 
-    # if entries with lower and higher frame exist, split the track
-    if np.any(track[:, 1] < frame) and np.any(track[:, 1] > frame):
-        # get new track id
+    # if entries with lower or higher frame exist:
+    # connection(s) must be removed
+    if np.any(track[:, 1] < frame) or np.any(track[:, 1] > frame):
 
         # get the entries with lower and higher frame
-        lower_indices = np.where(track[:, 1] < frame)[0]
-        higher_indices = np.where(track[:, 1] > frame)[0]
+        lower_entries = track[track[:, 1] < frame]
+        lower_indices = np.where(np.any(np.all(tracks[:, None] == lower_entries, axis=2), axis=1))[0]
+        higher_entries = track[track[:, 1] > frame]
+        higher_indices = np.where(np.any(np.all(tracks[:, None] == higher_entries, axis=2), axis=1))[0]
 
         # if only one entry with either lower or higher exists, find index
         # and queue for removal
@@ -581,12 +584,14 @@ def remove_frame_from_track(tracks, track_entry):
             indices_to_remove.append(lower_indices[0])
         if len(higher_indices) == 1:
             indices_to_remove.append(higher_indices[0])
+    print(f"indices_to_remove: {indices_to_remove}")
 
     # if more than the one entry needs to be removed no splitting
     # is necessary
     if len(indices_to_remove) < 2:
-        # remove only the one entry, relabel the following frames
+        # get new track id
         new_track_id = lowest_missing_int(tracks[:, 0])
+        # remove only the one entry, relabel the following frames
         tracks[higher_indices, 0] = new_track_id
         tracks = np.delete(tracks, indices_to_remove, axis=0)
     else:
