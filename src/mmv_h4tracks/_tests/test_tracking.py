@@ -30,6 +30,18 @@ def widget_with_seg_trk(create_widget):
     return widget
 
 @pytest.fixture
+def widget_with_seg_trk_justin(create_widget):
+    widget = create_widget
+    viewer = widget.viewer
+    seg_path = Path(PATH / "segmentation" / "GT.tif")
+    seg = AICSImage(seg_path).get_image_data("ZYX")
+    viewer.add_labels(seg, name="GT_seg")
+    trk_path = Path(PATH / "tracks" / "GT_tracks.npy")
+    trk = np.load(trk_path)
+    viewer.add_tracks(trk, name="GT_trk")
+    return widget
+
+@pytest.fixture
 def viewer_with_data(create_widget):
     widget = create_widget
     viewer = widget.viewer
@@ -566,39 +578,247 @@ class TestUnlink:
                 tracking_widget.unlink_tracks_on_click()
                 check_schema(widget)
                 mock_notify.assert_called_once_with("Please select cells from the same track to disconnect.")
-
+@pytest.mark.justin
 class TestUpdateSingleCentroid:
     class TestValid:
-        def test_both_centroids_inside_cell():
+        def test_both_centroids_inside_cell(self, widget_with_seg_trk_justin):            
+            
+            frame_id = 3
+            track_id = 1
+            
+            widget = widget_with_seg_trk_justin
+            viewer = widget.viewer
+
+            tracks = viewer.layers["GT_trk"].data
+            tracks[-1, -2:] += 1
+            segmentation = viewer.layers["GT_seg"].data
+            segmentation[frame_id, 56:60, 56:65] = 2
+            
+
+            # call updateSingleCentroid(data, frame_id, track_id)
+            # self.updateSingleCentroid(tracks, frame_id, track_id) ??
+
+            # check if tracks layer is changed  # this is redunant I guess??
+            # assert not np.array_equal(tracks, viewer.layers["GT_trk"].data)
+
+            # check if label layer is unchanged ??
+
+            # check if centroid is updated correctly
+                # check if tracks layer has the same shape
+                # check if all rows except the changed one are the same
+                # check if changed track is consistent
+
             pass
-        def test_old_centroid_outside_cell():
+        def test_old_centroid_outside_cell(self, widget_with_seg_trk_justin):
+            
+            frame_id = 3
+            track_id = 1
+            
+            widget = widget_with_seg_trk_justin
+            viewer = widget.viewer
+
+            tracks = viewer.layers["GT_trk"].data
+            tracks[-1, -2:] = 70
+            segmentation = viewer.layers["GT_seg"].data
+
+            # call updateSingleCentroid(data, frame_id, track_id)
+            # self.updateSingleCentroid(tracks, frame_id, track_id) ??
+
+            # check if tracks layer is changed  # this is redunant I guess??
+            # assert not np.array_equal(tracks, viewer.layers["GT_trk"].data)
+
+            # check if label layer is unchanged ??
+
+            # check if centroid is updated correctly
+                # check if tracks layer has the same shape
+                # check if all rows except the changed one are the same
+                # check if changed track is consistent
+
             pass
-        def test_new_centroid_outside_cell():
+        def test_new_centroid_outside_cell(self, widget_with_seg_trk_justin):
+
+            frame_id = 3
+            track_id = 1
+            
+            widget = widget_with_seg_trk_justin
+            viewer = widget.viewer
+
+            tracks = viewer.layers["GT_trk"].data
+            segmentation = viewer.layers["GT_seg"].data
+            segmentation[frame_id, 65:70, 45:65] = 2
+
+            # call updateSingleCentroid(data, frame_id, track_id)
+            # self.updateSingleCentroid(tracks, frame_id, track_id) ??
+
+            # check if tracks layer is changed  # this is redunant I guess??
+            # assert not np.array_equal(tracks, viewer.layers["GT_trk"].data)
+
+            # check if label layer is unchanged ??
+
+            # check if centroid is updated correctly
+                # check if tracks layer has the same shape
+                # check if all rows except the changed one are the same
+                # check if changed track is consistent
+
             pass
-        def test_both_centroids_outside_cell():
+        def test_both_centroids_outside_cell(self, widget_with_seg_trk_justin):
+            frame_id = 3
+            track_id = 1
+            
+            widget = widget_with_seg_trk_justin
+            viewer = widget.viewer
+
+            tracks = viewer.layers["GT_trk"].data
+            tracks[-1, -2:] = 70
+            segmentation = viewer.layers["GT_seg"].data
+            segmentation[frame_id, 65:70, 45:65] = 2
+
+            # call updateSingleCentroid(data, frame_id, track_id)
+            # self.updateSingleCentroid(tracks, frame_id, track_id) ??
+
+            # check if tracks layer is changed  # this is redunant I guess??
+            # assert not np.array_equal(tracks, viewer.layers["GT_trk"].data)
+
+            # check if label layer is unchanged ??
+
+            # check if centroid is updated correctly
+                # check if tracks layer has the same shape
+                # check if all rows except the changed one are the same
+                # check if changed track is consistent
             pass
-        # centroids equal
-        # centroid too far to find
-        # centroid gone
+        def test_centroids_equal(self, widget_with_seg_trk_justin):
+            frame_id = 3
+            track_id = 1
+            
+            widget = widget_with_seg_trk_justin
+            viewer = widget.viewer
+
+            tracks = viewer.layers["GT_trk"].data
+            segmentation = viewer.layers["GT_seg"].data
+
+            # call updateSingleCentroid(data, frame_id, track_id)
+            # self.updateSingleCentroid(tracks, frame_id, track_id) ??
+
+            # check if tracks layer is unchanged  # this is redunant I guess??
+            # assert np.array_equal(tracks, viewer.layers["GT_trk"].data)
+
+            # check if label layer is unchanged ??
+
+            pass
+        def test_centroid_too_far(self, widget_with_seg_trk_justin):
+            frame_id = 3
+            track_id = 1
+            
+            widget = widget_with_seg_trk_justin
+            viewer = widget.viewer
+
+            tracks = viewer.layers["GT_trk"].data
+            tracks[-1, -2:] = 199
+            segmentation = viewer.layers["GT_seg"].data
+
+            # call updateSingleCentroid(data, frame_id, track_id)
+            # self.updateSingleCentroid(tracks, frame_id, track_id) ??
+
+            # check if label layer is unchanged ??            
+
+            # check if right error message is displayed ??
+
+            # ??
+            pass
+        def test_centroid_gone(self, widget_with_seg_trk_justin):
+
+            frame_id = 3
+            track_id = 1
+            
+            widget = widget_with_seg_trk_justin
+            viewer = widget.viewer
+
+            tracks = viewer.layers["GT_trk"].data
+            segmentation = viewer.layers["GT_seg"].data
+            segmentation[segmentation==2] = 0
+
+            # call updateSingleCentroid(data, frame_id, track_id)
+            # self.updateSingleCentroid(tracks, frame_id, track_id) ??
+
+            # check if label layer is unchanged ??
+
+            # check if right error message is displayed ??
+            
+            # ??
+            pass
         
     class TestInvalid:
-        def test_no_label_layer():
+        def test_no_label_layer(self, widget_with_seg_trk_justin): # how??
             pass
-        def test_no_tracks_layer():
+        def test_no_tracks_layer(self, widget_with_seg_trk_justin): # how??
             pass
-        def test_frame_not_found(): # frame does not exist
-            pass
-        def test_track_not_found(): # track does not exist
-            pass
-        def test_track_not_in_frame(self, viewer_with_data):
-            # track does not appear in selected frame
-            viewer = viewer_with_data
-            segmentation = viewer.layers["test_seg"] # TODO: CHANGEME
-            tracks = viewer.layers["test_trk"] # TODO: CHANGEME
-            # build up
+        def test_frame_not_found(self, widget_with_seg_trk_justin): # frame does not exist
+            widget = widget_with_seg_trk_justin
+            viewer = widget.viewer
+
+            tracks = viewer.layers["GT_trk"].data
+            segmentation = viewer.layers["GT_seg"].data
+            
+            frame_id = 12
+            track_id = 1
+
             # call updateSingleCentroid(data, frame_id, track_id)
+            # self.updateSingleCentroid(tracks, frame_id, track_id) ??
+
             # check if tracks layer is unchanged
-            # check if error msg is correct
+            # assert np.array_equal(tracks, viewer.layers["GT_trk"].data)
+
+            # check if label layer is unchanged
+            # assert np.array_equal(segmentation, viewer.layers["GT_seg"].data)
+
+            # check if error msg is correct - how??
+
+            pass
+        def test_track_not_found(self, widget_with_seg_trk_justin): # track does not exist
+            widget = widget_with_seg_trk_justin
+            viewer = widget.viewer
+
+            tracks = viewer.layers["GT_trk"].data
+            segmentation = viewer.layers["GT_seg"].data
+            
+            frame_id = 4
+            track_id = 3
+
+            # call updateSingleCentroid(data, frame_id, track_id)
+            # self.updateSingleCentroid(tracks, frame_id, track_id) ??
+            
+            # check if tracks layer is unchanged
+            # assert np.array_equal(tracks, viewer.layers["GT_trk"].data)          
+
+            # check if label layer is unchanged
+            # assert np.array_equal(segmentation, viewer.layers["GT_seg"].data)   
+ 
+            # check if error msg is correct - how??
+            pass
+
+        def test_track_not_in_frame(self, widget_with_seg_trk_justin):
+            # track does not appear in selected frame
+            widget = widget_with_seg_trk_justin
+            viewer = widget.viewer
+
+            tracks = viewer.layers["GT_trk"].data
+            segmentation = viewer.layers["GT_seg"].data
+            
+            frame_id = 4
+            track_id = 1
+
+            # call updateSingleCentroid(data, frame_id, track_id)
+            # self.updateSingleCentroid(tracks, frame_id, track_id) ??
+
+            # check if tracks layer is unchanged
+            # assert np.array_equal(tracks, viewer.layers["GT_trk"].data)
+
+            # check if label layer is unchanged
+            # assert np.array_equal(segmentation, viewer.layers["GT_seg"].data)
+
+            # check if error msg is correct - how??
+            pass
+
 
 # @pytest.mark.integration
 # @pytest.mark.misc
