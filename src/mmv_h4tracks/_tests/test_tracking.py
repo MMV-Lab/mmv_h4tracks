@@ -568,8 +568,28 @@ class TestUnlink:
                 mock_notify.assert_called_once_with("Please select cells from the same track to disconnect.")
 
 class TestUpdateSingleCentroid:
-    # TODO: Justin
-    pass
+    class TestValid:
+        def test_both_centroids_inside_cell():
+            pass
+        def test_old_centroid_inside_cell():
+            pass
+        def test_new_centroid_inside_cell():
+            pass
+        def test_both_centroids_outside_cell():
+            pass
+        
+    class TestInvalid:
+        def test_labels_selected():
+            pass
+        def test_tracks_selected():
+            pass
+        def test_frame_not_found(): # frame does not exist
+            pass
+        def test_track_not_found(): # track does not exist
+            pass
+        def test_track_in_frame(): # track does not appear in selected frame
+            pass
+        pass
 
 # @pytest.mark.integration
 # @pytest.mark.misc
