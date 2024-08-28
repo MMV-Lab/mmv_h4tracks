@@ -40,13 +40,13 @@ def viewer_with_data(create_widget):
     for file in list(Path(PATH / "segmentation").iterdir()):
         segmentation = AICSImage(file).get_image_data("ZYX")
         name = file.stem
-        if name == "test_seg":
+        if name == "test_seg" or "test_seg_old":
             continue
         viewer.add_labels(segmentation, name=name)
     for file in list(Path(PATH / "tracks").iterdir()):
         tracks = np.load(file)
         name = file.stem
-        if name == "test_trk":
+        if name == "test_trk" or "test_trk_old":
             continue
         viewer.add_tracks(tracks, name=name)
     yield widget
@@ -571,25 +571,34 @@ class TestUpdateSingleCentroid:
     class TestValid:
         def test_both_centroids_inside_cell():
             pass
-        def test_old_centroid_inside_cell():
+        def test_old_centroid_outside_cell():
             pass
-        def test_new_centroid_inside_cell():
+        def test_new_centroid_outside_cell():
             pass
         def test_both_centroids_outside_cell():
             pass
+        # centroids equal
+        # centroid too far to find
+        # centroid gone
         
     class TestInvalid:
-        def test_labels_selected():
+        def test_no_label_layer():
             pass
-        def test_tracks_selected():
+        def test_no_tracks_layer():
             pass
         def test_frame_not_found(): # frame does not exist
             pass
         def test_track_not_found(): # track does not exist
             pass
-        def test_track_in_frame(): # track does not appear in selected frame
-            pass
-        pass
+        def test_track_not_in_frame(self, viewer_with_data):
+            # track does not appear in selected frame
+            viewer = viewer_with_data
+            segmentation = viewer.layers["test_seg"] # TODO: CHANGEME
+            tracks = viewer.layers["test_trk"] # TODO: CHANGEME
+            # build up
+            # call updateSingleCentroid(data, frame_id, track_id)
+            # check if tracks layer is unchanged
+            # check if error msg is correct
 
 # @pytest.mark.integration
 # @pytest.mark.misc
