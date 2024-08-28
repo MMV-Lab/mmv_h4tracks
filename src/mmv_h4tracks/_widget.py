@@ -17,7 +17,6 @@ from qtpy.QtWidgets import (
     QComboBox,
     QTabWidget,
     QSizePolicy,
-    QHBoxLayout,
 )
 from qtpy.QtCore import Qt
 from qtpy.QtGui import QImage, QPixmap
@@ -79,6 +78,7 @@ class MMVH4TRACKS(QWidget):
         viewer = napari.current_viewer() if viewer is None else viewer
         self.viewer = viewer
         self.initial_layers = [None, None]
+        self.seg_binary_sum = None
 
         ### QObjects
 
@@ -436,7 +436,7 @@ class MMVH4TRACKS(QWidget):
         # add layers to viewer
         self.viewer.add_image(zarr_file["raw_data"][:], name="Raw Image")
         segmentation = zarr_file["segmentation_data"][:]
-
+        self.seg_bin_sum = np.count_nonzero(segmentation)
         self.viewer.add_labels(segmentation, name="Segmentation Data")
         # save tracks so we can delete one slice tracks first
         tracks = zarr_file["tracking_data"][:]
@@ -480,6 +480,10 @@ class MMVH4TRACKS(QWidget):
         segmentation_layer = grab_layer(self.viewer, segmentation_name)
         track_name = self.combobox_tracks.currentText()
         track_layer = grab_layer(self.viewer, track_name)
+        bin_sum = np.count_nonzero(segmentation_layer.data)
+        if bin_sum != self.seg_binary_sum:
+            self.tracking_window.update_all_centroids()
+            self.seg_binary_sum = bin_sum
         layers = [raw_layer, segmentation_layer, track_layer]
         save_zarr(self.zarr, layers, self.tracking_window.cached_tracks)
 
@@ -505,6 +509,11 @@ class MMVH4TRACKS(QWidget):
             path += ".zarr"
         if path == ".zarr":
             return
+        
+        bin_sum = np.count_nonzero(segmentation_layer.data)
+        if bin_sum != self.seg_binary_sum:
+            self.tracking_window.update_all_centroids()
+            self.seg_binary_sum = bin_sum
         layers = [raw_layer, segmentation_layer, tracks_layer]
 
         zarrfile = zarr.open(path, mode="w")

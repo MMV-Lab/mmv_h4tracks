@@ -24,7 +24,6 @@ import napari
 from skimage import measure
 
 from ._grabber import grab_layer
-from ._logger import notify
 from mmv_h4tracks._logger import handle_exception
 from ._selector import Selector
 from ._writer import save_csv
@@ -596,6 +595,10 @@ class AnalysisWindow(QWidget):
             segmentation_layer = grab_layer(
                 self.viewer, self.parent.combobox_segmentation.currentText()
             )
+            bin_sum = np.count_nonzero(segmentation_layer.data)
+            if bin_sum != self.parent.seg_binary_sum:
+                self.parent.tracking_window.update_all_centroids()
+                self.parent.seg_binary_sum = bin_sum
             retval.update(
                 {"Description": "Scatterplot Standard Deviation vs Average: Size"}
             )
@@ -655,6 +658,10 @@ class AnalysisWindow(QWidget):
             segmentation_layer = grab_layer(
                 self.viewer, self.parent.combobox_segmentation.currentText()
             )
+            bin_sum = np.count_nonzero(segmentation_layer.data)
+            if bin_sum != self.parent.seg_binary_sum:
+                self.parent.tracking_window.update_all_centroids()
+                self.parent.seg_binary_sum = bin_sum
             retval.update(
                 {
                     "Description": "Scatterplot Standard Deviation vs Average: Eccentricity"
@@ -674,6 +681,10 @@ class AnalysisWindow(QWidget):
             segmentation_layer = grab_layer(
                 self.viewer, self.parent.combobox_segmentation.currentText()
             )
+            bin_sum = np.count_nonzero(segmentation_layer.data)
+            if bin_sum != self.parent.seg_binary_sum:
+                self.parent.tracking_window.update_all_centroids()
+                self.parent.seg_binary_sum = bin_sum
             retval.update(
                 {"Description": "Scatterplot Standard Deviation vs Average: Perimeter"}
             )
@@ -984,6 +995,10 @@ class AnalysisWindow(QWidget):
             segmentation = grab_layer(
                 self.viewer, self.parent.combobox_segmentation.currentText()
             ).data
+            bin_sum = np.count_nonzero(segmentation)
+            if bin_sum != self.parent.seg_binary_sum:
+                self.parent.tracking_window.update_all_centroids()
+                self.parent.seg_binary_sum = bin_sum
             size = self._calculate_size(tracks, segmentation)
             metrics.extend(
                 ["Average size [# pixels]", "Standard deviation of size [# pixels]"]
@@ -1180,6 +1195,10 @@ class AnalysisWindow(QWidget):
             segmentation = grab_layer(
                 self.viewer, self.parent.combobox_segmentation.currentText()
             ).data
+            bin_sum = np.count_nonzero(segmentation)
+            if bin_sum != self.parent.seg_binary_sum:
+                self.parent.tracking_window.update_all_centroids()
+                self.parent.seg_binary_sum = bin_sum
             perimeter = self.calculate_cell_perimeter(tracks, segmentation)
             metrics.extend(
                 [
@@ -1229,6 +1248,10 @@ class AnalysisWindow(QWidget):
             segmentation = grab_layer(
                 self.viewer, self.parent.combobox_segmentation.currentText()
             ).data
+            bin_sum = np.count_nonzero(segmentation)
+            if bin_sum != self.parent.seg_binary_sum:
+                self.parent.tracking_window.update_all_centroids()
+                self.parent.seg_binary_sum = bin_sum
             eccentricity = self.calculate_cell_eccentricity(tracks, segmentation)
             metrics.extend(
                 [
