@@ -5,6 +5,7 @@ from unittest.mock import patch
 from pathlib import Path
 from aicsimageio import AICSImage
 import numpy as np
+from scipy.ndimage import center_of_mass
 
 from mmv_h4tracks import MMVH4TRACKS
 from mmv_h4tracks._tracking import LINK_TEXT, UNLINK_TEXT
@@ -303,6 +304,35 @@ def check_schema(widget):
             print(f"track: {trk}")
         assert len(frames) == high_frame - low_frame + 1
 
+def check_schema_updated_centroids(widget, old_tracks, old_segmentation, frame, track_id, new_centroid): # rename?
+    assert len(widget.viewer.layers) == 2
+    tracks = widget.viewer.layers["GT_trk"].data
+
+    track = tracks[tracks[:, 0] == track_id]
+
+    # check if centroid at right frame is right
+    idx_track = np.where(track[:, 1] == frame)[0]
+    assert track[idx_track, 2:] == [new_centroid[0], new_centroid[1]] 
+
+    # check if track is continuous
+    for i in range(track.shape[0]-1):
+        assert track[i, 1] == track[i+1] + 1
+
+    # check if other rows are equal
+    idx_tracks = np.where((tracks[:, 0] == track_id) & (tracks[:, 1] == frame))[0]
+
+    old_tracks_without_update = np.delete(old_tracks, idx_tracks, axis=0)
+    tracks_without_update = np.delete(tracks, idx_tracks, axis=0)
+    assert np.array_equal(old_tracks_without_update, tracks_without_update)
+
+    # check if segmentation is equal
+    segmentation = widget.viewer.layers["GT_seg"].data
+    assert np.array_equal(old_segmentation, segmentation)
+
+def check_schema_updated_centroids_no_centroid(widget, old_tracks, old_segmentation, frame, track_id): # rename?
+    # ?? TODO
+    pass
+
 @pytest.mark.schema
 class TestLink:
     class TestValid:
@@ -589,24 +619,17 @@ class TestUpdateSingleCentroid:
             widget = widget_with_seg_trk_justin
             viewer = widget.viewer
 
-            tracks = viewer.layers["GT_trk"].data
+            tracks = np.copy(viewer.layers["GT_trk"].data)
             tracks[-1, -2:] += 1
-            segmentation = viewer.layers["GT_seg"].data
+            segmentation = np.copy(viewer.layers["GT_seg"].data)
             segmentation[frame_id, 56:60, 56:65] = 2
             
 
             # call updateSingleCentroid(data, frame_id, track_id)
             # self.updateSingleCentroid(tracks, frame_id, track_id) ??
 
-            # check if tracks layer is changed  # this is redunant I guess??
-            # assert not np.array_equal(tracks, viewer.layers["GT_trk"].data)
-
-            # check if label layer is unchanged ??
-
-            # check if centroid is updated correctly
-                # check if tracks layer has the same shape
-                # check if all rows except the changed one are the same
-                # check if changed track is consistent
+            centroid = center_of_mass(segmentation)
+            # check_schema_updated_centroids(widget, viewer.layers["GT_trk"].data, viewer.layers["GT_seg"].data, frame_id, track_id, centroid)
 
             pass
         def test_old_centroid_outside_cell(self, widget_with_seg_trk_justin):
@@ -617,22 +640,15 @@ class TestUpdateSingleCentroid:
             widget = widget_with_seg_trk_justin
             viewer = widget.viewer
 
-            tracks = viewer.layers["GT_trk"].data
+            tracks = np.copy(viewer.layers["GT_trk"].data)
             tracks[-1, -2:] = 70
-            segmentation = viewer.layers["GT_seg"].data
+            segmentation = np.copy(viewer.layers["GT_seg"].data)
 
             # call updateSingleCentroid(data, frame_id, track_id)
             # self.updateSingleCentroid(tracks, frame_id, track_id) ??
 
-            # check if tracks layer is changed  # this is redunant I guess??
-            # assert not np.array_equal(tracks, viewer.layers["GT_trk"].data)
-
-            # check if label layer is unchanged ??
-
-            # check if centroid is updated correctly
-                # check if tracks layer has the same shape
-                # check if all rows except the changed one are the same
-                # check if changed track is consistent
+            centroid = center_of_mass(segmentation)
+            # check_schema_updated_centroids(widget, viewer.layers["GT_trk"].data, viewer.layers["GT_seg"].data, frame_id, track_id, centroid)
 
             pass
         def test_new_centroid_outside_cell(self, widget_with_seg_trk_justin):
@@ -643,22 +659,15 @@ class TestUpdateSingleCentroid:
             widget = widget_with_seg_trk_justin
             viewer = widget.viewer
 
-            tracks = viewer.layers["GT_trk"].data
-            segmentation = viewer.layers["GT_seg"].data
+            tracks = np.copy(viewer.layers["GT_trk"].data)
+            segmentation = np.copy(viewer.layers["GT_seg"].data)
             segmentation[frame_id, 65:70, 45:65] = 2
 
             # call updateSingleCentroid(data, frame_id, track_id)
             # self.updateSingleCentroid(tracks, frame_id, track_id) ??
 
-            # check if tracks layer is changed  # this is redunant I guess??
-            # assert not np.array_equal(tracks, viewer.layers["GT_trk"].data)
-
-            # check if label layer is unchanged ??
-
-            # check if centroid is updated correctly
-                # check if tracks layer has the same shape
-                # check if all rows except the changed one are the same
-                # check if changed track is consistent
+            centroid = center_of_mass(segmentation)
+            # check_schema_updated_centroids(widget, viewer.layers["GT_trk"].data, viewer.layers["GT_seg"].data, frame_id, track_id, centroid)
 
             pass
         def test_both_centroids_outside_cell(self, widget_with_seg_trk_justin):
@@ -668,23 +677,17 @@ class TestUpdateSingleCentroid:
             widget = widget_with_seg_trk_justin
             viewer = widget.viewer
 
-            tracks = viewer.layers["GT_trk"].data
+            tracks = np.copy(viewer.layers["GT_trk"].data)
             tracks[-1, -2:] = 70
-            segmentation = viewer.layers["GT_seg"].data
+            segmentation = np.copy(viewer.layers["GT_seg"].data)
             segmentation[frame_id, 65:70, 45:65] = 2
 
             # call updateSingleCentroid(data, frame_id, track_id)
             # self.updateSingleCentroid(tracks, frame_id, track_id) ??
 
-            # check if tracks layer is changed  # this is redunant I guess??
-            # assert not np.array_equal(tracks, viewer.layers["GT_trk"].data)
+            centroid = center_of_mass(segmentation)
+            # check_schema_updated_centroids(widget, viewer.layers["GT_trk"].data, viewer.layers["GT_seg"].data, frame_id, track_id, centroid)
 
-            # check if label layer is unchanged ??
-
-            # check if centroid is updated correctly
-                # check if tracks layer has the same shape
-                # check if all rows except the changed one are the same
-                # check if changed track is consistent
             pass
         def test_centroids_equal(self, widget_with_seg_trk_justin):
             frame_id = 3
@@ -693,16 +696,14 @@ class TestUpdateSingleCentroid:
             widget = widget_with_seg_trk_justin
             viewer = widget.viewer
 
-            tracks = viewer.layers["GT_trk"].data
-            segmentation = viewer.layers["GT_seg"].data
+            tracks = np.copy(viewer.layers["GT_trk"].data)
+            segmentation = np.copy(viewer.layers["GT_seg"].data)
 
             # call updateSingleCentroid(data, frame_id, track_id)
             # self.updateSingleCentroid(tracks, frame_id, track_id) ??
 
-            # check if tracks layer is unchanged  # this is redunant I guess??
-            # assert np.array_equal(tracks, viewer.layers["GT_trk"].data)
-
-            # check if label layer is unchanged ??
+            centroid = center_of_mass(segmentation)
+            # check_schema_updated_centroids(widget, viewer.layers["GT_trk"].data, viewer.layers["GT_seg"].data, frame_id, track_id, centroid)
 
             pass
         def test_centroid_too_far(self, widget_with_seg_trk_justin):
@@ -721,7 +722,11 @@ class TestUpdateSingleCentroid:
 
             # check if label layer is unchanged ??            
 
+            check_schema_updated_centroids_no_centroid()
+
             # check if right error message is displayed ??
+
+
 
             # ??
             pass
@@ -742,10 +747,13 @@ class TestUpdateSingleCentroid:
 
             # check if label layer is unchanged ??
 
+            check_schema_updated_centroids_no_centroid()
+
             # check if right error message is displayed ??
             
             # ??
             pass
+
         
     class TestInvalid:
         def test_no_label_layer(self, widget_with_seg_trk_justin): # how??
