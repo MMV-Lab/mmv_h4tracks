@@ -5,6 +5,7 @@ from unittest.mock import patch
 from pathlib import Path
 from aicsimageio import AICSImage
 import numpy as np
+from scipy.ndimage import center_of_mass
 
 from mmv_h4tracks import MMVH4TRACKS
 from mmv_h4tracks._tracking import LINK_TEXT, UNLINK_TEXT
@@ -27,6 +28,18 @@ def widget_with_seg_trk(create_widget):
     trk_path = Path(PATH / "tracks" / "test_trk.npy")
     trk = np.load(trk_path)
     viewer.add_tracks(trk, name="test_trk")
+    return widget
+
+@pytest.fixture
+def widget_with_seg_trk_justin(create_widget):
+    widget = create_widget
+    viewer = widget.viewer
+    seg_path = Path(PATH / "segmentation" / "GT.tif")
+    seg = AICSImage(seg_path).get_image_data("ZYX")
+    viewer.add_labels(seg, name="GT_seg")
+    trk_path = Path(PATH / "tracks" / "GT_tracks.npy")
+    trk = np.load(trk_path)
+    viewer.add_tracks(trk, name="GT_trk")
     return widget
 
 @pytest.fixture
@@ -290,6 +303,35 @@ def check_schema(widget):
             print(f"track_id: {trk_id}")
             print(f"track: {trk}")
         assert len(frames) == high_frame - low_frame + 1
+
+def check_schema_updated_centroids(widget, old_tracks, old_segmentation, frame, track_id, new_centroid): # rename?
+    assert len(widget.viewer.layers) == 2
+    tracks = widget.viewer.layers["GT_trk"].data
+
+    track = tracks[tracks[:, 0] == track_id]
+
+    # check if centroid at right frame is right
+    idx_track = np.where(track[:, 1] == frame)[0]
+    assert track[idx_track, 2:] == [new_centroid[0], new_centroid[1]] 
+
+    # check if track is continuous
+    for i in range(track.shape[0]-1):
+        assert track[i, 1] == track[i+1] + 1
+
+    # check if other rows are equal
+    idx_tracks = np.where((tracks[:, 0] == track_id) & (tracks[:, 1] == frame))[0]
+
+    old_tracks_without_update = np.delete(old_tracks, idx_tracks, axis=0)
+    tracks_without_update = np.delete(tracks, idx_tracks, axis=0)
+    assert np.array_equal(old_tracks_without_update, tracks_without_update)
+
+    # check if segmentation is equal
+    segmentation = widget.viewer.layers["GT_seg"].data
+    assert np.array_equal(old_segmentation, segmentation)
+
+def check_schema_updated_centroids_no_centroid(widget, old_tracks, old_segmentation, frame, track_id): # rename?
+    # ?? TODO
+    pass
 
 @pytest.mark.schema
 class TestLink:
@@ -566,39 +608,225 @@ class TestUnlink:
                 tracking_widget.unlink_tracks_on_click()
                 check_schema(widget)
                 mock_notify.assert_called_once_with("Please select cells from the same track to disconnect.")
-
+@pytest.mark.justin
 class TestUpdateSingleCentroid:
     class TestValid:
-        def test_both_centroids_inside_cell():
+        def test_both_centroids_inside_cell(self, widget_with_seg_trk_justin):            
+            
+            frame_id = 3
+            track_id = 1
+            
+            widget = widget_with_seg_trk_justin
+            viewer = widget.viewer
+
+            tracks = np.copy(viewer.layers["GT_trk"].data)
+            tracks[-1, -2:] += 1
+            segmentation = np.copy(viewer.layers["GT_seg"].data)
+            segmentation[frame_id, 56:60, 56:65] = 2
+            
+
+            # call updateSingleCentroid(data, frame_id, track_id)
+            # self.updateSingleCentroid(tracks, frame_id, track_id) ??
+
+            centroid = center_of_mass(segmentation)
+            # check_schema_updated_centroids(widget, viewer.layers["GT_trk"].data, viewer.layers["GT_seg"].data, frame_id, track_id, centroid)
+
             pass
-        def test_old_centroid_outside_cell():
+        def test_old_centroid_outside_cell(self, widget_with_seg_trk_justin):
+            
+            frame_id = 3
+            track_id = 1
+            
+            widget = widget_with_seg_trk_justin
+            viewer = widget.viewer
+
+            tracks = np.copy(viewer.layers["GT_trk"].data)
+            tracks[-1, -2:] = 70
+            segmentation = np.copy(viewer.layers["GT_seg"].data)
+
+            # call updateSingleCentroid(data, frame_id, track_id)
+            # self.updateSingleCentroid(tracks, frame_id, track_id) ??
+
+            centroid = center_of_mass(segmentation)
+            # check_schema_updated_centroids(widget, viewer.layers["GT_trk"].data, viewer.layers["GT_seg"].data, frame_id, track_id, centroid)
+
             pass
-        def test_new_centroid_outside_cell():
+        def test_new_centroid_outside_cell(self, widget_with_seg_trk_justin):
+
+            frame_id = 3
+            track_id = 1
+            
+            widget = widget_with_seg_trk_justin
+            viewer = widget.viewer
+
+            tracks = np.copy(viewer.layers["GT_trk"].data)
+            segmentation = np.copy(viewer.layers["GT_seg"].data)
+            segmentation[frame_id, 65:70, 45:65] = 2
+
+            # call updateSingleCentroid(data, frame_id, track_id)
+            # self.updateSingleCentroid(tracks, frame_id, track_id) ??
+
+            centroid = center_of_mass(segmentation)
+            # check_schema_updated_centroids(widget, viewer.layers["GT_trk"].data, viewer.layers["GT_seg"].data, frame_id, track_id, centroid)
+
             pass
-        def test_both_centroids_outside_cell():
+        def test_both_centroids_outside_cell(self, widget_with_seg_trk_justin):
+            frame_id = 3
+            track_id = 1
+            
+            widget = widget_with_seg_trk_justin
+            viewer = widget.viewer
+
+            tracks = np.copy(viewer.layers["GT_trk"].data)
+            tracks[-1, -2:] = 70
+            segmentation = np.copy(viewer.layers["GT_seg"].data)
+            segmentation[frame_id, 65:70, 45:65] = 2
+
+            # call updateSingleCentroid(data, frame_id, track_id)
+            # self.updateSingleCentroid(tracks, frame_id, track_id) ??
+
+            centroid = center_of_mass(segmentation)
+            # check_schema_updated_centroids(widget, viewer.layers["GT_trk"].data, viewer.layers["GT_seg"].data, frame_id, track_id, centroid)
+
             pass
-        # centroids equal
-        # centroid too far to find
-        # centroid gone
+        def test_centroids_equal(self, widget_with_seg_trk_justin):
+            frame_id = 3
+            track_id = 1
+            
+            widget = widget_with_seg_trk_justin
+            viewer = widget.viewer
+
+            tracks = np.copy(viewer.layers["GT_trk"].data)
+            segmentation = np.copy(viewer.layers["GT_seg"].data)
+
+            # call updateSingleCentroid(data, frame_id, track_id)
+            # self.updateSingleCentroid(tracks, frame_id, track_id) ??
+
+            centroid = center_of_mass(segmentation)
+            # check_schema_updated_centroids(widget, viewer.layers["GT_trk"].data, viewer.layers["GT_seg"].data, frame_id, track_id, centroid)
+
+            pass
+        def test_centroid_too_far(self, widget_with_seg_trk_justin):
+            frame_id = 3
+            track_id = 1
+            
+            widget = widget_with_seg_trk_justin
+            viewer = widget.viewer
+
+            tracks = viewer.layers["GT_trk"].data
+            tracks[-1, -2:] = 199
+            segmentation = viewer.layers["GT_seg"].data
+
+            # call updateSingleCentroid(data, frame_id, track_id)
+            # self.updateSingleCentroid(tracks, frame_id, track_id) ??
+
+            # check if label layer is unchanged ??            
+
+            check_schema_updated_centroids_no_centroid()
+
+            # check if right error message is displayed ??
+
+
+
+            # ??
+            pass
+        def test_centroid_gone(self, widget_with_seg_trk_justin):
+
+            frame_id = 3
+            track_id = 1
+            
+            widget = widget_with_seg_trk_justin
+            viewer = widget.viewer
+
+            tracks = viewer.layers["GT_trk"].data
+            segmentation = viewer.layers["GT_seg"].data
+            segmentation[segmentation==2] = 0
+
+            # call updateSingleCentroid(data, frame_id, track_id)
+            # self.updateSingleCentroid(tracks, frame_id, track_id) ??
+
+            # check if label layer is unchanged ??
+
+            check_schema_updated_centroids_no_centroid()
+
+            # check if right error message is displayed ??
+            
+            # ??
+            pass
+
         
     class TestInvalid:
-        def test_no_label_layer():
+        def test_no_label_layer(self, widget_with_seg_trk_justin): # how??
             pass
-        def test_no_tracks_layer():
+        def test_no_tracks_layer(self, widget_with_seg_trk_justin): # how??
             pass
-        def test_frame_not_found(): # frame does not exist
-            pass
-        def test_track_not_found(): # track does not exist
-            pass
-        def test_track_not_in_frame(self, viewer_with_data):
-            # track does not appear in selected frame
-            viewer = viewer_with_data
-            segmentation = viewer.layers["test_seg"] # TODO: CHANGEME
-            tracks = viewer.layers["test_trk"] # TODO: CHANGEME
-            # build up
+        def test_frame_not_found(self, widget_with_seg_trk_justin): # frame does not exist
+            widget = widget_with_seg_trk_justin
+            viewer = widget.viewer
+
+            tracks = viewer.layers["GT_trk"].data
+            segmentation = viewer.layers["GT_seg"].data
+            
+            frame_id = 12
+            track_id = 1
+
             # call updateSingleCentroid(data, frame_id, track_id)
+            # self.updateSingleCentroid(tracks, frame_id, track_id) ??
+
             # check if tracks layer is unchanged
-            # check if error msg is correct
+            # assert np.array_equal(tracks, viewer.layers["GT_trk"].data)
+
+            # check if label layer is unchanged
+            # assert np.array_equal(segmentation, viewer.layers["GT_seg"].data)
+
+            # check if error msg is correct - how??
+
+            pass
+        def test_track_not_found(self, widget_with_seg_trk_justin): # track does not exist
+            widget = widget_with_seg_trk_justin
+            viewer = widget.viewer
+
+            tracks = viewer.layers["GT_trk"].data
+            segmentation = viewer.layers["GT_seg"].data
+            
+            frame_id = 4
+            track_id = 3
+
+            # call updateSingleCentroid(data, frame_id, track_id)
+            # self.updateSingleCentroid(tracks, frame_id, track_id) ??
+            
+            # check if tracks layer is unchanged
+            # assert np.array_equal(tracks, viewer.layers["GT_trk"].data)          
+
+            # check if label layer is unchanged
+            # assert np.array_equal(segmentation, viewer.layers["GT_seg"].data)   
+ 
+            # check if error msg is correct - how??
+            pass
+
+        def test_track_not_in_frame(self, widget_with_seg_trk_justin):
+            # track does not appear in selected frame
+            widget = widget_with_seg_trk_justin
+            viewer = widget.viewer
+
+            tracks = viewer.layers["GT_trk"].data
+            segmentation = viewer.layers["GT_seg"].data
+            
+            frame_id = 4
+            track_id = 1
+
+            # call updateSingleCentroid(data, frame_id, track_id)
+            # self.updateSingleCentroid(tracks, frame_id, track_id) ??
+
+            # check if tracks layer is unchanged
+            # assert np.array_equal(tracks, viewer.layers["GT_trk"].data)
+
+            # check if label layer is unchanged
+            # assert np.array_equal(segmentation, viewer.layers["GT_seg"].data)
+
+            # check if error msg is correct - how??
+            pass
+
 
 # @pytest.mark.integration
 # @pytest.mark.misc
