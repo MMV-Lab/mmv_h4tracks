@@ -330,21 +330,33 @@ class AssistantWindow(QWidget):
         tracks = tracks_layer.data
         untracked = []
         for frame in tqdm(range(segmentation.shape[0])):
-            for id_ in set(np.unique(segmentation[frame])) - {0}:
-                centroid = center_of_mass(
-                    label_layer.data[frame],
-                    labels=label_layer.data[frame],
-                    index=id_,
-                )
-                centroid = [
-                    frame,
-                    int(np.rint(centroid[0])),
-                    int(np.rint(centroid[1])),
-                ]
-                if not any(
-                    np.all(centroid == track[1:4]) for track in tracks
-                ):
-                    untracked.append(centroid)
+        # for frame in range(segmentation.shape[0]):
+        #     starttime1 = time.time()
+        #     for id_ in set(np.unique(segmentation[frame])) - {0}:
+        #         centroid = center_of_mass(
+        #             label_layer.data[frame],
+        #             labels=label_layer.data[frame],
+        #             index=id_,
+        #         )
+        #         centroid = [
+        #             frame,
+        #             int(np.rint(centroid[0])),
+        #             int(np.rint(centroid[1])),
+        #         ]
+        #         if not any(
+        #             np.all(centroid == track[1:4]) for track in tracks
+        #         ):
+        #             untracked.append(centroid)
+        #     print(f"center_of_mass took {time.time() - starttime1} seconds")
+        #     print(untracked)
+
+            tracked_centroids = [[entry[2], entry[3]] for entry in tracks if entry[1] == frame]
+            tracked_ids = [segmentation[frame][coord[0], coord[1]] for coord in tracked_centroids]
+            untracked_ids = set(np.unique(segmentation[frame])) - set(tracked_ids) - {0}
+            centroids = center_of_mass(segmentation[frame], labels=segmentation[frame], index=list(untracked_ids))
+            for centroid in centroids:
+                centroid = [frame, int(np.rint(centroid[0])), int(np.rint(centroid[1]))]
+                untracked.append(centroid)
 
         print(untracked)
         self.mark_outliers(untracked, "Untracked cells")
