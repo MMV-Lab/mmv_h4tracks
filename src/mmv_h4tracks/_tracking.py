@@ -1061,6 +1061,9 @@ class TrackingWindow(QWidget):
         Display the selected tracks
         Cache the displayed tracks if no cached tracks exist
         """
+        if len(track_ids) < 1:
+            notify("No tracks selected.")
+            return
         tracks_layer = self.get_tracks_layer()
         if tracks_layer is None:
             notify("Please select a valid tracks layer.")
@@ -1072,6 +1075,9 @@ class TrackingWindow(QWidget):
         selected_tracks = self.cached_tracks[
             np.isin(self.cached_tracks[:, 0], track_ids)
         ]
+        if len(selected_tracks) < 1:
+            notify("No tracks found for the selected track IDs.")
+            return
         tracks_layer.data = selected_tracks
         self.lineedit_delete.clear()
 

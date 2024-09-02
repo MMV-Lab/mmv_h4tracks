@@ -15,6 +15,7 @@ from scipy.ndimage import label, center_of_mass
 from tqdm import tqdm
 
 from ._grabber import grab_layer
+from ._logger import notify
 
 DEFAULT_SPEED_THRESHOLD = 10
 DEFAULT_SIZE_THRESHOLD = 5
@@ -205,6 +206,10 @@ class AssistantWindow(QWidget):
         return y_edge or x_edge
 
     def display_outliers(self, outliers):
+        if len(outliers) == 0:
+            print("No outliers found")
+            notify("No outliers found")
+            return
         self.parent.tracking_window.display_selected_tracks(outliers)
         outlier_text = ", ".join(map(str, outliers))
         self.parent.tracking_window.lineedit_filter.setText(outlier_text)
@@ -377,7 +382,7 @@ class AssistantWindow(QWidget):
                     # tiny.append(centroid)
 
         unique_frames = set([coord[0] for coord in tiny])
-        print(f"Found {len(tiny)} tiny cells in frames {unique_frames}")
+        print(f"Found {len(tiny)} tiny cells in frames {sorted(unique_frames)}")
         
         self.mark_outliers(tiny, "Tiny cells")
 
