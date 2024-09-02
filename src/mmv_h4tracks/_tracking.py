@@ -111,9 +111,9 @@ class TrackingWindow(QWidget):
         )
         btn_delete_selected_tracks = QPushButton("Delete")
 
-        btn_pretty_duck = QPushButton("Use This One")
-        btn_pretty_duck.setToolTip("Or don't, i'm just a button")
-        btn_pretty_duck.clicked.connect(self.update_all_centroids)
+        # btn_update_centroids = QPushButton("Update centroids")
+        # btn_update_centroids.setToolTip("WARNING: Long running operation")
+        # btn_update_centroids.clicked.connect(self.update_all_centroids)
 
         btn_centroid_tracking.clicked.connect(self.coordinate_tracking_on_click)
         btn_auto_track_all.clicked.connect(self.overlap_tracking_on_click)
@@ -182,7 +182,7 @@ class TrackingWindow(QWidget):
         content.layout().addWidget(automatic_tracking)
         content.layout().addWidget(tracking_correction)
         content.layout().addWidget(filter_tracks)
-        content.layout().addWidget(btn_pretty_duck)
+        # content.layout().addWidget(btn_update_centroids)
         content.layout().addWidget(v_spacer)
 
         self.layout().addWidget(content)
