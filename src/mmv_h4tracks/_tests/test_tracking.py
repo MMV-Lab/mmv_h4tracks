@@ -304,11 +304,16 @@ def check_schema(widget):
             print(f"track: {trk}")
         assert len(frames) == high_frame - low_frame + 1
 
-def check_schema_updated_centroids(widget, old_tracks, old_segmentation, frame, track_id, new_centroid): # rename?
+def check_schema_updated_centroid(widget, old_tracks, old_segmentation, frame, track_id): #, new_centroid): # rename?
     assert len(widget.viewer.layers) == 2
     tracks = widget.viewer.layers["GT_trk"].data
 
     track = tracks[tracks[:, 0] == track_id]
+
+    segmentation = widget.viewer.layers["GT_seg"].data
+    old_centroid = [entry[2:3] for entry in old_tracks if entry[0] == track_id and entry[1] == frame][0]
+    cell_id = segmentation[frame, old_centroid[0], old_centroid[1]]
+    new_centroid = center_of_mass(segmentation[frame], index = cell_id)
 
     # check if centroid at right frame is right
     idx_track = np.where(track[:, 1] == frame)[0]
@@ -326,12 +331,22 @@ def check_schema_updated_centroids(widget, old_tracks, old_segmentation, frame, 
     assert np.array_equal(old_tracks_without_update, tracks_without_update)
 
     # check if segmentation is equal
-    segmentation = widget.viewer.layers["GT_seg"].data
     assert np.array_equal(old_segmentation, segmentation)
 
-def check_schema_updated_centroids_no_centroid(widget, old_tracks, old_segmentation, frame, track_id): # rename?
-    # ?? TODO
-    pass
+def check_schema_updated_centroid_no_centroid(widget, old_tracks, old_segmentation, frame, track_id): # rename?
+    assert len(widget.viewer.layers) == 2
+    tracks = widget.viewer.layers["GT_trk"].data
+    track = tracks[tracks[:, 0] == track_id]
+    segmentation = widget.viewer.layers["GT_seg"].data
+    track_entry = [entry for entry in old_tracks if entry[0] == track_id and entry[1] == frame][0]
+    # track length 2 -> delete
+    # cutting off at start/end
+    # split into 2 tracks
+
+
+    # check if segmentation is equal
+    segmentation = widget.viewer.layers["GT_seg"].data
+    assert np.array_equal(old_segmentation, segmentation)
 
 @pytest.mark.schema
 class TestLink:
@@ -624,14 +639,10 @@ class TestUpdateSingleCentroid:
             segmentation = np.copy(viewer.layers["GT_seg"].data)
             segmentation[frame_id, 56:60, 56:65] = 2
             
+            widget.tracking_window.update_single_centroid(track_id, frame_id)
 
-            # call updateSingleCentroid(data, frame_id, track_id)
-            # self.updateSingleCentroid(tracks, frame_id, track_id) ??
+            check_schema_updated_centroid(widget, viewer.layers["GT_trk"].data, viewer.layers["GT_seg"].data, frame_id, track_id)
 
-            centroid = center_of_mass(segmentation)
-            # check_schema_updated_centroids(widget, viewer.layers["GT_trk"].data, viewer.layers["GT_seg"].data, frame_id, track_id, centroid)
-
-            pass
         def test_old_centroid_outside_cell(self, widget_with_seg_trk_justin):
             
             frame_id = 3
@@ -643,14 +654,11 @@ class TestUpdateSingleCentroid:
             tracks = np.copy(viewer.layers["GT_trk"].data)
             tracks[-1, -2:] = 70
             segmentation = np.copy(viewer.layers["GT_seg"].data)
+            
+            widget.tracking_window.update_single_centroid(track_id, frame_id)
 
-            # call updateSingleCentroid(data, frame_id, track_id)
-            # self.updateSingleCentroid(tracks, frame_id, track_id) ??
+            check_schema_updated_centroid(widget, viewer.layers["GT_trk"].data, viewer.layers["GT_seg"].data, frame_id, track_id)
 
-            centroid = center_of_mass(segmentation)
-            # check_schema_updated_centroids(widget, viewer.layers["GT_trk"].data, viewer.layers["GT_seg"].data, frame_id, track_id, centroid)
-
-            pass
         def test_new_centroid_outside_cell(self, widget_with_seg_trk_justin):
 
             frame_id = 3
@@ -667,7 +675,7 @@ class TestUpdateSingleCentroid:
             # self.updateSingleCentroid(tracks, frame_id, track_id) ??
 
             centroid = center_of_mass(segmentation)
-            # check_schema_updated_centroids(widget, viewer.layers["GT_trk"].data, viewer.layers["GT_seg"].data, frame_id, track_id, centroid)
+            # check_schema_updated_centroid(widget, viewer.layers["GT_trk"].data, viewer.layers["GT_seg"].data, frame_id, track_id, centroid)
 
             pass
         def test_both_centroids_outside_cell(self, widget_with_seg_trk_justin):
@@ -686,7 +694,7 @@ class TestUpdateSingleCentroid:
             # self.updateSingleCentroid(tracks, frame_id, track_id) ??
 
             centroid = center_of_mass(segmentation)
-            # check_schema_updated_centroids(widget, viewer.layers["GT_trk"].data, viewer.layers["GT_seg"].data, frame_id, track_id, centroid)
+            # check_schema_updated_centroid(widget, viewer.layers["GT_trk"].data, viewer.layers["GT_seg"].data, frame_id, track_id, centroid)
 
             pass
         def test_centroids_equal(self, widget_with_seg_trk_justin):
@@ -703,7 +711,7 @@ class TestUpdateSingleCentroid:
             # self.updateSingleCentroid(tracks, frame_id, track_id) ??
 
             centroid = center_of_mass(segmentation)
-            # check_schema_updated_centroids(widget, viewer.layers["GT_trk"].data, viewer.layers["GT_seg"].data, frame_id, track_id, centroid)
+            # check_schema_updated_centroid(widget, viewer.layers["GT_trk"].data, viewer.layers["GT_seg"].data, frame_id, track_id, centroid)
 
             pass
         def test_centroid_too_far(self, widget_with_seg_trk_justin):
@@ -722,7 +730,7 @@ class TestUpdateSingleCentroid:
 
             # check if label layer is unchanged ??            
 
-            check_schema_updated_centroids_no_centroid()
+            check_schema_updated_centroid_no_centroid()
 
             # check if right error message is displayed ??
 
@@ -747,7 +755,7 @@ class TestUpdateSingleCentroid:
 
             # check if label layer is unchanged ??
 
-            check_schema_updated_centroids_no_centroid()
+            check_schema_updated_centroid_no_centroid()
 
             # check if right error message is displayed ??
             
