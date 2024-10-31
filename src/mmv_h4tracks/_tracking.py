@@ -21,7 +21,7 @@ from qtpy.QtWidgets import (
 )
 from scipy import ndimage, stats
 
-from ._logger import notify, notify_with_delay, choice_dialog, handle_exception
+from ._logger import notify, choice_dialog, handle_exception
 from ._grabber import grab_layer
 import mmv_h4tracks._processing as processing
 
@@ -294,7 +294,7 @@ class TrackingWindow(QWidget):
             Callback for the overlap based tracking
             """
             if len(event.position) == 2:
-                notify_with_delay("2D image can not be tracked.")
+                raise ValueError("2D image can not be tracked.")
 
             try:
                 label_layer = grab_layer(
@@ -306,8 +306,7 @@ class TrackingWindow(QWidget):
 
             selected_cell = label_layer.get_value(event.position)
             if selected_cell == 0:
-                notify_with_delay("The background can not be tracked.")
-                return
+                raise ValueError("The background can not be tracked.")
 
             worker = self.worker_single_overlap_tracking(
                 label_layer.data, int(event.position[0]), selected_cell
@@ -393,8 +392,7 @@ class TrackingWindow(QWidget):
         """
         if len(proposed_track) < self.MIN_TRACK_LENGTH:
             QApplication.restoreOverrideCursor()
-            notify_with_delay("Could not find a track of sufficient length.")
-            return
+            raise ValueError("Could not find a track of sufficient length.")
         # Check if any of the cells are already tracked
         tracks_layer = self.get_tracks_layer()
         if tracks_layer is None:
@@ -468,8 +466,7 @@ class TrackingWindow(QWidget):
                 tracks_layer.data[:, 0] + 1
             ):
                 QApplication.restoreOverrideCursor()
-                notify_with_delay("Could not find a track of sufficient length.")
-                return
+                raise ValueError("Could not find a track of sufficient length.")
             if entries_to_add == proposed_track:
                 self.add_track_to_tracks(np.array(proposed_track))
             else:
@@ -506,7 +503,7 @@ class TrackingWindow(QWidget):
             Callback for the unlink function to store the selected cells
             """
             if len(event.position) == 2:
-                notify_with_delay("2D image can not be tracked.")
+                raise ValueError("2D image can not be tracked.")
 
             try:
                 label_layer = grab_layer(
@@ -521,9 +518,7 @@ class TrackingWindow(QWidget):
             z = int(event.position[0])
             selected_id = label_layer.get_value(event.position)
             if selected_id == 0:
-                worker = notify_with_delay("The background can not be tracked.")
-                worker.start()
-                return
+                raise ValueError("The background can not be tracked.")
             centroid = ndimage.center_of_mass(
                 label_layer.data[z],
                 labels=label_layer.data[z],
@@ -709,8 +704,7 @@ class TrackingWindow(QWidget):
             Callback for the unlink function to store the selected cells
             """
             if len(event.position) == 2:
-                notify_with_delay("2D image can not be tracked.")
-                
+                raise ValueError("2D image can not be tracked.")
             try:
                 label_layer = grab_layer(
                     self.viewer, self.parent.combobox_segmentation.currentText()
@@ -724,9 +718,7 @@ class TrackingWindow(QWidget):
             z = int(event.position[0])
             selected_id = label_layer.get_value(event.position)
             if selected_id == 0:
-                worker = notify_with_delay("The background can not be tracked.")
-                worker.start()
-                return
+                raise ValueError("The background can not be tracked.")
             centroid = ndimage.center_of_mass(
                 label_layer.data[z],
                 labels=label_layer.data[z],

@@ -17,7 +17,7 @@ from qtpy.QtWidgets import (
     QComboBox,
     QTabWidget,
     QSizePolicy,
-    QHBoxLayout,
+    # QHBoxLayout,
 )
 from qtpy.QtCore import Qt
 from qtpy.QtGui import QImage, QPixmap
@@ -34,7 +34,7 @@ from napari.layers.tracks.tracks import Tracks
 from ._assistant import AssistantWindow
 from ._analysis import AnalysisWindow
 from ._evaluation import EvaluationWindow
-from ._logger import notify
+# from ._logger import notify
 from ._reader import open_dialog, napari_get_reader
 from ._segmentation import SegmentationWindow
 from ._tracking import TrackingWindow
