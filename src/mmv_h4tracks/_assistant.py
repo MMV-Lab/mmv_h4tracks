@@ -289,8 +289,8 @@ class AssistantWindow(QWidget):
                 frame = old_segmentation[track[1]]
                 candidates = np.unique(
                     frame[
-                        centroid[1] - 20 : centroid[1] + 20,
-                        centroid[2] - 20 : centroid[2] + 20,
+                        np.maximum(centroid[1] - 20, 0) : np.minimum(centroid[1] + 20, frame.shape[0]),        # Candidates must be located within the edges.
+                        np.maximum(centroid[2] - 20, 0) : np.minimum(centroid[2] + 20, frame.shape[1]),
                     ]
                 )
                 cell_found = False
