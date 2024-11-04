@@ -728,7 +728,6 @@ class TrackingWindow(QWidget):
             if not cell in self.selected_cells:
                 self.selected_cells.append(cell)
                 self.selected_cells.sort(key = lambda x: x[0])
-            pass
 
         # check if button text is confirm or unlink
         if self.btn_remove_correspondence.text() == UNLINK_TEXT:
@@ -737,7 +736,6 @@ class TrackingWindow(QWidget):
             self.btn_remove_correspondence.setText(CONFIRM_TEXT)
             self.set_callback(store_cell_for_unlink)
             QApplication.setOverrideCursor(Qt.CrossCursor)
-            pass
         else:
             self.reset_button_labels()
             self.restore_callbacks()
@@ -771,6 +769,8 @@ class TrackingWindow(QWidget):
         if len(track_id_matches) != len(self.selected_cells):
             notify("All selected cells must be tracked.")
             return
+        
+        print(f"Selected cells initially: {self.selected_cells}")
 
         min_z = np.min(np.asarray(self.selected_cells)[:, 0])
         max_z = np.max(np.asarray(self.selected_cells)[:, 0])
@@ -790,32 +790,28 @@ class TrackingWindow(QWidget):
                 and cell[0] >= min_z
                 and cell[0] <= max_z
             ]
+            print(f"Missing cells: {missing_cells}")
             self.selected_cells.extend(missing_cells)
 
         self.selected_cells.sort(key = lambda x: x[0])
 
-        print(self.selected_cells)
+        print(f"Selected cells with missing cells added: {self.selected_cells}")
         # if only part of the track is removed the outermost entries must remain
         if min_z_track < min_z:
             self.selected_cells.pop(0)
         if max_z_track > max_z:
             self.selected_cells.pop(-1)
-        # if min_z_track < min_z:
-        #     self.selected_cells.pop(0)
-        #     if max_z_track > max_z:
-        #         self.selected_cells.pop(0)
-        # else:
-        #     if max_z_track > max_z:
-        #         self.selected_cells.pop(-1)
-        print(self.selected_cells)
+        print(f"Cells being removed: {self.selected_cells}")
 
         # remove the selected cells from the tracks
         self.remove_entries_from_tracks(self.selected_cells)
         if min_z_track < min_z and max_z_track > max_z:
+            print("Splitting track")
             # split the track
             track_id = np.amax(tracks_layer.data[:, 0]) + 1
             if self.cached_tracks is not None:
                 track_id = np.amax(self.cached_tracks[:, 0]) + 1
+            print(f"New track id: {track_id}")
             track_to_reassign = [entry for entry in track if entry[0] >= max_z]
             self.remove_entries_from_tracks(track_to_reassign)
             self.add_entries_to_tracks(track_to_reassign, track_id)
@@ -1013,6 +1009,7 @@ class TrackingWindow(QWidget):
         cells : list
             The cells to remove
         """
+        print(f"Amount of cells to remove: {len(cells)}")
         tracks_layer = self.get_tracks_layer()
         if tracks_layer is None:
             raise ValueError("Can't remove tracks from non-existing layer")
@@ -1022,8 +1019,14 @@ class TrackingWindow(QWidget):
         if self.cached_tracks is not None:
             tracks_objects.append(self.cached_tracks)
         for tracks in tracks_objects:
-            tracks = np.delete(tracks, np.isin(tracks[:, 1:4], cells).all(axis=1), 0)
+            old_length = len(tracks)
+            mask = np.ones(tracks.shape[0], dtype=bool)
+
+            for cell in cells:
+                mask &= ~np.all(tracks[:, 1:4] == cell, axis=1)
+            tracks = tracks[mask]
             track_results.append(tracks)
+            print(f"Removed {old_length - len(tracks)} cells")
         if len(track_results[0]) < 1:
             if len(track_results) > 1 and len(track_results[1]) > 1:
                 tracks_layer.data = track_results[1]
@@ -1084,6 +1087,7 @@ class TrackingWindow(QWidget):
         track_id : int
             The track id of the cells
         """
+        print(f"Amount of cells to add: {len(cells)}")
         if len(cells) == 0:
             msg = QMessageBox()
             msg.setIcon(QMessageBox.Warning)
