@@ -555,9 +555,10 @@ class AnalysisWindow(QWidget):
                 napari.qt.get_stylesheet(theme_id="dark")
             )
         self.parent.plot_window.setLayout(QVBoxLayout())
-        description = QLabel(plot_dict["Description"])
-        description.setMaximumHeight(20)
-        self.parent.plot_window.layout().addWidget(description)
+        self.parent.plot_window.setWindowTitle(plot_dict["Description"])
+        # description = QLabel(plot_dict["Description"])
+        # description.setMaximumHeight(20)
+        # self.parent.plot_window.layout().addWidget(description)
         self.selector = Selector(self, axes, results)
 
         self.parent.plot_window.layout().addWidget(canvas)
