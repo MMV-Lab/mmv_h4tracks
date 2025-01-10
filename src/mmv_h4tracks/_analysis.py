@@ -22,8 +22,10 @@ from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from napari.qt.threading import thread_worker
 import napari
 from skimage import measure
+import math
 
 from ._grabber import grab_layer
+from ._logger import notify
 from mmv_h4tracks._logger import handle_exception
 from ._selector import Selector
 from ._writer import save_csv
@@ -205,23 +207,24 @@ class AnalysisWindow(QWidget):
         Returns
         -------
         nd array
-            (N,3) shape array, which contains the ID, average speed and standard deviation of speed
+            (N,4) shape array, which contains the ID, average speed, standard deviation of speed and max speed
         """
         for unique_id in np.unique(tracks[:, 0]):
             track = np.delete(tracks, np.where(tracks[:, 0] != unique_id), 0)
             accumulated_distance = []
+            max_speed = 0
             for i in range(0, len(track) - 1):
-                accumulated_distance.append(
-                    np.hypot(
-                        track[i, 2] - track[i + 1, 2], track[i, 3] - track[i + 1, 3]
-                    )
+                distance = np.hypot(
+                    track[i, 2] - track[i + 1, 2], track[i, 3] - track[i + 1, 3]
                 )
+                accumulated_distance.append(distance)
+                max_speed = max(max_speed, distance)
             average = np.around(np.average(accumulated_distance), 3)
             std_deviation = np.around(np.std(accumulated_distance), 3)
             try:
-                speeds = np.append(speeds, [[unique_id, average, std_deviation]], 0)
+                speeds = np.append(speeds, [[unique_id, average, std_deviation, max_speed]], 0)
             except UnboundLocalError:
-                speeds = np.array([[unique_id, average, std_deviation]])
+                speeds = np.array([[unique_id, average, std_deviation, max_speed]])
         return speeds
 
     def _calculate_size(self, tracks, segmentation):
@@ -552,9 +555,10 @@ class AnalysisWindow(QWidget):
                 napari.qt.get_stylesheet(theme_id="dark")
             )
         self.parent.plot_window.setLayout(QVBoxLayout())
-        description = QLabel(plot_dict["Description"])
-        description.setMaximumHeight(20)
-        self.parent.plot_window.layout().addWidget(description)
+        self.parent.plot_window.setWindowTitle(plot_dict["Description"])
+        # description = QLabel(plot_dict["Description"])
+        # description.setMaximumHeight(20)
+        # self.parent.plot_window.layout().addWidget(description)
         self.selector = Selector(self, axes, results)
 
         self.parent.plot_window.layout().addWidget(canvas)
@@ -595,10 +599,6 @@ class AnalysisWindow(QWidget):
             segmentation_layer = grab_layer(
                 self.viewer, self.parent.combobox_segmentation.currentText()
             )
-            bin_sum = np.count_nonzero(segmentation_layer.data)
-            if bin_sum != self.parent.seg_binary_sum:
-                self.parent.tracking_window.update_all_centroids()
-                self.parent.seg_binary_sum = bin_sum
             retval.update(
                 {"Description": "Scatterplot Standard Deviation vs Average: Size"}
             )
@@ -658,10 +658,6 @@ class AnalysisWindow(QWidget):
             segmentation_layer = grab_layer(
                 self.viewer, self.parent.combobox_segmentation.currentText()
             )
-            bin_sum = np.count_nonzero(segmentation_layer.data)
-            if bin_sum != self.parent.seg_binary_sum:
-                self.parent.tracking_window.update_all_centroids()
-                self.parent.seg_binary_sum = bin_sum
             retval.update(
                 {
                     "Description": "Scatterplot Standard Deviation vs Average: Eccentricity"
@@ -681,10 +677,6 @@ class AnalysisWindow(QWidget):
             segmentation_layer = grab_layer(
                 self.viewer, self.parent.combobox_segmentation.currentText()
             )
-            bin_sum = np.count_nonzero(segmentation_layer.data)
-            if bin_sum != self.parent.seg_binary_sum:
-                self.parent.tracking_window.update_all_centroids()
-                self.parent.seg_binary_sum = bin_sum
             retval.update(
                 {"Description": "Scatterplot Standard Deviation vs Average: Perimeter"}
             )
@@ -995,10 +987,6 @@ class AnalysisWindow(QWidget):
             segmentation = grab_layer(
                 self.viewer, self.parent.combobox_segmentation.currentText()
             ).data
-            bin_sum = np.count_nonzero(segmentation)
-            if bin_sum != self.parent.seg_binary_sum:
-                self.parent.tracking_window.update_all_centroids()
-                self.parent.seg_binary_sum = bin_sum
             size = self._calculate_size(tracks, segmentation)
             metrics.extend(
                 ["Average size [# pixels]", "Standard deviation of size [# pixels]"]
@@ -1195,10 +1183,6 @@ class AnalysisWindow(QWidget):
             segmentation = grab_layer(
                 self.viewer, self.parent.combobox_segmentation.currentText()
             ).data
-            bin_sum = np.count_nonzero(segmentation)
-            if bin_sum != self.parent.seg_binary_sum:
-                self.parent.tracking_window.update_all_centroids()
-                self.parent.seg_binary_sum = bin_sum
             perimeter = self.calculate_cell_perimeter(tracks, segmentation)
             metrics.extend(
                 [
@@ -1248,10 +1232,6 @@ class AnalysisWindow(QWidget):
             segmentation = grab_layer(
                 self.viewer, self.parent.combobox_segmentation.currentText()
             ).data
-            bin_sum = np.count_nonzero(segmentation)
-            if bin_sum != self.parent.seg_binary_sum:
-                self.parent.tracking_window.update_all_centroids()
-                self.parent.seg_binary_sum = bin_sum
             eccentricity = self.calculate_cell_eccentricity(tracks, segmentation)
             metrics.extend(
                 [
@@ -1352,14 +1332,20 @@ def calculate_size_single_track(track, segmentation):
     Returns
     -------
     sizes: nd array
-        (N,3) shape array, which contains the ID, average size and standard deviation of size
+        (N,5) shape array, which contains the ID, average size standard deviation of size, min size and max size
     """
     id = track[0, 0]
     sizes = []
+    max_size = 0
+    min_size = math.inf
     for line in track:
         _, z, y, x = line
         seg_id = segmentation[z, y, x]
-        sizes.append(len(np.where(segmentation[z] == seg_id)[0]))
+        size = len(np.where(segmentation[z] == seg_id)[0])
+        sizes.append(size)
+        max_size = max(max_size, size)
+        min_size = min(min_size, size)
+        # sizes.append(len(np.where(segmentation[z] == seg_id)[0]))
     average = np.around(np.average(sizes), 3)
     std_deviation = np.around(np.std(sizes), 3)
-    return [id, average, std_deviation]
+    return [id, average, std_deviation, min_size, max_size]
