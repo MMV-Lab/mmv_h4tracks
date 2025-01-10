@@ -111,13 +111,9 @@ class TrackingWindow(QWidget):
         )
         btn_delete_selected_tracks = QPushButton("Delete")
 
-        btn_ugly_duck = QPushButton("Don't Use This One")
-        btn_ugly_duck.setToolTip("I warned you")
-        btn_ugly_duck.clicked.connect(self.update_helper)
-
-        btn_pretty_duck = QPushButton("Use This One")
-        btn_pretty_duck.setToolTip("Or don't, i'm just a button")
-        btn_pretty_duck.clicked.connect(self.update_all_centroids)
+        # btn_update_centroids = QPushButton("Update centroids")
+        # btn_update_centroids.setToolTip("WARNING: Long running operation")
+        # btn_update_centroids.clicked.connect(self.update_all_centroids)
 
         btn_centroid_tracking.clicked.connect(self.coordinate_tracking_on_click)
         btn_auto_track_all.clicked.connect(self.overlap_tracking_on_click)
@@ -186,8 +182,7 @@ class TrackingWindow(QWidget):
         content.layout().addWidget(automatic_tracking)
         content.layout().addWidget(tracking_correction)
         content.layout().addWidget(filter_tracks)
-        content.layout().addWidget(btn_ugly_duck)
-        content.layout().addWidget(btn_pretty_duck)
+        # content.layout().addWidget(btn_update_centroids)
         content.layout().addWidget(v_spacer)
 
         self.layout().addWidget(content)
@@ -758,9 +753,39 @@ class TrackingWindow(QWidget):
 
         track_id_matches = []
         for cell in self.selected_cells:
+            if not np.any(np.all(tracks_layer.data[:, 1:4] == cell, axis=1)):
+                # try updating the track entry
+                # search for closest centroid in a spiral pattern
+                # (pattern is not actually spiral, but it's a start)
+                test_candidate = cell
+                track_id = None
+                for i in range(1, 10):
+                    for j in range(-i, i + 1):
+                        test_candidate = [cell[0], cell[1] + j, cell[2] + i]
+                        test_candidate_2 = [cell[0], cell[1] + j, cell[2] - i]
+                        track_ids = []
+                        track_ids.extend(
+                            [
+                                track_line[0]
+                                for track_line in tracks_layer.data
+                                if np.all(track_line[1:4] == test_candidate)
+                                or np.all(track_line[1:4] == test_candidate_2)
+                            ]
+                        )
+                        if len(track_ids) >= 0:
+                            track_id = track_ids[0]
+                            self.update_single_centroid(track_id, cell[0])
+                            break
+                    if track_id is not None:
+                        break
+                if track_id is not None:
+                    track_id_matches.append(track_id)
+                    continue
+
             for track_line in tracks_layer.data:
                 if np.all(track_line[1:4] == cell):
                     track_id_matches.append(track_line[0])
+                    break
 
         if len(set(track_id_matches)) != 1:
             notify("Please select cells from the same track to disconnect.")
@@ -793,7 +818,7 @@ class TrackingWindow(QWidget):
             print(f"Missing cells: {missing_cells}")
             self.selected_cells.extend(missing_cells)
 
-        self.selected_cells.sort(key = lambda x: x[0])
+        self.selected_cells.sort(key=lambda x: x[0])
 
         print(f"Selected cells with missing cells added: {self.selected_cells}")
         # if only part of the track is removed the outermost entries must remain
@@ -1217,15 +1242,10 @@ class TrackingWindow(QWidget):
         endtime = time.time()
         print(f"Updating all centroids took {endtime - starttime} seconds.")
 
-    def update_helper(self):
-        self.update_single_centroid(1,1)
-
     def update_single_centroid(self, track_id: int, frame: int):
         """
         Updates a single centroid to account for changed segmentation
         """
-        # track_id = 1
-        # frame = 1
         starttime = time.time()
         label_layer = grab_layer(
             self.viewer, self.parent.combobox_segmentation.currentText()
@@ -1236,7 +1256,9 @@ class TrackingWindow(QWidget):
         if tracks_layer is None:
             return
         tracks = tracks_layer.data
-        track_entry = [entry for entry in tracks if entry[0] == track_id and entry[1] == frame][0]
+        track_entry = [
+            entry for entry in tracks if entry[0] == track_id and entry[1] == frame
+        ][0]
 
         filter_values = None
         if self.cached_tracks is not None:
@@ -1262,6 +1284,7 @@ class TrackingWindow(QWidget):
 
         endtime = time.time()
         print(f"Updating single centroid took {endtime - starttime} seconds.")
+
 
 def func(label_data, start_slice, id):
     """
@@ -1323,7 +1346,10 @@ def func(label_data, start_slice, id):
         return
     return track_cells
 
-def update_centroid(track_entry: np.ndarray, frame_data: np.ndarray, tracks: np.ndarray):
+
+def update_centroid(
+    track_entry: np.ndarray, frame_data: np.ndarray, tracks: np.ndarray
+):
     """
     Updates the centroid of a track
     """
@@ -1337,10 +1363,13 @@ def update_centroid(track_entry: np.ndarray, frame_data: np.ndarray, tracks: np.
         # find all label ids not previously considered
         candidates = np.unique(
             frame_data[
-                old_y - tolerance : old_y + tolerance + 1, old_x - tolerance : old_x + tolerance + 1
+                old_y - tolerance : old_y + tolerance + 1,
+                old_x - tolerance : old_x + tolerance + 1,
             ]
         )
-        candidates = [candidate for candidate in candidates if candidate not in checked_ids]
+        candidates = [
+            candidate for candidate in candidates if candidate not in checked_ids
+        ]
         closest_candidate = [None, float("inf")]
         # find closest candidate to old centroid
         for candidate in candidates:
@@ -1349,21 +1378,22 @@ def update_centroid(track_entry: np.ndarray, frame_data: np.ndarray, tracks: np.
             )
             centroid = [int(np.rint(centroid[0])), int(np.rint(centroid[1]))]
             # use candidate if centroids match
-            if (
-                centroid[0] == old_y
-                and centroid[1] == old_x
-            ):
+            if centroid[0] == old_y and centroid[1] == old_x:
                 return np.array([track_id, z, old_y, old_x])
-            distance = np.sqrt(
-                (old_y - centroid[0]) ** 2 + (old_x - centroid[1]) ** 2
-            )
+            distance = np.sqrt((old_y - centroid[0]) ** 2 + (old_x - centroid[1]) ** 2)
             # skip if candidate is already part of another track
-            if np.any(np.all(tracks[:, 1:] == np.array([z, centroid[0], centroid[1]]), axis=1)):
-                print(f"Skipping {z, *centroid} due to other track (tolerance {tolerance})")
+            if np.any(
+                np.all(tracks[:, 1:] == np.array([z, centroid[0], centroid[1]]), axis=1)
+            ):
+                print(
+                    f"Skipping {z, *centroid} due to other track (tolerance {tolerance})"
+                )
                 checked_ids.append(candidate)
                 continue
             if distance < closest_candidate[1]:
-                print(f"Found new closest candidate {z, *centroid} (tolerance {tolerance})")
+                print(
+                    f"Found new closest candidate {z, *centroid} (tolerance {tolerance})"
+                )
                 closest_candidate = [centroid, distance]
         if closest_candidate[0] is not None:
             y, x = closest_candidate[0]
