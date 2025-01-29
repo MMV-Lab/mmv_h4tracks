@@ -1,6 +1,7 @@
-from multiprocessing import Pool
+from multiprocessing import Pool, shared_memory
 from threading import Event
 import time
+from itertools import groupby
 
 import napari
 import numpy as np
@@ -111,9 +112,8 @@ class TrackingWindow(QWidget):
         )
         btn_delete_selected_tracks = QPushButton("Delete")
 
-        # btn_update_centroids = QPushButton("Update centroids")
-        # btn_update_centroids.setToolTip("WARNING: Long running operation")
-        # btn_update_centroids.clicked.connect(self.update_all_centroids)
+        btn_update_centroids = QPushButton("Update centroids")
+        btn_update_centroids.clicked.connect(self.update_all_centroids)
 
         btn_centroid_tracking.clicked.connect(self.coordinate_tracking_on_click)
         btn_auto_track_all.clicked.connect(self.overlap_tracking_on_click)
@@ -182,7 +182,7 @@ class TrackingWindow(QWidget):
         content.layout().addWidget(automatic_tracking)
         content.layout().addWidget(tracking_correction)
         content.layout().addWidget(filter_tracks)
-        # content.layout().addWidget(btn_update_centroids)
+        content.layout().addWidget(btn_update_centroids)
         content.layout().addWidget(v_spacer)
 
         self.layout().addWidget(content)
@@ -722,7 +722,7 @@ class TrackingWindow(QWidget):
             cell = [z, int(np.rint(centroid[0])), int(np.rint(centroid[1]))]
             if not cell in self.selected_cells:
                 self.selected_cells.append(cell)
-                self.selected_cells.sort(key = lambda x: x[0])
+                self.selected_cells.sort(key=lambda x: x[0])
 
         # check if button text is confirm or unlink
         if self.btn_remove_correspondence.text() == UNLINK_TEXT:
@@ -794,7 +794,7 @@ class TrackingWindow(QWidget):
         if len(track_id_matches) != len(self.selected_cells):
             notify("All selected cells must be tracked.")
             return
-        
+
         print(f"Selected cells initially: {self.selected_cells}")
 
         min_z = np.min(np.asarray(self.selected_cells)[:, 0])
@@ -1217,7 +1217,6 @@ class TrackingWindow(QWidget):
         """
         Updates all centroids to account for changed segmentation
         """
-        starttime = time.time()
         label_layer = grab_layer(
             self.viewer, self.parent.combobox_segmentation.currentText()
         )
@@ -1226,27 +1225,42 @@ class TrackingWindow(QWidget):
         tracks_layer = self.get_tracks_layer()
         if tracks_layer is None:
             return
-        AMOUNT_OF_PROCESSES = self.parent.get_process_limit()
-        tracks = tracks_layer.data
-        threads_input = []
-        for track in tracks:
-            threads_input.append([track, label_layer.data[track[1]], tracks])
-        with Pool(AMOUNT_OF_PROCESSES) as pool:
-            updated_tracks = pool.starmap(update_centroid, threads_input)
+
+        label_data = np.array(label_layer.data)
+        tracks = np.array(tracks_layer.data)
+        original_label_data = np.array(self.parent.initial_layers[0])
+
+        frames_to_update = []
+
+        for z in range(len(label_data)):
+            frame_o = original_label_data[z]
+            frame = label_data[z]
+            if not np.array_equal(frame_o[frame_o > 0], frame[frame > 0]):
+                frames_to_update.append(z)
+
+        tracks_to_update = [track for track in tracks if track[1] in frames_to_update]
+        unchanged_tracks = [
+            track for track in tracks if track[1] not in frames_to_update
+        ]
+        updated_tracks = []
+        for track in tracks_to_update:
+            updated_track = update_centroid(label_data, tracks, track)
+            updated_tracks.append(updated_track)
+
         updated_tracks = [track for track in updated_tracks if track is not None]
-        updated_tracks = np.array(updated_tracks)
+        updated_tracks.extend(unchanged_tracks)
+        df = pd.DataFrame(updated_tracks, columns=["ID", "Z", "Y", "X"])
+        df.sort_values(["ID", "Z"], ascending=True, inplace=True)
+        updated_tracks = df.values
         updated_tracks = processing.split_noncontinuous_tracks(updated_tracks)
         updated_tracks = processing.remove_dot_tracks(updated_tracks)
         tracks_layer.data = updated_tracks
-
-        endtime = time.time()
-        print(f"Updating all centroids took {endtime - starttime} seconds.")
 
     def update_single_centroid(self, track_id: int, frame: int):
         """
         Updates a single centroid to account for changed segmentation
         """
-        starttime = time.time()
+        # starttime = time.time()
         label_layer = grab_layer(
             self.viewer, self.parent.combobox_segmentation.currentText()
         )
@@ -1282,8 +1296,8 @@ class TrackingWindow(QWidget):
         else:
             tracks_layer.data = tracks
 
-        endtime = time.time()
-        print(f"Updating single centroid took {endtime - starttime} seconds.")
+        # endtime = time.time()
+        # print(f"Updating single centroid took {endtime - starttime} seconds.")
 
 
 def func(label_data, start_slice, id):
@@ -1347,56 +1361,53 @@ def func(label_data, start_slice, id):
     return track_cells
 
 
-def update_centroid(
-    track_entry: np.ndarray, frame_data: np.ndarray, tracks: np.ndarray
-):
+def update_centroid(labels: np.ndarray, tracks: np.ndarray, track_entry: np.ndarray):
     """
     Updates the centroid of a track
     """
+    frame_data = labels[track_entry[1]]
     # track entry: find if centroid is centroid of an existing cell
     # if not: find if centroid is close to an existing cell
-    # if not: repeat with higher tolerance (0, 20, 40, 60, 80, 100)
     track_id, z, old_y, old_x = track_entry
-    checked_ids = [0]
-    # check within increasing area around the old centroid
-    for tolerance in range(0, 101, 20):
-        # find all label ids not previously considered
-        candidates = np.unique(
-            frame_data[
-                old_y - tolerance : old_y + tolerance + 1,
-                old_x - tolerance : old_x + tolerance + 1,
-            ]
-        )
-        candidates = [
-            candidate for candidate in candidates if candidate not in checked_ids
-        ]
-        closest_candidate = [None, float("inf")]
-        # find closest candidate to old centroid
-        for candidate in candidates:
-            centroid = ndimage.center_of_mass(
-                frame_data, labels=frame_data, index=candidate
-            )
-            centroid = [int(np.rint(centroid[0])), int(np.rint(centroid[1]))]
-            # use candidate if centroids match
-            if centroid[0] == old_y and centroid[1] == old_x:
-                return np.array([track_id, z, old_y, old_x])
-            distance = np.sqrt((old_y - centroid[0]) ** 2 + (old_x - centroid[1]) ** 2)
-            # skip if candidate is already part of another track
-            if np.any(
-                np.all(tracks[:, 1:] == np.array([z, centroid[0], centroid[1]]), axis=1)
-            ):
-                print(
-                    f"Skipping {z, *centroid} due to other track (tolerance {tolerance})"
-                )
-                checked_ids.append(candidate)
-                continue
-            if distance < closest_candidate[1]:
-                print(
-                    f"Found new closest candidate {z, *centroid} (tolerance {tolerance})"
-                )
-                closest_candidate = [centroid, distance]
-        if closest_candidate[0] is not None:
-            y, x = closest_candidate[0]
-            print(f"Using closest candidate {z}, {y}, {x} (tolerance {tolerance})")
-            return np.array([track_id, z, y, x])
+
+    tolerance = 100
+    offset = (max(0, old_y - tolerance), max(0, old_x - tolerance))
+    roi = frame_data[
+        offset[0] : min(frame_data.shape[0], old_y + tolerance + 1),
+        offset[1] : min(frame_data.shape[1], old_x + tolerance + 1),
+    ]
+
+    def fast_center_of_mass(frame_data, label, offset):
+        # about 20% faster than ndimage.center_of_mass in this context
+        binary_mask = frame_data == label
+        coords = np.argwhere(binary_mask)
+        if coords.size == 0:
+            return None
+        coords += offset
+        return np.mean(coords, axis=0)
+
+    unique_labels = np.unique(roi)
+    centroids = {
+        label: fast_center_of_mass(roi, label, offset)
+        for label in unique_labels
+        if label != 0
+    }
+    closest_candidate = [None, float("inf")]
+    # find closest candidate to old centroid
+    for _, centroid in centroids.items():
+        centroid = [int(np.rint(centroid[0])), int(np.rint(centroid[1]))]
+        # use candidate if centroids match
+        if centroid[0] == old_y and centroid[1] == old_x:
+            return np.array([track_id, z, old_y, old_x])
+        distance = np.sqrt((old_y - centroid[0]) ** 2 + (old_x - centroid[1]) ** 2)
+        # skip if candidate is already part of another track
+        if np.any(
+            np.all(tracks[:, 1:] == np.array([z, centroid[0], centroid[1]]), axis=1)
+        ):
+            continue
+        if distance < closest_candidate[1]:
+            closest_candidate = [centroid, distance]
+    if closest_candidate[0] is not None:
+        y, x = closest_candidate[0]
+        return np.array([track_id, z, y, x])
     return None
