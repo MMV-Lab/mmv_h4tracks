@@ -1,7 +1,5 @@
-from multiprocessing import Pool, shared_memory
+from multiprocessing import Pool
 from threading import Event
-import time
-from itertools import groupby
 
 import napari
 import numpy as np
