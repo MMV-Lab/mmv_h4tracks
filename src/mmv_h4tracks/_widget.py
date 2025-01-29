@@ -477,6 +477,7 @@ class MMVH4TRACKS(QWidget):
             self.save_as()
             return
         QApplication.setOverrideCursor(Qt.WaitCursor)
+        self.tracking_window.update_all_centroids()
         raw_name = self.combobox_image.currentText()
         raw_layer = grab_layer(self.viewer, raw_name)
         segmentation_name = self.combobox_segmentation.currentText()
@@ -491,6 +492,7 @@ class MMVH4TRACKS(QWidget):
         Opens a dialog for the user to choose a zarr file to save to.
         Fails if not all layers exist
         """
+        self.tracking_window.update_all_centroids()
         raw_name = self.combobox_image.currentText()
         raw_layer = grab_layer(self.viewer, raw_name)
         raw_data = grab_layer(self.viewer, raw_name).data
