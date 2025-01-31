@@ -246,10 +246,6 @@ class EvaluationWindow(QWidget):
             handle_exception(exc)
             return
         
-        bin_sum = np.count_nonzero(gt_seg.data)
-        if bin_sum != self.parent.seg_binary_sum:
-            self.parent.tracking_window.update_all_centroids()
-            self.parent.seg_binary_sum = bin_sum
         eval_tracks = self.parent.initial_layers[1]
         eval_seg = self.parent.initial_layers[0]
         if eval_tracks is None or eval_seg is None:
