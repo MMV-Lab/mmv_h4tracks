@@ -770,7 +770,7 @@ class TrackingWindow(QWidget):
                                 or np.all(track_line[1:4] == test_candidate_2)
                             ]
                         )
-                        if len(track_ids) >= 0:
+                        if len(track_ids) > 0:
                             track_id = track_ids[0]
                             self.update_single_centroid(track_id, cell[0])
                             break
@@ -1046,6 +1046,8 @@ class TrackingWindow(QWidget):
             mask = np.ones(tracks.shape[0], dtype=bool)
 
             for cell in cells:
+                if len(cell) == 4:
+                    cell = cell[1:4]
                 mask &= ~np.all(tracks[:, 1:4] == cell, axis=1)
             tracks = tracks[mask]
             track_results.append(tracks)
