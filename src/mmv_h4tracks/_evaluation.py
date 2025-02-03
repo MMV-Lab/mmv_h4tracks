@@ -37,8 +37,8 @@ class EvaluationWindow(QWidget):
         evaluation_label = QLabel("Frames to evaluate:")
 
         # Buttons
-        evaluate_segmentation = QPushButton("Evaluate Segmentation")
-        evaluate_tracking = QPushButton("Evaluate Tracking")
+        evaluate_segmentation = QPushButton("Evaluate segmentation")
+        evaluate_tracking = QPushButton("Evaluate tracking")
 
         evaluate_segmentation.clicked.connect(self.evaluate_segmentation)
         evaluate_tracking.clicked.connect(self.evaluate_tracking)
