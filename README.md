@@ -58,7 +58,6 @@ The computation mode is used to set how many of the available CPU cores (40% or 
 
 For segmentation, we use the state of the art instance segmentation method Cellpose. We provide a model that we trained and has proven successful for our application ([see more information](https://doi.org/10.1038/s41467-023-43765-3)).
 
-(...)
 
 #### Automatic instance segmentation
 
@@ -102,7 +101,7 @@ In contrast, to link cells, the corresponding cell in each frame must be clicked
 
 #### Visualize & filter tracks
 
-The displayed tracks can be filtered by entering specific track IDs. An empty entry and subsequent click on the "Filter" button resets the track layer and all existing tracks are displayed.
+The displayed tracks can be filtered by entering specific track IDs. An empty entry and subsequent click on the "Filter" button resets the track layer and all existing tracks are displayed. ??
 
 Individual tracks can be deleted using the delete function. Note: These are permanently deleted and cannot be restored without re-tracking. In addition, all displayed tracks can be deleted.
 
@@ -132,6 +131,11 @@ In order to evaluate the segmentation results, a segmentation must first be load
 #### Tracking evaluation
 
 As for the evaluation of the segmentation, tracking results loaded via the plugin or obtained within the plugin are required. At least 2 consecutive frames must be corrected manually so that a score can be calculated for the quality of the tracking results. More information can be found [here](https://doi.org/10.1371/journal.pone.0144959).
+
+
+### Assistant
+
+(...)
 
 
 ## Hotkeys
