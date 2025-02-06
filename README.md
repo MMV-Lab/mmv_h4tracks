@@ -1,5 +1,3 @@
-**We are actively working on the documentation**
-
 # MMV_H4Tracks
 
 [![License](https://img.shields.io/pypi/l/mmv_h4tracks.svg?color=green)](https://github.com/MMV-Lab/mmv_h4tracks/raw/main/LICENSE)
@@ -9,7 +7,9 @@
 [![codecov](https://codecov.io/gh/MMV-Lab/mmv_h4tracks/branch/main/graph/badge.svg)](https://codecov.io/gh/MMV-Lab/mmv_h4tracks)
 [![napari hub](https://img.shields.io/endpoint?url=https://api.napari-hub.org/shields/mmv_h4tracks)](https://napari-hub.org/plugins/mmv_h4tracks)
 
-A plugin to use with napari to segment and track cells via HumanInTheLoop(HITL)-approach.
+MMV_H4Tracks (Human4Tracks) is a plugin to use with napari for segmenting and tracking cells, which additionally enables user-friendly manual curation of segmentation and tracks and various options for analyzing and evaluating the results.
+
+We have tested MMV_H4Tracks intensively under Linux and Windows, for Mac there may be problems with parallel computing, which are on our roadmap and will be fixed in a future version.
 
 ----------------------------------
 
@@ -35,7 +35,7 @@ To install latest development version :
 
 
 ## Documentation
-This plugin was developed to analyze 2D cell migration. It includes the function of segmenting 2D videos using [Cellpose](https://github.com/MouseLand/cellpose) (both CPU and GPU implemented) and then tracking them using different automatic tracking algorithms, depending on the use case. For both segmentation and tracking, we have implemented user-friendly options for manual curation after automatic processing. In conjunction with napari's inherent functionalities, our plugin provides the capability to automatically track data and subsequently process the tracks in three different ways based on the reliability of the automated results. Firstly, any potentially existing incorrect tracks can be rectified in a user-friendly manner, thereby maximizing the evaluation of available information. Secondly, unreliable tracks can be selectively deleted, and thirdly, individual tracks can be manually or semi-automatically created for particularly challenging data, ensuring reliable results. In essence, our tool aims to offer a valuable supplement to the existing fully automated tracking tools and a user-friendly means to analyze videos where fully automated tracking has been previously challenging.
+This plugin was developed to analyze 2D cell migration. It includes the function of segmenting 2D videos using [Cellpose](https://github.com/MouseLand/cellpose) (both CPU and GPU implemented) and then tracking them using different automatic tracking algorithms, depending on the use case. For both segmentation and tracking, we have implemented user-friendly options for manual curation after automatic processing. In conjunction with napari's inherent functionalities, our plugin provides the capability to automatically track data and subsequently process the tracks in three different ways based on the reliability of the automated results. Firstly, any potentially existing incorrect tracks can be rectified in a user-friendly manner, thereby maximizing the evaluation of available information. Secondly, unreliable tracks can be selectively deleted, and thirdly, individual tracks can be manually or semi-automatically created for particularly challenging data, ensuring reliable results. In addition, the manually curated results can be compared with the automatic results in order to obtain a score for the quality of the automatic results. In essence, our tool aims to offer a valuable supplement to the existing fully automated tracking tools and a user-friendly means to analyze videos where fully automated tracking has been previously challenging.
 
 Common metrics such as speed, cell size, velocity, etc... can then be extracted, plotted and exported from the tracks obtained in this way. Furthermore, the plugin incorporates a functionality to assess the automatic tracking outcomes using a [quality score](https://doi.org/10.1371/journal.pone.0144959). Since automated tracking may not be consistently 100% accurate, presenting a quality measure alongside scientific discoveries becomes essential. This supplementary metric offers researchers valuable insights into the dependability of the produced tracking results, fostering informed data interpretation and decision-making in the analysis of cell migration.
 
@@ -121,7 +121,7 @@ To be aware of the accuracy of your automatic tracking and segmentation results,
 
 To evaluate results, at least 2 consecutive frames must first be corrected manually. The plugin saves the previously mentioned automatic or loaded results in the background, so no activation via button or similar is necessary before manual correction.
 
-(...)
+The range of frames to be evaluated can be set, for which the results for segmentation and tracking can be calculated independently of each other. 
 
 
 #### Segmentation evaluation
@@ -152,10 +152,12 @@ Here's an overview of the hotkeys. All of them can also be found in the correspo
 
 We will continue to develop the plugin and implement new features in the future. Some of our plans in arbitrary order:
 
+- Feedback (progress bar) for computationally intensive functions
 - Support of lineages
 - Support training custom Cellpose models within the plugin
 - Model optimization to further optimize segmentation computation
 - Support evaluation of external segmentations
+- Improve robustness of Mac computing
 - ...
 
 If you have a feature request, please [file an issue].
