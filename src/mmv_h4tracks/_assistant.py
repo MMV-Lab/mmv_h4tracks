@@ -42,7 +42,7 @@ class AssistantWindow(QWidget):
 
         # Labels
         label_speed = QLabel("Threshold speed change")
-        label_size = QLabel("Threshold ize change")
+        label_size = QLabel("Threshold size change")
         label_distance = QLabel("Threshold edge distance")
         label_small_size = QLabel("Threshold size")
         label_FOI = QLabel("Frames of interest:")
