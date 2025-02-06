@@ -16,6 +16,9 @@ from qtpy.QtWidgets import (
     QAbstractScrollArea,
 )
 from scipy import ndimage
+from scipy.optimize import linear_sum_assignment
+# from scipy.optimize import linear_sum_assignment
+from numba import jit
 
 from ._logger import notify
 from ._grabber import grab_layer
@@ -52,7 +55,7 @@ class EvaluationWindow(QWidget):
         segmentation_table.setSizeAdjustPolicy(QAbstractScrollArea.AdjustToContents)
         segmentation_table.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Minimum)
         segmentation_table.setHorizontalHeaderLabels(
-            ["IoU Score", "DICE Score", "F1 Score"]
+            ["IoU Score", "DICE Score", "Average Precision 50"]
         )
         segmentation_table.setVerticalHeaderLabels(["Range", "All"])
         segmentation_table.setItem(0, 0, QTableWidgetItem())
@@ -195,11 +198,13 @@ class EvaluationWindow(QWidget):
         )
         all_dice = self._calculate_dice(gt_seg, eval_seg)
 
-        # F1
-        range_f1 = self._calculate_f1(
-            gt_seg[lower_bound:upper_bound + 1], eval_seg[lower_bound:upper_bound + 1]
-        )
-        all_f1 = self._calculate_f1(gt_seg, eval_seg)
+        # Average Precision 50
+        range_ap50 = self._calculate_ap50(gt_seg[lower_bound:upper_bound + 1], eval_seg[lower_bound:upper_bound + 1])
+        all_ap50 = self._calculate_ap50(gt_seg, eval_seg)
+
+        print(f"Range AP50: {range_ap50}")
+        print(f"All AP50: {all_ap50}")
+
 
         ### Update the table
         table = self.segmentation_results.layout().itemAt(1).widget()
@@ -208,10 +213,10 @@ class EvaluationWindow(QWidget):
         )
         table.item(0, 0).setText(f"{round_half_up(range_iou, 3):.3f}")
         table.item(0, 1).setText(f"{round_half_up(range_dice, 3):.3f}")
-        table.item(0, 2).setText(f"{round_half_up(range_f1, 3):.3f}")
+        table.item(0, 2).setText(f"{round_half_up(range_ap50, 3):.3f}")
         table.item(1, 0).setText(f"{round_half_up(all_iou, 3):.3f}")
         table.item(1, 1).setText(f"{round_half_up(all_dice, 3):.3f}")
-        table.item(1, 2).setText(f"{round_half_up(all_f1, 3):.3f}")
+        table.item(1, 2).setText(f"{round_half_up(all_ap50, 3):.3f}")
 
     def _calculate_iou(self, gt_seg, eval_seg):
         """Calculate the IoU score for two given segmentations."""
@@ -225,12 +230,63 @@ class EvaluationWindow(QWidget):
         return (
             2 * intersection / (np.count_nonzero(gt_seg) + np.count_nonzero(eval_seg))
         )
+    
+    def _calculate_ap50(self, gt_seg, eval_seg):
+        """
+        Heavily based on the average_precision function from the cellpose library
+        (https://github.com/MouseLand/cellpose/blob/06df602fbe074be02db3d716e280f0990816c726/cellpose/metrics.py#L73C5-L73C22)
+        """
+        if gt_seg.shape != eval_seg.shape:
+            raise ValueError("gt_seg and eval_seg must have the same shape")
 
-    def _calculate_f1(self, gt_seg, eval_seg):
-        """Calculate the F1 score for two given segmentations."""
-        intersection = np.sum(np.logical_and(gt_seg, eval_seg).flat)
-        union = np.sum(np.logical_or(gt_seg, eval_seg).flat)
-        return 2 * intersection / (intersection + union)
+        ap = 0
+        tp = 0
+        fp = 0
+        fn = 0
+        
+        n_true = np.array(list(map(len, map(np.unique, gt_seg)))) - 1
+        n_pred = np.array(list(map(len, map(np.unique, eval_seg)))) - 1
+
+        if gt_seg.ndim == 2:
+            gt_seg = [gt_seg]
+            eval_seg = [eval_seg]
+
+        for n in range(len(gt_seg)):
+            tp_n = 0
+            if n_pred[n] > 0:
+                iou = self._intersection_over_union(gt_seg[n], eval_seg[n])[1:, 1:]
+                tp_n += self._true_positive(iou)
+            tp += tp_n
+            fp += n_pred[n] - tp_n
+            fn += n_true[n] - tp_n
+        ap = tp / (tp + fp + fn)
+
+        return ap
+        
+    def _true_positive(self, iou):
+        n_min = min(iou.shape[0], iou.shape[1])
+        costs = -(iou >= 0.5).astype(float) - iou / (2 * n_min)
+        true_ind, pred_ind = linear_sum_assignment(costs)
+        match_ok = iou[true_ind, pred_ind] >= 0.5
+        tp = np.sum(match_ok)
+        return tp
+    
+    def _intersection_over_union(self, gt_seg, eval_seg):
+        @jit(nopython=True)
+        def _label_overlap(x, y):
+            x = x.ravel()
+            y = y.ravel()
+
+            overlap = np.zeros((1 + x.max(), 1 + y.max()), dtype=np.uint)
+            for i in range(len(x)):
+                overlap[x[i], y[i]] += 1
+            return overlap
+        overlap = _label_overlap(gt_seg, eval_seg)
+        n_pixels_pred = np.sum(overlap, axis=0, keepdims=True)
+        n_pixels_gt = np.sum(overlap, axis=1, keepdims=True)
+        iou = overlap / (n_pixels_pred + n_pixels_gt - overlap)
+        iou[np.isnan(iou)] = 0.0
+        return iou
 
     def evaluate_tracking(self):
         """Evaluate the tracking results against the curated tracks."""

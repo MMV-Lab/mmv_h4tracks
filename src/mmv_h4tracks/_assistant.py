@@ -46,7 +46,7 @@ class AssistantWindow(QWidget):
         label_distance = QLabel("Threshold edge distance")
         label_small_size = QLabel("Threshold size")
         label_FOI = QLabel("Frames of interest:")
-        self.label_frames = QLabel("None")
+        self.label_frames = QLabel()
         self.label_frames.setMaximumWidth(335)
 
         # while we support python<=3.11, we can't do multiline f-strings
@@ -412,8 +412,7 @@ class AssistantWindow(QWidget):
         if len(untracked) > 0:
             self.label_frames.setText(", ".join(map(str, untracked)))
         else:
-            self.label_frames.setText("None")
-        # print(untracked)
+            self.label_frames.setText()
         self.mark_outliers(untracked, "Untracked cells")
 
     def show_tiny_cells_on_click(self):
@@ -453,7 +452,7 @@ class AssistantWindow(QWidget):
         if len(unique_frames) > 0:
             self.label_frames.setText(", ".join(map(str, sorted(unique_frames))))
         else:
-            self.label_frames.setText("None")
+            self.label_frames.setText()
         
         self.mark_outliers(tiny, "Tiny cells")
 
