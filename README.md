@@ -145,8 +145,8 @@ Recommended strategy:
 Here's an overview of the hotkeys. All of them can also be found in the corresponding tooltips. 
 
 - `W` - Load next free segmentation ID
-- `?` - Overlap-based single cell tracking 
-- `?` - Separate cells
+- `G` - Overlap-based single cell tracking 
+- `H` - Separate cells
 - `Q` - Select cell ID 
 
 
