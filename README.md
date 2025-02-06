@@ -101,7 +101,7 @@ In contrast, to link cells, the corresponding cell in each frame must be clicked
 
 #### Visualize & filter tracks
 
-The displayed tracks can be filtered by entering specific track IDs. An empty entry and subsequent click on the "Filter" button resets the track layer and all existing tracks are displayed. ??
+The displayed tracks can be filtered by entering specific track IDs. Click on the "Show all tracks" button to display all tracks again.
 
 Individual tracks can be deleted using the delete function. Note: These are permanently deleted and cannot be restored without re-tracking. In addition, all displayed tracks can be deleted.
 
@@ -135,17 +135,19 @@ As for the evaluation of the segmentation, tracking results loaded via the plugi
 
 ### Assistant
 
-(...)
+The Assistant tab serves to facilitate the identification of errors within segmentation and tracking.
+
+Recommended strategy:
 
 
 ## Hotkeys
 
 Here's an overview of the hotkeys. All of them can also be found in the corresponding tooltips. 
 
-- `E` - Load next free segmentation ID
-- `S` - Overlap-based single cell tracking 
-- `R` - Separate cells
-- `T` - Select cell ID 
+- `?` - Load next free segmentation ID
+- `?` - Overlap-based single cell tracking 
+- `?` - Separate cells
+- `?` - Select cell ID 
 
 
 ## Development plan
