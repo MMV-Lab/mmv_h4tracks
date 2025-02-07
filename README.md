@@ -111,9 +111,8 @@ The plugin supports the calculation of various metrics, which can be divided int
 
 All these metrics can be exported to a .csv file. In addition, the tracks can be filtered with a movement minimum (in pixels) and a minimum track length (in frames). Note: All existing tracks are exported in any case, but their results are presented separately.
  
-The plugin offers the option of filtering the existing tracks according to the metrics. To do this, the corresponding metric can be selected in the plot area and a scatter plot of the data points will be generated using the plot button. Individual data points (/tracks) that are to be displayed can be circled with the mouse and all tracks that are not circled will be hidden. Note: No tracks are deleted in this process. Hiding tracks triggers the filter function in the tracking section. In combination with this, entire tracks can be deleted as described above.
+The plugin offers the option of filtering the existing tracks according to the metrics. To do this, the corresponding metric can be selected in the plot area and a scatter plot of the data points will be generated using the plot button. Individual data points (/tracks) that are to be displayed can be circled with the mouse and all tracks that are not circled will be hidden. Note: No tracks are deleted in this process. Hiding tracks triggers the filter function in the tracking section, the "Show all tracks" button can display all tracks again as described above.
 
-(...)
 
 ### Evaluation
 
@@ -135,7 +134,7 @@ As for the evaluation of the segmentation, tracking results loaded via the plugi
 
 ### Assistant
 
-The Assistant tab serves to facilitate the identification of errors within segmentation and tracking.
+The assistant tab serves to facilitate the identification of errors within segmentation and tracking.
 
 Recommended strategy:
 
