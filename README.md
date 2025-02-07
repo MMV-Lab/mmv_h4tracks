@@ -134,9 +134,16 @@ As for the evaluation of the segmentation, tracking results loaded via the plugi
 
 ### Assistant
 
-The assistant tab serves to facilitate the identification of errors within segmentation and tracking.
+The assistant tab serves to facilitate the identification of errors within segmentation and tracking. It is divided into filters and segmentation adaptation.
 
-Recommended strategy:
+Recommended filter strategy:
+1. "Show noteworthy tracks" to discover tracks that are not close to the edge and emerge or disappear after the movie starts. Tracks must be gapless and resulting hits can be indications of errors.
+2. "Show small cells" to double-check if there is any noise/pollution segmented.
+3. "Show untracked cells" to identify untracked segmented instances. 
+
+The other filters can provide additional support.
+
+The segmentation adaptation functions supplement useful functions with respect to segmentation. "Align segmentation IDs" adapts the label IDs with regard to the tracking IDs (the label IDs are then no longer arbitrary). "Relabel cells" ensures that the labels within a frame are unique => accidental errors during manual segmentation correction can thus be eliminated.
 
 
 ## Hotkeys
