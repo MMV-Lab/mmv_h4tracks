@@ -17,7 +17,6 @@ from qtpy.QtWidgets import (
 )
 from scipy import ndimage
 from scipy.optimize import linear_sum_assignment
-# from scipy.optimize import linear_sum_assignment
 from numba import jit
 
 from ._logger import notify
@@ -55,7 +54,7 @@ class EvaluationWindow(QWidget):
         segmentation_table.setSizeAdjustPolicy(QAbstractScrollArea.AdjustToContents)
         segmentation_table.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Minimum)
         segmentation_table.setHorizontalHeaderLabels(
-            ["IoU Score", "DICE Score", "Average Precision 50"]
+            ["IoU Score", "DICE Score", "AP at 0.5"]
         )
         segmentation_table.setVerticalHeaderLabels(["Range", "All"])
         segmentation_table.setItem(0, 0, QTableWidgetItem())
@@ -201,10 +200,6 @@ class EvaluationWindow(QWidget):
         # Average Precision 50
         range_ap50 = self._calculate_ap50(gt_seg[lower_bound:upper_bound + 1], eval_seg[lower_bound:upper_bound + 1])
         all_ap50 = self._calculate_ap50(gt_seg, eval_seg)
-
-        print(f"Range AP50: {range_ap50}")
-        print(f"All AP50: {all_ap50}")
-
 
         ### Update the table
         table = self.segmentation_results.layout().itemAt(1).widget()

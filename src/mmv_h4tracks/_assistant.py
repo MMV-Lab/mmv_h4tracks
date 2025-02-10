@@ -8,6 +8,7 @@ from qtpy.QtWidgets import (
     QGroupBox,
     QSizePolicy,
     QGridLayout,
+    QCheckBox,
 )
 
 import napari
@@ -87,8 +88,7 @@ class AssistantWindow(QWidget):
         btn_distance.clicked.connect(self.show_abrupt_tracks_on_click)
         btn_relabel.clicked.connect(self.relabel_cells_on_click)
         btn_align_ids.clicked.connect(self.align_ids_on_click)
-        btn_untracked.clicked.connect(self.demo)
-        # btn_untracked.clicked.connect(self.show_untracked_cells_on_click)
+        btn_untracked.clicked.connect(self.show_untracked_cells_on_click)
         btn_tiny.clicked.connect(self.show_tiny_cells_on_click)
         # btn_delete_id.clicked.connect(self.delete_id_on_click)
 
@@ -105,6 +105,11 @@ class AssistantWindow(QWidget):
         self.tiny_lineedit.setPlaceholderText(str(DEFAULT_SMALL_SIZE_THRESHOLD))
         # self.delete_id_lineedit.setPlaceholderText("ID to delete")
 
+        # Checkboxes
+        self.checkbox_hidden = QCheckBox("Include hidden tracks")
+        self.checkbox_hidden.setChecked(True)
+        self.checkbox_hidden.setToolTip("Include tracks that are hidden in evaluating the untracked cells")
+
         # Horizontal lines
         line = QWidget()
         line.setFixedHeight(4)
@@ -115,6 +120,9 @@ class AssistantWindow(QWidget):
         v_spacer = QWidget()
         v_spacer.setFixedWidth(4)
         v_spacer.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
+        h_spacer = QWidget()
+        h_spacer.setFixedHeight(10)
+        h_spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
         # QGroupBoxes
         filters = QGroupBox("Filters")
@@ -132,7 +140,8 @@ class AssistantWindow(QWidget):
         filters_layout.addWidget(label_small_size, 4, 0, 1, 2)
         filters_layout.addWidget(self.tiny_lineedit, 4, 2)
         filters_layout.addWidget(btn_tiny, 4, 3)
-        filters_layout.addWidget(btn_untracked, 5, 0, 1, -1)
+        filters_layout.addWidget(self.checkbox_hidden, 5, 0, 1, 2)
+        filters_layout.addWidget(btn_untracked, 5, 2, 1, 2)
         filters_layout.addWidget(label_FOI, 6, 0)
         filters_layout.addWidget(self.label_frames, 6, 1, 1, 3)
         # filters_layout.addWidget(self.delete_id_lineedit, 4, 0, 1, 2) # can't just uncomment
@@ -141,6 +150,7 @@ class AssistantWindow(QWidget):
 
         segmentation_adaptation = QGroupBox("Segmentation adaptation")
         segmentation_adaptation_layout = QVBoxLayout()
+        segmentation_adaptation_layout.addWidget(h_spacer)
         segmentation_adaptation_layout.addWidget(btn_align_ids)
         segmentation_adaptation_layout.addWidget(btn_relabel)
         segmentation_adaptation.setLayout(segmentation_adaptation_layout)
@@ -152,10 +162,6 @@ class AssistantWindow(QWidget):
         content.layout().addWidget(segmentation_adaptation)
         content.layout().addWidget(v_spacer)
         self.layout().addWidget(content)
-
-    def demo(self):
-        demo_text = ", ".join(map(str, range(1, 100)))
-        self.label_frames.setText(demo_text)
 
     def show_speed_outliers_on_click(self):
         try:
@@ -378,7 +384,10 @@ class AssistantWindow(QWidget):
         except ValueError:
             print("No tracks layer found")
             return
-        tracks = tracks_layer.data
+        if self.checkbox_hidden.isChecked():
+            tracks = self.parent.tracking_window.cached_tracks
+        else:
+            tracks = tracks_layer.data
         untracked = []
         for frame in tqdm(range(segmentation.shape[0])):
         # for frame in range(segmentation.shape[0]):
@@ -410,7 +419,8 @@ class AssistantWindow(QWidget):
                 untracked.append(centroid)
 
         if len(untracked) > 0:
-            self.label_frames.setText(", ".join(map(str, untracked)))
+            unique_frames = set([coord[0] for coord in untracked])
+            self.label_frames.setText(", ".join(map(str, sorted(unique_frames))))
         else:
             self.label_frames.setText()
         self.mark_outliers(untracked, "Untracked cells")
@@ -452,7 +462,7 @@ class AssistantWindow(QWidget):
         if len(unique_frames) > 0:
             self.label_frames.setText(", ".join(map(str, sorted(unique_frames))))
         else:
-            self.label_frames.setText()
+            self.label_frames.setText("")
         
         self.mark_outliers(tiny, "Tiny cells")
 

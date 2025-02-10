@@ -233,9 +233,11 @@ class MMVH4TRACKS(QWidget):
             ("Q", self.hotkey_select_id),
         ]
         for custom_bind in custom_binds:
-            if not custom_bind[0] in hotkeys:
-                viewer.bind_key(*custom_bind)
-            else:
+            old_bind = viewer.bind_key(*custom_bind, overwrite=True)
+            if old_bind is not None and old_bind.__name__ != custom_bind[1].__name__:
+                print(old_bind)
+                print(custom_bind)
+                viewer.bind_key(custom_bind[0], old_bind, overwrite=True)
                 raise ValueError(f"Hotkey {custom_bind[0]} already in use")
 
         self.viewer.layers.events.inserted.connect(self.add_entry_to_comboboxes)
