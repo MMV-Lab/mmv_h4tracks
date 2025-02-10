@@ -25,7 +25,7 @@ You can install `mmv_h4tracks` via [pip]:
     pip install mmv_h4tracks
 
 
-By default, CPU is used for segmentation computing. We did our best to optimize the CPU computing time, but still recommend GPU computing. For more detailed instructions on how to install GPU support look [here](https://github.com/MouseLand/cellpose#gpu-version-cuda-on-windows-or-linux).
+By default, CPU is used for segmentation computing. We did our best to optimize the CPU computing time, but still recommend GPU computing for better performance. For more detailed instructions on how to install GPU support look [here](https://github.com/MouseLand/cellpose#gpu-version-cuda-on-windows-or-linux).
 
 <!-- 
 
@@ -77,7 +77,7 @@ In future versions, we plan to support fine-tuning of Cellpose models within the
 
 We provide different options to correct the automatic segmentation:
 
-- `Remove cell` - Click on a cell to remove it. Be aware that removing a cell cuts the track the cell is on.
+- `Remove cell` - Click on a cell to remove it. Be aware that removing a cell will split the track the cell belongs to, potentially affecting subsequent tracking.
 - `Next free ID` - Loads the next free label ID, then a false negative cell can be manually annotated using the paint mode.
 - `Select ID` - Click on a cell to load its ID, then this cell can be corrected manually using the paint mode.
 - `Merge cell` - Click on 2 different fragments of the same cell to harmonize their ID. Note: This has no effect on the annotation itself.
@@ -118,14 +118,14 @@ The plugin offers the option of filtering the existing tracks according to the m
 
 To be aware of the accuracy of your automatic tracking and segmentation results, we have implemented an option to evaluate your automatic results. Evaluation is always carried out against the latest results of automatic segmentation and automatic tracking or previously created results loaded via the plugin's own load function. We may implement the option to evaluate external segmentations in the future, but for now you can use save and load as a workaround.
 
-To evaluate results, at least 2 consecutive frames must first be corrected manually. The plugin saves the previously mentioned automatic or loaded results in the background, so no activation via button or similar is necessary before manual correction.
+To evaluate results, at least two consecutive frames must be manually corrected first. The plugin saves the previously mentioned automatic or loaded results in the background, so no activation via button or similar is necessary before manual correction.
 
 The range of frames to be evaluated can be set, for which the results for segmentation and tracking can be calculated independently of each other. 
 
 
 #### Segmentation evaluation
 
-In order to evaluate the segmentation results, a segmentation must first be loaded either via the load function of the plugin (drag&drop via napari is not sufficient) or computed within the plugin. This can then be corrected manually. For IoU, Dice and F1 scores are then calculated for the frames specified by the user. These results are not exported automatically and must therefore be noted down by users themselves.
+In order to evaluate the segmentation results, a segmentation must first be loaded via the plugin's load function (drag & drop via napari is not sufficient) or computed within the plugin. This can then be corrected manually. For IoU, Dice and Average Precision 50 scores are then calculated for the frames specified by the user. These results are not exported automatically and must therefore be noted down by users themselves.
 
 #### Tracking evaluation
 
@@ -137,13 +137,13 @@ As for the evaluation of the segmentation, tracking results loaded via the plugi
 The assistant tab serves to facilitate the identification of errors within segmentation and tracking. It is divided into filters and segmentation adaptation.
 
 Recommended filter strategy:
-1. "Show noteworthy tracks" to discover tracks that are not close to the edge and emerge or disappear after the movie starts. Tracks must be gapless and resulting hits can be indications of errors.
+1. "Show noteworthy tracks" to discover tracks that are not close to the edge and emerge or disappear after the movie starts. Tracks must be gapless, and resulting hits can be indications of errors.
 2. "Show small cells" to double-check if there is any noise/pollution segmented.
 3. "Show untracked cells" to identify untracked segmented instances. 
 
 The other filters can provide additional support.
 
-The segmentation adaptation functions supplement useful functions with respect to segmentation. "Align segmentation IDs" adapts the label IDs with regard to the tracking IDs (the label IDs are then no longer arbitrary). "Relabel cells" ensures that the labels within a frame are unique => accidental errors during manual segmentation correction can thus be eliminated.
+The segmentation adaptation functions supplement useful functions with respect to segmentation. "Align segmentation IDs" adapts the label IDs with regard to the tracking IDs (the label IDs are then no longer arbitrary). "Relabel cells" ensures that the labels within a frame are unique, which helps eliminate accidental errors during manual segmentation correction.
 
 
 ## Hotkeys
