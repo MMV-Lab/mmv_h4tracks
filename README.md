@@ -1,5 +1,3 @@
-**We are actively working on the documentation**
-
 # MMV_H4Tracks
 
 [![License](https://img.shields.io/pypi/l/mmv_h4tracks.svg?color=green)](https://github.com/MMV-Lab/mmv_h4tracks/raw/main/LICENSE)
@@ -9,7 +7,9 @@
 [![codecov](https://codecov.io/gh/MMV-Lab/mmv_h4tracks/branch/main/graph/badge.svg)](https://codecov.io/gh/MMV-Lab/mmv_h4tracks)
 [![napari hub](https://img.shields.io/endpoint?url=https://api.napari-hub.org/shields/mmv_h4tracks)](https://napari-hub.org/plugins/mmv_h4tracks)
 
-A plugin to use with napari to segment and track cells via HumanInTheLoop(HITL)-approach.
+MMV_H4Tracks (Human4Tracks) is a plugin to use with napari for segmenting and tracking cells, which additionally enables user-friendly manual curation of segmentation and tracks and various options for analyzing and evaluating the results.
+
+We have tested MMV_H4Tracks intensively under Linux and Windows, for Mac there may be problems with parallel computing, which are on our roadmap and will be fixed in a future version.
 
 ----------------------------------
 
@@ -25,7 +25,7 @@ You can install `mmv_h4tracks` via [pip]:
     pip install mmv_h4tracks
 
 
-By default, CPU is used for segmentation computing. We did our best to optimize the CPU computing time, but still recommend GPU computing. For more detailed instructions on how to install GPU support look [here](https://github.com/MouseLand/cellpose#gpu-version-cuda-on-windows-or-linux).
+By default, CPU is used for segmentation computing. We did our best to optimize the CPU computing time, but still recommend GPU computing for better performance. For more detailed instructions on how to install GPU support look [here](https://github.com/MouseLand/cellpose#gpu-version-cuda-on-windows-or-linux).
 
 <!-- 
 
@@ -35,7 +35,7 @@ To install latest development version :
 
 
 ## Documentation
-This plugin was developed to analyze 2D cell migration. It includes the function of segmenting 2D videos using [Cellpose](https://github.com/MouseLand/cellpose) (both CPU and GPU implemented) and then tracking them using different automatic tracking algorithms, depending on the use case. For both segmentation and tracking, we have implemented user-friendly options for manual curation after automatic processing. In conjunction with napari's inherent functionalities, our plugin provides the capability to automatically track data and subsequently process the tracks in three different ways based on the reliability of the automated results. Firstly, any potentially existing incorrect tracks can be rectified in a user-friendly manner, thereby maximizing the evaluation of available information. Secondly, unreliable tracks can be selectively deleted, and thirdly, individual tracks can be manually or semi-automatically created for particularly challenging data, ensuring reliable results. In essence, our tool aims to offer a valuable supplement to the existing fully automated tracking tools and a user-friendly means to analyze videos where fully automated tracking has been previously challenging.
+This plugin was developed to analyze 2D cell migration. It includes the function of segmenting 2D videos using [Cellpose](https://github.com/MouseLand/cellpose) (both CPU and GPU implemented) and then tracking them using different automatic tracking algorithms, depending on the use case. For both segmentation and tracking, we have implemented user-friendly options for manual curation after automatic processing. In conjunction with napari's inherent functionalities, our plugin provides the capability to automatically track data and subsequently process the tracks in three different ways based on the reliability of the automated results. Firstly, any potentially existing incorrect tracks can be rectified in a user-friendly manner, thereby maximizing the evaluation of available information. Secondly, unreliable tracks can be selectively deleted, and thirdly, individual tracks can be manually or semi-automatically created for particularly challenging data, ensuring reliable results. In addition, the manually curated results can be compared with the automatic results in order to obtain a score for the quality of the automatic results. In essence, our tool aims to offer a valuable supplement to the existing fully automated tracking tools and a user-friendly means to analyze videos where fully automated tracking has been previously challenging.
 
 Common metrics such as speed, cell size, velocity, etc... can then be extracted, plotted and exported from the tracks obtained in this way. Furthermore, the plugin incorporates a functionality to assess the automatic tracking outcomes using a [quality score](https://doi.org/10.1371/journal.pone.0144959). Since automated tracking may not be consistently 100% accurate, presenting a quality measure alongside scientific discoveries becomes essential. This supplementary metric offers researchers valuable insights into the dependability of the produced tracking results, fostering informed data interpretation and decision-making in the analysis of cell migration.
 
@@ -58,7 +58,6 @@ The computation mode is used to set how many of the available CPU cores (40% or 
 
 For segmentation, we use the state of the art instance segmentation method Cellpose. We provide a model that we trained and has proven successful for our application ([see more information](https://doi.org/10.1038/s41467-023-43765-3)).
 
-(...)
 
 #### Automatic instance segmentation
 
@@ -78,7 +77,7 @@ In future versions, we plan to support fine-tuning of Cellpose models within the
 
 We provide different options to correct the automatic segmentation:
 
-- `Remove cell` - Click on a cell to remove it. Be aware that removing a cell cuts the track the cell is on.
+- `Remove cell` - Click on a cell to remove it. Be aware that removing a cell will split the track the cell belongs to, potentially affecting subsequent tracking.
 - `Next free ID` - Loads the next free label ID, then a false negative cell can be manually annotated using the paint mode.
 - `Select ID` - Click on a cell to load its ID, then this cell can be corrected manually using the paint mode.
 - `Merge cell` - Click on 2 different fragments of the same cell to harmonize their ID. Note: This has no effect on the annotation itself.
@@ -102,7 +101,7 @@ In contrast, to link cells, the corresponding cell in each frame must be clicked
 
 #### Visualize & filter tracks
 
-The displayed tracks can be filtered by entering specific track IDs. An empty entry and subsequent click on the "Filter" button resets the track layer and all existing tracks are displayed.
+The displayed tracks can be filtered by entering specific track IDs. Click on the "Show all tracks" button to display all tracks again.
 
 Individual tracks can be deleted using the delete function. Note: These are permanently deleted and cannot be restored without re-tracking. In addition, all displayed tracks can be deleted.
 
@@ -112,46 +111,61 @@ The plugin supports the calculation of various metrics, which can be divided int
 
 All these metrics can be exported to a .csv file. In addition, the tracks can be filtered with a movement minimum (in pixels) and a minimum track length (in frames). Note: All existing tracks are exported in any case, but their results are presented separately.
  
-The plugin offers the option of filtering the existing tracks according to the metrics. To do this, the corresponding metric can be selected in the plot area and a scatter plot of the data points will be generated using the plot button. Individual data points (/tracks) that are to be displayed can be circled with the mouse and all tracks that are not circled will be hidden. Note: No tracks are deleted in this process. Hiding tracks triggers the filter function in the tracking section. In combination with this, entire tracks can be deleted as described above.
+The plugin offers the option of filtering the existing tracks according to the metrics. To do this, the corresponding metric can be selected in the plot area and a scatter plot of the data points will be generated using the plot button. Individual data points (/tracks) that are to be displayed can be circled with the mouse and all tracks that are not circled will be hidden. Note: No tracks are deleted in this process. Hiding tracks triggers the filter function in the tracking section, the "Show all tracks" button can display all tracks again as described above.
 
-(...)
 
 ### Evaluation
 
 To be aware of the accuracy of your automatic tracking and segmentation results, we have implemented an option to evaluate your automatic results. Evaluation is always carried out against the latest results of automatic segmentation and automatic tracking or previously created results loaded via the plugin's own load function. We may implement the option to evaluate external segmentations in the future, but for now you can use save and load as a workaround.
 
-To evaluate results, at least 2 consecutive frames must first be corrected manually. The plugin saves the previously mentioned automatic or loaded results in the background, so no activation via button or similar is necessary before manual correction.
+To evaluate results, at least two consecutive frames must be manually corrected first. The plugin saves the previously mentioned automatic or loaded results in the background, so no activation via button or similar is necessary before manual correction.
 
-(...)
+The range of frames to be evaluated can be set, for which the results for segmentation and tracking can be calculated independently of each other. 
 
 
 #### Segmentation evaluation
 
-In order to evaluate the segmentation results, a segmentation must first be loaded either via the load function of the plugin (drag&drop via napari is not sufficient) or computed within the plugin. This can then be corrected manually. For IoU, Dice and F1 scores are then calculated for the frames specified by the user. These results are not exported automatically and must therefore be noted down by users themselves.
+In order to evaluate the segmentation results, a segmentation must first be loaded via the plugin's load function (drag & drop via napari is not sufficient) or computed within the plugin. This can then be corrected manually. For IoU, Dice and Average Precision 50 scores are then calculated for the frames specified by the user. These results are not exported automatically and must therefore be noted down by users themselves.
 
 #### Tracking evaluation
 
 As for the evaluation of the segmentation, tracking results loaded via the plugin or obtained within the plugin are required. At least 2 consecutive frames must be corrected manually so that a score can be calculated for the quality of the tracking results. More information can be found [here](https://doi.org/10.1371/journal.pone.0144959).
 
 
+### Assistant
+
+The assistant tab serves to facilitate the identification of errors within segmentation and tracking. It is divided into filters and segmentation adaptation.
+
+Recommended filter strategy:
+1. "Show noteworthy tracks" to discover tracks that are not close to the edge and emerge or disappear after the movie starts. Tracks must be gapless, and resulting hits can be indications of errors.
+2. "Show small cells" to double-check if there is any noise/pollution segmented.
+3. "Show untracked cells" to identify untracked segmented instances. 
+
+The other filters can provide additional support.
+
+The segmentation adaptation functions supplement useful functions with respect to segmentation. "Align segmentation IDs" adapts the label IDs with regard to the tracking IDs (the label IDs are then no longer arbitrary). "Relabel cells" ensures that the labels within a frame are unique, which helps eliminate accidental errors during manual segmentation correction.
+
+
 ## Hotkeys
 
 Here's an overview of the hotkeys. All of them can also be found in the corresponding tooltips. 
 
-- `E` - Load next free segmentation ID
-- `S` - Overlap-based single cell tracking 
-- `R` - Separate cells
-- `T` - Select cell ID 
+- `W` - Load next free segmentation ID
+- `G` - Overlap-based single cell tracking 
+- `H` - Separate cells
+- `Q` - Select cell ID 
 
 
 ## Development plan
 
 We will continue to develop the plugin and implement new features in the future. Some of our plans in arbitrary order:
 
+- Feedback (progress bar) for computationally intensive functions
 - Support of lineages
 - Support training custom Cellpose models within the plugin
 - Model optimization to further optimize segmentation computation
 - Support evaluation of external segmentations
+- Improve robustness of Mac computing
 - ...
 
 If you have a feature request, please [file an issue].
