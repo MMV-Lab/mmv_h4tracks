@@ -87,3 +87,6 @@ venv/
 
 # program log
 hitl4trk.log
+
+# Thumbnail cache
+Thumbs.db
