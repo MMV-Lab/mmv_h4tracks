@@ -10,6 +10,7 @@ from qtpy.QtWidgets import (
     QGridLayout,
     QCheckBox,
 )
+from qtpy.QtGui import QDoubleValidator
 
 import napari
 
@@ -55,7 +56,9 @@ class AssistantWindow(QWidget):
         size_tooltip = f"Threshold for the size change within a track (max/min).\nDefault is {DEFAULT_SIZE_THRESHOLD}"
         distance_tooltip = f"Threshold for the distance to the edge of the image at wich a track starts or ends.\nOnly applies when the track does not start in the first frame and does not end in the last frame.\nDefault is {DEFAULT_DISTANCE_THRESHOLD}"
         small_size_tooltip = f"Threshold for the size of a cell.\nOnly applies within a frame.\nDefault is {DEFAULT_SMALL_SIZE_THRESHOLD}"
-        foi_tooltip = "Frames of interest are the frames in which the outliers are marked."
+        foi_tooltip = (
+            "Frames of interest are the frames in which the outliers are marked."
+        )
 
         label_speed.setToolTip(speed_tooltip)
         label_size.setToolTip(size_tooltip)
@@ -68,7 +71,7 @@ class AssistantWindow(QWidget):
         btn_speed = QPushButton("Show speed outliers")
         btn_size = QPushButton("Show size outliers")
         btn_distance = QPushButton("Show noteworthy tracks")
-        btn_relabel = QPushButton("Relabel cells")
+        btn_relabel = QPushButton("Relabel all cells")
         btn_align_ids = QPushButton("Align segmentation IDs")
         btn_untracked = QPushButton("Show untracked cells")
         btn_tiny = QPushButton("Show small cells")
@@ -78,8 +81,12 @@ class AssistantWindow(QWidget):
         btn_size.setToolTip(size_tooltip)
         btn_distance.setToolTip(distance_tooltip)
         btn_tiny.setToolTip(small_size_tooltip)
-        btn_relabel.setToolTip("Make sure that each cell has a unique ID.\nThis can fix slip ups in the segmentation.")
-        btn_align_ids.setToolTip("Align the IDs of the tracks with the segmentation")
+        btn_relabel.setToolTip(
+            "Make sure that each cell has a unique ID.\nThis can fix slip ups in the segmentation.\nReplaces the existing label layer."
+        )
+        btn_align_ids.setToolTip(
+            "Align the IDs of the tracks with the segmentation.\nReplaces the existing label layer."
+        )
         btn_untracked.setToolTip("Show cells that are not tracked")
         # btn_delete_id.setToolTip("Delete a specific ID from the whole movie")
 
@@ -94,9 +101,14 @@ class AssistantWindow(QWidget):
 
         # LineEdits
         self.speed_lineedit = QLineEdit()
+        self.speed_lineedit.setValidator(QDoubleValidator(0, 1000, 2))
         self.size_lineedit = QLineEdit()
+        self.size_lineedit.setValidator(QDoubleValidator(0, 10000, 2))
         self.distance_lineedit = QLineEdit()
+        self.distance_lineedit.setValidator(QDoubleValidator(0, 1000, 2))
+
         self.tiny_lineedit = QLineEdit()
+        self.tiny_lineedit.setValidator(QDoubleValidator(0, 10000, 2))
         # self.delete_id_lineedit = QLineEdit()
 
         self.speed_lineedit.setPlaceholderText(str(DEFAULT_SPEED_THRESHOLD))
@@ -108,7 +120,9 @@ class AssistantWindow(QWidget):
         # Checkboxes
         self.checkbox_hidden = QCheckBox("Include hidden tracks")
         self.checkbox_hidden.setChecked(True)
-        self.checkbox_hidden.setToolTip("Include tracks that are hidden in evaluating the untracked cells")
+        self.checkbox_hidden.setToolTip(
+            "Include tracks that are hidden in evaluating the untracked cells"
+        )
 
         # Horizontal lines
         line = QWidget()
@@ -164,6 +178,7 @@ class AssistantWindow(QWidget):
         self.layout().addWidget(content)
 
     def show_speed_outliers_on_click(self):
+        self.label_frames.setText("")
         try:
             tracks_layer = grab_layer(
                 self.viewer, self.parent.combobox_tracks.currentText()
@@ -189,6 +204,7 @@ class AssistantWindow(QWidget):
         self.display_outliers(outliers)
 
     def show_size_outliers_on_click(self):
+        self.label_frames.setText("")
         try:
             label_layer = grab_layer(
                 self.viewer, self.parent.combobox_segmentation.currentText()
@@ -219,6 +235,7 @@ class AssistantWindow(QWidget):
         self.display_outliers(outliers)
 
     def show_abrupt_tracks_on_click(self):
+        self.label_frames.setText("")
         try:
             label_layer = grab_layer(
                 self.viewer, self.parent.combobox_segmentation.currentText()
@@ -272,6 +289,7 @@ class AssistantWindow(QWidget):
         self.parent.tracking_window.lineedit_filter.setText(outlier_text)
 
     def relabel_cells_on_click(self):
+        self.label_frames.setText("")
         try:
             label_layer = grab_layer(
                 self.viewer, self.parent.combobox_segmentation.currentText()
@@ -296,9 +314,12 @@ class AssistantWindow(QWidget):
                 new_frame += labeled_mask
             relabeled_data[frame] = new_frame
 
-        self.viewer.add_labels(relabeled_data, name="Relabeled cells")
+        label_layer.data = relabeled_data
+        # self.viewer.layers.remove(label_layer.name)
+        # self.viewer.add_labels(relabeled_data, name=label_layer.name)
 
     def align_ids_on_click(self):
+        self.label_frames.setText("")
         try:
             label_layer = grab_layer(
                 self.viewer, self.parent.combobox_segmentation.currentText()
@@ -320,7 +341,7 @@ class AssistantWindow(QWidget):
             tracks[:, 0] = tracks[:, 0] + 1
 
         new_segmentation[segmentation > 0] = segmentation[segmentation > 0] + np.max(
-            [np.max(segmentation), np.max(tracks[:,0])]
+            [np.max(segmentation), np.max(tracks[:, 0])]
         )
         # segmentation[segmentation > 0] = segmentation[segmentation > 0] + np.max(
         #     segmentation
@@ -336,7 +357,9 @@ class AssistantWindow(QWidget):
         #     )
 
         # self.viewer.add_labels(segmentation, name="Aligned cells")
-        self.viewer.add_labels(new_segmentation, name="Aligned cells")
+        label_layer.data = new_segmentation
+        # self.viewer.layers.remove(label_layer.name)
+        # self.viewer.add_labels(new_segmentation, name=label_layer.name)
 
     def adjust_segmentation_ids(self, segmentation, old_segmentation, tracks):
         for track in tracks:
@@ -346,8 +369,12 @@ class AssistantWindow(QWidget):
                 frame = old_segmentation[track[1]]
                 candidates = np.unique(
                     frame[
-                        np.maximum(centroid[1] - 20, 0) : np.minimum(centroid[1] + 20, frame.shape[0]),        # Candidates must be located within the edges.
-                        np.maximum(centroid[2] - 20, 0) : np.minimum(centroid[2] + 20, frame.shape[1]),
+                        np.maximum(centroid[1] - 20, 0) : np.minimum(
+                            centroid[1] + 20, frame.shape[0]
+                        ),  # Candidates must be located within the edges.
+                        np.maximum(centroid[2] - 20, 0) : np.minimum(
+                            centroid[2] + 20, frame.shape[1]
+                        ),
                     ]
                 )
                 cell_found = False
@@ -367,7 +394,7 @@ class AssistantWindow(QWidget):
                     segmentation[track[1]] == segmentation[track[1], track[2], track[3]]
                 ] = track[0]
         return segmentation
-    
+
     def show_untracked_cells_on_click(self):
         try:
             label_layer = grab_layer(
@@ -384,36 +411,47 @@ class AssistantWindow(QWidget):
         except ValueError:
             print("No tracks layer found")
             return
-        if self.checkbox_hidden.isChecked():
+        if (
+            self.checkbox_hidden.isChecked()
+            and self.parent.tracking_window.cached_tracks
+        ):
             tracks = self.parent.tracking_window.cached_tracks
         else:
             tracks = tracks_layer.data
         untracked = []
         for frame in tqdm(range(segmentation.shape[0])):
-        # for frame in range(segmentation.shape[0]):
-        #     starttime1 = time.time()
-        #     for id_ in set(np.unique(segmentation[frame])) - {0}:
-        #         centroid = center_of_mass(
-        #             label_layer.data[frame],
-        #             labels=label_layer.data[frame],
-        #             index=id_,
-        #         )
-        #         centroid = [
-        #             frame,
-        #             int(np.rint(centroid[0])),
-        #             int(np.rint(centroid[1])),
-        #         ]
-        #         if not any(
-        #             np.all(centroid == track[1:4]) for track in tracks
-        #         ):
-        #             untracked.append(centroid)
-        #     print(f"center_of_mass took {time.time() - starttime1} seconds")
-        #     print(untracked)
+            # for frame in range(segmentation.shape[0]):
+            #     starttime1 = time.time()
+            #     for id_ in set(np.unique(segmentation[frame])) - {0}:
+            #         centroid = center_of_mass(
+            #             label_layer.data[frame],
+            #             labels=label_layer.data[frame],
+            #             index=id_,
+            #         )
+            #         centroid = [
+            #             frame,
+            #             int(np.rint(centroid[0])),
+            #             int(np.rint(centroid[1])),
+            #         ]
+            #         if not any(
+            #             np.all(centroid == track[1:4]) for track in tracks
+            #         ):
+            #             untracked.append(centroid)
+            #     print(f"center_of_mass took {time.time() - starttime1} seconds")
+            #     print(untracked)
 
-            tracked_centroids = [[entry[2], entry[3]] for entry in tracks if entry[1] == frame]
-            tracked_ids = [segmentation[frame][coord[0], coord[1]] for coord in tracked_centroids]
+            tracked_centroids = [
+                [entry[2], entry[3]] for entry in tracks if entry[1] == frame
+            ]
+            tracked_ids = [
+                segmentation[frame][coord[0], coord[1]] for coord in tracked_centroids
+            ]
             untracked_ids = set(np.unique(segmentation[frame])) - set(tracked_ids) - {0}
-            centroids = center_of_mass(segmentation[frame], labels=segmentation[frame], index=list(untracked_ids))
+            centroids = center_of_mass(
+                segmentation[frame],
+                labels=segmentation[frame],
+                index=list(untracked_ids),
+            )
             for centroid in centroids:
                 centroid = [frame, int(np.rint(centroid[0])), int(np.rint(centroid[1]))]
                 untracked.append(centroid)
@@ -422,7 +460,7 @@ class AssistantWindow(QWidget):
             unique_frames = set([coord[0] for coord in untracked])
             self.label_frames.setText(", ".join(map(str, sorted(unique_frames))))
         else:
-            self.label_frames.setText()
+            self.label_frames.setText("")
         self.mark_outliers(untracked, "Untracked cells")
 
     def show_tiny_cells_on_click(self):
@@ -463,7 +501,7 @@ class AssistantWindow(QWidget):
             self.label_frames.setText(", ".join(map(str, sorted(unique_frames))))
         else:
             self.label_frames.setText("")
-        
+
         self.mark_outliers(tiny, "Tiny cells")
 
     # def delete_id_on_click(self):
@@ -541,48 +579,48 @@ class AssistantWindow(QWidget):
 
         return list(coordinates)
 
-    def get_cross(self, centroid):
-        try:
-            label_layer = grab_layer(
-                self.viewer, self.parent.combobox_segmentation.currentText()
-            )
-        except ValueError:
-            print("No segmentation layer found")
-            return
-        _, max_y, max_x = label_layer.data.shape
-        z, y, x = centroid
-        cross = []
-        for i in range(26):
-            if 0 < x - i < max_x and 0 < y - i < max_y:
-                cross.append([z, y - i, x - i])
-            if 0 < x + i < max_x and 0 < y - i < max_y:
-                cross.append([z, y - i, x + i])
-            if 0 < x - i < max_x and 0 < y + i < max_y:
-                cross.append([z, y + i, x - i])
-            if 0 < x + i < max_x and 0 < y + i < max_y:
-                cross.append([z, y + i, x + i])
+    # def get_cross(self, centroid):
+    #     try:
+    #         label_layer = grab_layer(
+    #             self.viewer, self.parent.combobox_segmentation.currentText()
+    #         )
+    #     except ValueError:
+    #         print("No segmentation layer found")
+    #         return
+    #     _, max_y, max_x = label_layer.data.shape
+    #     z, y, x = centroid
+    #     cross = []
+    #     for i in range(26):
+    #         if 0 < x - i < max_x and 0 < y - i < max_y:
+    #             cross.append([z, y - i, x - i])
+    #         if 0 < x + i < max_x and 0 < y - i < max_y:
+    #             cross.append([z, y - i, x + i])
+    #         if 0 < x - i < max_x and 0 < y + i < max_y:
+    #             cross.append([z, y + i, x - i])
+    #         if 0 < x + i < max_x and 0 < y + i < max_y:
+    #             cross.append([z, y + i, x + i])
 
-        return cross
+    #     return cross
 
-    def get_circle(self, centroid, R=10):
-        try:
-            label_layer = grab_layer(
-                self.viewer, self.parent.combobox_segmentation.currentText()
-            )
-        except ValueError:
-            print("No segmentation layer found")
-            return
+    # def get_circle(self, centroid, R=10):
+    #     try:
+    #         label_layer = grab_layer(
+    #             self.viewer, self.parent.combobox_segmentation.currentText()
+    #         )
+    #     except ValueError:
+    #         print("No segmentation layer found")
+    #         return
 
-        _, max_y, max_x = label_layer.data.shape
-        z, y, x = centroid
-        circle = []
-        R_squared = R * R
+    #     _, max_y, max_x = label_layer.data.shape
+    #     z, y, x = centroid
+    #     circle = []
+    #     R_squared = R * R
 
-        for dy in range(-R, R + 1):
-            dx_limit = int((R_squared - dy**2) ** 0.5)
-            for dx in range(-dx_limit, dx_limit + 1):
-                new_x, new_y = x + dx, y + dy
-                if 0 <= new_x < max_x and 0 <= new_y < max_y:
-                    circle.append([z, new_y, new_x])
+    #     for dy in range(-R, R + 1):
+    #         dx_limit = int((R_squared - dy**2) ** 0.5)
+    #         for dx in range(-dx_limit, dx_limit + 1):
+    #             new_x, new_y = x + dx, y + dy
+    #             if 0 <= new_x < max_x and 0 <= new_y < max_y:
+    #                 circle.append([z, new_y, new_x])
 
-        return circle
+    #     return circle

@@ -15,6 +15,8 @@ from qtpy.QtWidgets import (
     QTableWidgetItem,
     QAbstractScrollArea,
 )
+from qtpy.QtGui import QIntValidator
+from napari.qt.threading import thread_worker
 from scipy import ndimage
 from scipy.optimize import linear_sum_assignment
 from numba import jit
@@ -42,12 +44,14 @@ class EvaluationWindow(QWidget):
         evaluate_segmentation = QPushButton("Evaluate segmentation")
         evaluate_tracking = QPushButton("Evaluate tracking")
 
-        evaluate_segmentation.clicked.connect(self.evaluate_segmentation)
-        evaluate_tracking.clicked.connect(self.evaluate_tracking)
+        evaluate_segmentation.clicked.connect(self.start_evaluate_segmentation)
+        evaluate_tracking.clicked.connect(self.start_evaluate_tracking)
 
         # Lineedits
         self.evaluation_limit_lower = QLineEdit()
+        self.evaluation_limit_lower.setValidator(QIntValidator(0, 9999))
         self.evaluation_limit_upper = QLineEdit()
+        self.evaluation_limit_upper.setValidator(QIntValidator(0, 9999))
 
         # Table
         segmentation_table = QTableWidget(2, 3)
@@ -141,6 +145,25 @@ class EvaluationWindow(QWidget):
         layout.addWidget(content)
         self.setLayout(layout)
 
+    def update_limits(self, name):
+        """
+        Update the limits for acceptable values in the evaluation limits line edits.
+        """
+        try:
+            layer = grab_layer(self.viewer, name)
+        except ValueError:
+            return
+        self.evaluation_limit_lower.validator().setRange(0, layer.data.shape[0] - 1)
+        self.evaluation_limit_upper.validator().setRange(0, layer.data.shape[0] - 1)
+
+    def start_evaluate_segmentation(self):
+        """
+        Start the evaluate segmentation worker to keep UI responsive
+        """
+        worker = self.evaluate_segmentation()
+        worker.start()
+
+    @thread_worker
     def evaluate_segmentation(self):
         """
         Evaluate the segmentation results against the curated segmentation.
@@ -154,9 +177,11 @@ class EvaluationWindow(QWidget):
             return
         eval_seg = self.parent.initial_layers[0]
         if eval_seg is None:
-            notify("Segmentation and Tracks must be imported from zarr currently! (Drag and drop will be supported in the future). As a work-around for now export your data as zarr and import it.")
+            notify(
+                "Segmentation and Tracks must be imported from zarr currently! (Drag and drop will be supported in the future). As a work-around for now export your data as zarr and import it."
+            )
             return
-            
+
         self.evaluate_curated_segmentation(gt_seg, eval_seg)
         content = self.layout().itemAt(0).widget()
         if not self.segmentation_results.isVisible():
@@ -187,19 +212,25 @@ class EvaluationWindow(QWidget):
         ### Calculate the scores
         # IoU
         range_iou = self._calculate_iou(
-            gt_seg[lower_bound:upper_bound + 1], eval_seg[lower_bound:upper_bound + 1]
+            gt_seg[lower_bound : upper_bound + 1],
+            eval_seg[lower_bound : upper_bound + 1],
         )
         all_iou = self._calculate_iou(gt_seg, eval_seg)
 
         # DICE
         range_dice = self._calculate_dice(
-            gt_seg[lower_bound:upper_bound + 1], eval_seg[lower_bound:upper_bound + 1]
+            gt_seg[lower_bound : upper_bound + 1],
+            eval_seg[lower_bound : upper_bound + 1],
         )
         all_dice = self._calculate_dice(gt_seg, eval_seg)
 
         # Average Precision 50
-        range_ap50 = self._calculate_ap50(gt_seg[lower_bound:upper_bound + 1], eval_seg[lower_bound:upper_bound + 1])
-        all_ap50 = self._calculate_ap50(gt_seg, eval_seg)
+        range_ap50 = self._calculate_ap50(
+            gt_seg[lower_bound : upper_bound + 1],
+            eval_seg[lower_bound : upper_bound + 1],
+        )
+        # skip all_ap50 for now, takes too long
+        # all_ap50 = self._calculate_ap50(gt_seg, eval_seg)
 
         ### Update the table
         table = self.segmentation_results.layout().itemAt(1).widget()
@@ -211,7 +242,8 @@ class EvaluationWindow(QWidget):
         table.item(0, 2).setText(f"{round_half_up(range_ap50, 3):.3f}")
         table.item(1, 0).setText(f"{round_half_up(all_iou, 3):.3f}")
         table.item(1, 1).setText(f"{round_half_up(all_dice, 3):.3f}")
-        table.item(1, 2).setText(f"{round_half_up(all_ap50, 3):.3f}")
+        table.item(1, 2).setText("")
+        # table.item(1, 2).setText(f"{round_half_up(all_ap50, 3):.3f}")
 
     def _calculate_iou(self, gt_seg, eval_seg):
         """Calculate the IoU score for two given segmentations."""
@@ -225,7 +257,7 @@ class EvaluationWindow(QWidget):
         return (
             2 * intersection / (np.count_nonzero(gt_seg) + np.count_nonzero(eval_seg))
         )
-    
+
     def _calculate_ap50(self, gt_seg, eval_seg):
         """
         Heavily based on the average_precision function from the cellpose library
@@ -238,7 +270,7 @@ class EvaluationWindow(QWidget):
         tp = 0
         fp = 0
         fn = 0
-        
+
         n_true = np.array(list(map(len, map(np.unique, gt_seg)))) - 1
         n_pred = np.array(list(map(len, map(np.unique, eval_seg)))) - 1
 
@@ -257,7 +289,7 @@ class EvaluationWindow(QWidget):
         ap = tp / (tp + fp + fn)
 
         return ap
-        
+
     def _true_positive(self, iou):
         n_min = min(iou.shape[0], iou.shape[1])
         costs = -(iou >= 0.5).astype(float) - iou / (2 * n_min)
@@ -265,7 +297,7 @@ class EvaluationWindow(QWidget):
         match_ok = iou[true_ind, pred_ind] >= 0.5
         tp = np.sum(match_ok)
         return tp
-    
+
     def _intersection_over_union(self, gt_seg, eval_seg):
         @jit(nopython=True)
         def _label_overlap(x, y):
@@ -276,6 +308,7 @@ class EvaluationWindow(QWidget):
             for i in range(len(x)):
                 overlap[x[i], y[i]] += 1
             return overlap
+
         overlap = _label_overlap(gt_seg, eval_seg)
         n_pixels_pred = np.sum(overlap, axis=0, keepdims=True)
         n_pixels_gt = np.sum(overlap, axis=1, keepdims=True)
@@ -283,6 +316,14 @@ class EvaluationWindow(QWidget):
         iou[np.isnan(iou)] = 0.0
         return iou
 
+    def start_evaluate_tracking(self):
+        """
+        Start the evaluate tracking worker to keep UI responsive
+        """
+        worker = self.evaluate_tracking()
+        worker.start()
+
+    @thread_worker
     def evaluate_tracking(self):
         """Evaluate the tracking results against the curated tracks."""
         try:
@@ -292,15 +333,17 @@ class EvaluationWindow(QWidget):
             gt_seg = grab_layer(
                 self.viewer, self.parent.combobox_segmentation.currentText()
             ).data
-            
+
         except ValueError as exc:
             handle_exception(exc)
             return
-        
+
         eval_tracks = self.parent.initial_layers[1]
         eval_seg = self.parent.initial_layers[0]
         if eval_tracks is None or eval_seg is None:
-            notify("Segmentation and Tracks must be imported from zarr currently! (Drag and drop will be supported in the future). As a work-around for now export your data as zarr and import it.")
+            notify(
+                "Segmentation and Tracks must be imported from zarr currently! (Drag and drop will be supported in the future). As a work-around for now export your data as zarr and import it."
+            )
             return
         self.evaluate_curated_tracking(gt_tracks_layer, gt_seg, eval_tracks, eval_seg)
 
@@ -325,7 +368,7 @@ class EvaluationWindow(QWidget):
         if lower_bound < 0:
             lower_bound = 0
         if upper_bound >= gt_seg.shape[0]:
-            upper_bound = gt_seg.shape[0] -1
+            upper_bound = gt_seg.shape[0] - 1
 
         if lower_bound == upper_bound:
             return
@@ -335,11 +378,11 @@ class EvaluationWindow(QWidget):
         gt_tracks = gt_tracks_layer.data
         mask = (gt_tracks[:, 1] >= lower_bound) & (gt_tracks[:, 1] < upper_bound)
         gt_tracks = gt_tracks[mask]
-        gt_tracks[:,1] -= lower_bound
+        gt_tracks[:, 1] -= lower_bound
         gt_seg = gt_seg[lower_bound : upper_bound + 1]
         mask = (eval_tracks[:, 1] >= lower_bound) & (eval_tracks[:, 1] < upper_bound)
         eval_tracks = eval_tracks[mask]
-        eval_tracks[:,1] -= lower_bound
+        eval_tracks[:, 1] -= lower_bound
         eval_seg = eval_seg[lower_bound : upper_bound + 1]
         fp = self.get_segmentation_fault(gt_seg, eval_seg, get_false_positives)
         fn = self.get_segmentation_fault(gt_seg, eval_seg, get_false_negatives)

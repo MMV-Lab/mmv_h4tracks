@@ -90,3 +90,6 @@ hitl4trk.log
 
 # Thumbnail cache
 Thumbs.db
+
+# Backup files
+*.bak

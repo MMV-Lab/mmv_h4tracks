@@ -34,6 +34,7 @@ from napari.layers.tracks.tracks import Tracks
 from ._assistant import AssistantWindow
 from ._analysis import AnalysisWindow
 from ._evaluation import EvaluationWindow
+
 # from ._logger import notify
 from ._reader import open_dialog, napari_get_reader
 from ._segmentation import SegmentationWindow
@@ -125,6 +126,9 @@ class MMVH4TRACKS(QWidget):
         # Comboboxes
         self.combobox_image = QComboBox()
         self.combobox_segmentation = QComboBox()
+        self.combobox_segmentation.currentTextChanged.connect(
+            self.update_evaluation_limits
+        )
         self.combobox_tracks = QComboBox()
         self.layer_comboboxes = [
             self.combobox_image,
@@ -225,7 +229,7 @@ class MMVH4TRACKS(QWidget):
         self.setMinimumWidth(540)
         self.setMinimumHeight(900)
 
-        hotkeys = self.viewer.keymap.keys()
+        # hotkeys = self.viewer.keymap.keys()
         custom_binds = [
             ("W", self.hotkey_next_free),
             ("G", self.hotkey_overlap_single_tracking),
@@ -282,7 +286,13 @@ class MMVH4TRACKS(QWidget):
         """
         Hotkey for select ID
         """
-        self.segmentation_window._add_select_callback()        
+        self.segmentation_window._add_select_callback()
+
+    def update_evaluation_limits(self, event):
+        """
+        Updates the limits for the evaluation window
+        """
+        self.evaluation_window.update_limits(event)
 
     def add_entry_to_comboboxes(self, event):
         """
