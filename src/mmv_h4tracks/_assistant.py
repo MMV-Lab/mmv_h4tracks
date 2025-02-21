@@ -413,7 +413,7 @@ class AssistantWindow(QWidget):
             return
         if (
             self.checkbox_hidden.isChecked()
-            and self.parent.tracking_window.cached_tracks
+            and self.parent.tracking_window.cached_tracks is not None
         ):
             tracks = self.parent.tracking_window.cached_tracks
         else:

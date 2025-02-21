@@ -44,6 +44,12 @@ class EvaluationWindow(QWidget):
         evaluate_segmentation = QPushButton("Evaluate segmentation")
         evaluate_tracking = QPushButton("Evaluate tracking")
 
+        evaluate_segmentation_tooltip = "Evaluate segmentation in user-selected frames.\nThis may take some time, the results will be shown as soon as they are computed."
+        evaluate_tracking_tooltip = "Evaluate tracking in user-selected frames.\nThis may take some time, the results will be shown as soon as they are computed."
+
+        evaluate_segmentation.setToolTip(evaluate_segmentation_tooltip)
+        evaluate_tracking.setToolTip(evaluate_tracking_tooltip)
+
         evaluate_segmentation.clicked.connect(self.start_evaluate_segmentation)
         evaluate_tracking.clicked.connect(self.start_evaluate_tracking)
 
@@ -271,8 +277,8 @@ class EvaluationWindow(QWidget):
         fp = 0
         fn = 0
 
-        n_true = np.array(list(map(len, map(np.unique, gt_seg)))) - 1
-        n_pred = np.array(list(map(len, map(np.unique, eval_seg)))) - 1
+        n_true = np.array(list(map(len, map(np.unique, gt_seg))))
+        n_pred = np.array(list(map(len, map(np.unique, eval_seg))))
 
         if gt_seg.ndim == 2:
             gt_seg = [gt_seg]
@@ -280,6 +286,10 @@ class EvaluationWindow(QWidget):
 
         for n in range(len(gt_seg)):
             tp_n = 0
+            if 0 in gt_seg[n]:
+                n_true[n] -= 1
+            if 0 in eval_seg[n]:
+                n_pred[n] -= 1
             if n_pred[n] > 0:
                 iou = self._intersection_over_union(gt_seg[n], eval_seg[n])[1:, 1:]
                 tp_n += self._true_positive(iou)
