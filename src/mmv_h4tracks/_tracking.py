@@ -105,9 +105,10 @@ class TrackingWindow(QWidget):
 
         btn_delete_displayed_tracks = QPushButton("Delete all displayed tracks")
         btn_filter_tracks = QPushButton("Filter")
-        btn_filter_tracks.setToolTip(
-            "In order to display all tracks, clear the filter field and click here"
-        )
+        # btn_filter_tracks.setToolTip(
+        #     "In order to display all tracks, clear the filter field and click here"
+        # )
+        btn_show_all_tracks = QPushButton("Show all tracks")
         btn_delete_selected_tracks = QPushButton("Delete")
 
         btn_update_centroids = QPushButton("Update centroids")
@@ -122,6 +123,7 @@ class TrackingWindow(QWidget):
             self.delete_displayed_tracks_on_click
         )
         btn_filter_tracks.clicked.connect(self.filter_tracks_on_click)
+        btn_show_all_tracks.clicked.connect(self.show_all_tracks_on_click)
         btn_delete_selected_tracks.clicked.connect(self.delete_listed_tracks_on_click)
 
         # Line Edits
@@ -167,11 +169,12 @@ class TrackingWindow(QWidget):
         filter_tracks.layout().addWidget(label_display_ids, 2, 0)
         filter_tracks.layout().addWidget(self.lineedit_filter, 2, 1)
         filter_tracks.layout().addWidget(btn_filter_tracks, 2, 2)
-        filter_tracks.layout().addWidget(h_spacer_4, 3, 2, 1, -1)
-        filter_tracks.layout().addWidget(label_delete_specific_ids, 4, 0)
-        filter_tracks.layout().addWidget(self.lineedit_delete, 4, 1)
-        filter_tracks.layout().addWidget(btn_delete_selected_tracks, 4, 2)
-        filter_tracks.layout().addWidget(btn_delete_displayed_tracks, 5, 0, 1, -1)
+        filter_tracks.layout().addWidget(btn_show_all_tracks, 3, 0, 1, -1)
+        filter_tracks.layout().addWidget(h_spacer_4, 4, 2, 1, -1)
+        filter_tracks.layout().addWidget(label_delete_specific_ids, 5, 0)
+        filter_tracks.layout().addWidget(self.lineedit_delete, 5, 1)
+        filter_tracks.layout().addWidget(btn_delete_selected_tracks, 5, 2)
+        filter_tracks.layout().addWidget(btn_delete_displayed_tracks, 6, 0, 1, -1)
 
         ### Organize objects via widgets
         content = QWidget()
@@ -871,6 +874,14 @@ class TrackingWindow(QWidget):
             ", ".join([str(track_id) for track_id in tracks_to_display])
         )
         self.display_selected_tracks(tracks_to_display)
+
+    def show_all_tracks_on_click(self):
+        """
+        Displays all tracks
+        """
+        self.lineedit_filter.setText("")
+        if self.cached_tracks is not None:
+            self.display_cached_tracks()
 
     def delete_listed_tracks_on_click(self):
         """

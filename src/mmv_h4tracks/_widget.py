@@ -34,6 +34,7 @@ from napari.layers.tracks.tracks import Tracks
 from ._assistant import AssistantWindow
 from ._analysis import AnalysisWindow
 from ._evaluation import EvaluationWindow
+
 # from ._logger import notify
 from ._reader import open_dialog, napari_get_reader
 from ._segmentation import SegmentationWindow
@@ -125,6 +126,9 @@ class MMVH4TRACKS(QWidget):
         # Comboboxes
         self.combobox_image = QComboBox()
         self.combobox_segmentation = QComboBox()
+        self.combobox_segmentation.currentTextChanged.connect(
+            self.update_evaluation_limits
+        )
         self.combobox_tracks = QComboBox()
         self.layer_comboboxes = [
             self.combobox_image,
@@ -225,16 +229,20 @@ class MMVH4TRACKS(QWidget):
         self.setMinimumWidth(540)
         self.setMinimumHeight(900)
 
-        hotkeys = self.viewer.keymap.keys()
+        # hotkeys = self.viewer.keymap.keys()
         custom_binds = [
-            ("E", self.hotkey_next_free),
-            ("S", self.hotkey_overlap_single_tracking),
-            ("R", self.hotkey_separate),
-            ("T", self.hotkey_select_id),
+            ("W", self.hotkey_next_free),
+            ("G", self.hotkey_overlap_single_tracking),
+            ("H", self.hotkey_separate),
+            ("Q", self.hotkey_select_id),
         ]
         for custom_bind in custom_binds:
-            if not custom_bind[0] in hotkeys:
-                viewer.bind_key(*custom_bind)
+            old_bind = viewer.bind_key(*custom_bind, overwrite=True)
+            if old_bind is not None and old_bind.__name__ != custom_bind[1].__name__:
+                print(old_bind)
+                print(custom_bind)
+                viewer.bind_key(custom_bind[0], old_bind, overwrite=True)
+                raise ValueError(f"Hotkey {custom_bind[0]} already in use")
 
         self.viewer.layers.events.inserted.connect(self.add_entry_to_comboboxes)
         self.viewer.layers.events.removed.connect(self.remove_entry_from_comboboxes)
@@ -278,7 +286,13 @@ class MMVH4TRACKS(QWidget):
         """
         Hotkey for select ID
         """
-        self.segmentation_window._add_select_callback()        
+        self.segmentation_window._add_select_callback()
+
+    def update_evaluation_limits(self, event):
+        """
+        Updates the limits for the evaluation window
+        """
+        self.evaluation_window.update_limits(event)
 
     def add_entry_to_comboboxes(self, event):
         """
