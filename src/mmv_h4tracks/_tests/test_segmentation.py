@@ -39,3 +39,7 @@ def test_remove_cell_from_tracks(viewer_with_data, position):
         widget.segmentation_window.remove_cell_from_tracks(position)
     except Exception as e:
         pytest.fail(f"An error occurred: {e}")
+
+# TODO: test for track layer schema when
+# cell at start/end of track is removed
+# especially when track is only 2 cells long

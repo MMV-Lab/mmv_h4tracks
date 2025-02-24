@@ -17,7 +17,7 @@ from qtpy.QtWidgets import (
     QComboBox,
     QTabWidget,
     QSizePolicy,
-    QHBoxLayout,
+    # QHBoxLayout,
 )
 from qtpy.QtCore import Qt
 from qtpy.QtGui import QImage, QPixmap
@@ -31,9 +31,11 @@ from napari.layers.image.image import Image
 from napari.layers.labels.labels import Labels
 from napari.layers.tracks.tracks import Tracks
 
+from ._assistant import AssistantWindow
 from ._analysis import AnalysisWindow
 from ._evaluation import EvaluationWindow
-from ._logger import notify
+
+# from ._logger import notify
 from ._reader import open_dialog, napari_get_reader
 from ._segmentation import SegmentationWindow
 from ._tracking import TrackingWindow
@@ -124,6 +126,9 @@ class MMVH4TRACKS(QWidget):
         # Comboboxes
         self.combobox_image = QComboBox()
         self.combobox_segmentation = QComboBox()
+        self.combobox_segmentation.currentTextChanged.connect(
+            self.update_evaluation_limits
+        )
         self.combobox_tracks = QComboBox()
         self.layer_comboboxes = [
             self.combobox_image,
@@ -189,6 +194,8 @@ class MMVH4TRACKS(QWidget):
         tabwidget.addTab(self.analysis_window, "Analysis")
         self.evaluation_window = EvaluationWindow(self)
         tabwidget.addTab(self.evaluation_window, "Evaluation")
+        self.assistant_window = AssistantWindow(self)
+        tabwidget.addTab(self.assistant_window, "Assistant")
 
         ### Organize objects via widgets
         # widget: parent widget of all content
@@ -222,14 +229,20 @@ class MMVH4TRACKS(QWidget):
         self.setMinimumWidth(540)
         self.setMinimumHeight(900)
 
-        hotkeys = self.viewer.keymap.keys()
+        # hotkeys = self.viewer.keymap.keys()
         custom_binds = [
-            ("E", self.hotkey_next_free),
-            ("S", self.hotkey_overlap_single_tracking),
+            ("W", self.hotkey_next_free),
+            ("G", self.hotkey_overlap_single_tracking),
+            ("H", self.hotkey_separate),
+            ("Q", self.hotkey_select_id),
         ]
         for custom_bind in custom_binds:
-            if not custom_bind[0] in hotkeys:
-                viewer.bind_key(*custom_bind)
+            old_bind = viewer.bind_key(*custom_bind, overwrite=True)
+            if old_bind is not None and old_bind.__name__ != custom_bind[1].__name__:
+                print(old_bind)
+                print(custom_bind)
+                viewer.bind_key(custom_bind[0], old_bind, overwrite=True)
+                raise ValueError(f"Hotkey {custom_bind[0]} already in use")
 
         self.viewer.layers.events.inserted.connect(self.add_entry_to_comboboxes)
         self.viewer.layers.events.removed.connect(self.remove_entry_from_comboboxes)
@@ -262,6 +275,24 @@ class MMVH4TRACKS(QWidget):
         Hotkey for the overlap single tracking
         """
         self.tracking_window._add_auto_track_callback()
+
+    def hotkey_separate(self, _):
+        """
+        Hotkey for separate
+        """
+        self.segmentation_window._add_replace_callback()
+
+    def hotkey_select_id(self, _):
+        """
+        Hotkey for select ID
+        """
+        self.segmentation_window._add_select_callback()
+
+    def update_evaluation_limits(self, event):
+        """
+        Updates the limits for the evaluation window
+        """
+        self.evaluation_window.update_limits(event)
 
     def add_entry_to_comboboxes(self, event):
         """
@@ -460,6 +491,7 @@ class MMVH4TRACKS(QWidget):
             self.save_as()
             return
         QApplication.setOverrideCursor(Qt.WaitCursor)
+        self.tracking_window.update_all_centroids()
         raw_name = self.combobox_image.currentText()
         raw_layer = grab_layer(self.viewer, raw_name)
         segmentation_name = self.combobox_segmentation.currentText()
@@ -474,6 +506,7 @@ class MMVH4TRACKS(QWidget):
         Opens a dialog for the user to choose a zarr file to save to.
         Fails if not all layers exist
         """
+        self.tracking_window.update_all_centroids()
         raw_name = self.combobox_image.currentText()
         raw_layer = grab_layer(self.viewer, raw_name)
         raw_data = grab_layer(self.viewer, raw_name).data

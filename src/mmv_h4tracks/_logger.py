@@ -1,10 +1,4 @@
-import sys
-import time
-from pathlib import Path
-
-from qtpy.QtWidgets import QMessageBox, QInputDialog, QApplication
-from napari.qt.threading import thread_worker
-
+from qtpy.QtWidgets import QMessageBox, QApplication
 
 def notify(text):
     """
@@ -19,22 +13,6 @@ def notify(text):
     msg.setWindowTitle("napari")
     msg.setText(text)
     msg.exec()
-
-@thread_worker
-def notify_with_delay(text):
-    """
-    Shows a notification dialog after a brief delay
-
-    This is used to ensure the mouse release event is sent to the viewer
-    before the message is displayed
-
-    Parameters
-    ----------
-    text : str
-        The text displayed as the notification
-    """
-    time.sleep(0.2)
-    notify(text)
 
 def choice_dialog(text, choices):
     """

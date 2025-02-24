@@ -1,35 +1,37 @@
 import multiprocessing
-import os
-import platform
-from multiprocessing import Pool, Manager
-from threading import Event
+from multiprocessing import Pool
 import json
+import logging
 from pathlib import Path
+import time
 
-import napari
 import numpy as np
 from cellpose import models, core
 from napari.qt.threading import thread_worker
 from qtpy.QtCore import Qt
-from qtpy.QtWidgets import (
-    QApplication,
-    QComboBox,
-    QGridLayout,
-    QLabel,
-    QMessageBox,
-    QPushButton,
-    QSizePolicy,
-    QVBoxLayout,
-    QWidget,
-)
+from qtpy.QtWidgets import QApplication
 from scipy import ndimage, optimize, spatial
-import torch
 
 from mmv_h4tracks import APPROX_INF, MAX_MATCHING_DIST
 from ._grabber import grab_layer
-from ._logger import choice_dialog, notify, handle_exception
+from ._logger import handle_exception
 
 CUSTOM_MODEL_PREFIX = "custom_"
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+logger.propagate = False
+for handler in logger.handlers:
+    logger.removeHandler(handler)
+handler = logging.StreamHandler()
+handler.setFormatter(
+    logging.Formatter(
+        fmt="%(asctime)s - %(levelname)s - %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+)
+logger.addHandler(handler)
+logger.debug("logger initialized")
 
 
 def segment_slice_cpu(layer_slice, parameters):
@@ -46,12 +48,18 @@ def segment_slice_cpu(layer_slice, parameters):
     nd array
         the segmentation mask for the slice
     """
+    starttime = time.time()
+    logger.debug("Starting pid: " + str(multiprocessing.current_process().pid) + " for slice at " + str(starttime))
+    logger.info("Segmentation process started")
     model = models.CellposeModel(
         gpu=False, pretrained_model=parameters["model_path"]
     )
     eval_params = parameters
     eval_params.pop("model_path", None)
     mask, _, _ = model.eval(layer_slice, **eval_params)
+    endtime = time.time()
+    logger.debug("Ending pid: " + str(multiprocessing.current_process().pid) + " for slice at " + str(endtime) + " after " + str(endtime - starttime) + " seconds")
+    logger.info("Segmentation process finished with runtime: " + str(endtime - starttime))
     return mask
 
 
@@ -219,6 +227,7 @@ def _segment_image(widget, demo=False):
     widget, mask
         the widget and the segmentation mask
     """
+    logger.info("Starting segmentation")
     QApplication.setOverrideCursor(Qt.WaitCursor)
 
     viewer = widget.viewer
@@ -232,6 +241,7 @@ def _segment_image(widget, demo=False):
     parameters = _get_parameters(widget, selected_model)
 
     if core.use_gpu():
+        logger.info("Using GPU for segmentation")
         model = models.CellposeModel(
             gpu=True, pretrained_model=parameters.pop("model_path")
         )
@@ -241,8 +251,10 @@ def _segment_image(widget, demo=False):
             mask.append(layer_mask)
         mask = np.array(mask)
     else:
+        logger.info("Using CPU for segmentation")
         # set process limit
         AMOUNT_OF_PROCESSES = widget.parent.get_process_limit()
+        logger.debug("Amount of processes: " + str(AMOUNT_OF_PROCESSES))
 
         data_with_parameters = [(layer_slice, parameters) for layer_slice in data]
 
@@ -253,6 +265,7 @@ def _segment_image(widget, demo=False):
     if not demo:
         widget.parent.initial_layers[0] = mask
     QApplication.restoreOverrideCursor()
+    logger.info("Segmentation finished")
     return widget, mask
 
 
@@ -330,7 +343,6 @@ def _track_segmentation(widget):
     matches = _match_centroids_parallel(widget, extended_centroids)
 
     tracks = _process_matches(matches)
-
     QApplication.restoreOverrideCursor()
     return tracks
 
@@ -543,3 +555,107 @@ def _process_matches(matches):
         next_id += 1
 
     return tracks.astype(int)
+
+def remove_frame_from_track(tracks, track_entry):
+    """Handles the logic for removing a frame from a track.
+    Includes splitting the track if necessary."""
+    # get index, track id and frame of track entry
+    index = np.where(np.all(tracks == track_entry, axis=1))[0][0]
+    track_id, frame, _, _ = track_entry
+    indices_to_remove = [index]
+
+    # get all track entries with the same track id
+    track = tracks[tracks[:, 0] == track_id]
+    print(f"track: {track}")
+
+    # if entries with lower or higher frame exist:
+    # connection(s) must be removed
+    if np.any(track[:, 1] < frame) or np.any(track[:, 1] > frame):
+
+        # get the entries with lower and higher frame
+        lower_entries = track[track[:, 1] < frame]
+        lower_indices = np.where(np.any(np.all(tracks[:, None] == lower_entries, axis=2), axis=1))[0]
+        higher_entries = track[track[:, 1] > frame]
+        higher_indices = np.where(np.any(np.all(tracks[:, None] == higher_entries, axis=2), axis=1))[0]
+
+        # if only one entry with either lower or higher exists, find index
+        # and queue for removal
+        if len(lower_indices) == 1:
+            indices_to_remove.append(lower_indices[0])
+        if len(higher_indices) == 1:
+            indices_to_remove.append(higher_indices[0])
+    print(f"indices_to_remove: {indices_to_remove}")
+
+    # if more than the one entry needs to be removed no splitting
+    # is necessary
+    if len(indices_to_remove) < 2:
+        # get new track id
+        new_track_id = lowest_missing_int(tracks[:, 0])
+        # remove only the one entry, relabel the following frames
+        tracks[higher_indices, 0] = new_track_id
+        tracks = np.delete(tracks, indices_to_remove, axis=0)
+    else:
+        tracks = np.delete(tracks, indices_to_remove, axis=0)
+
+    return tracks
+
+def lowest_missing_int(arr):
+    num_set = set(arr)
+    i = 1
+    while i in num_set:
+        i += 1
+    return i
+
+def split_noncontinuous_tracks(tracks):
+    """Splits noncontinuous tracks into separate tracks."""
+    # get unique track ids
+    unique_track_ids = np.unique(tracks[:, 0])
+
+    # iterate through all unique track ids
+    for track_id in unique_track_ids:
+        # get all entries with the current track id
+        current_track = tracks[tracks[:, 0] == track_id]
+
+        # if the track is not continuous, split it
+        if not np.all(np.diff(current_track[:, 1]) == 1):
+            print(f"Splitting track {track_id}")
+            print(f"Current track: {current_track}")
+            # get the indices of the noncontinuous entries
+            jumped_indices = np.where(np.diff(current_track[:, 1]) != 1)[0] + 1
+            print(f"Jumped indices: {jumped_indices}")
+            # get lists of indices to update
+            # each list starts at the first entry and goes to the
+            # end of the track
+            indices_to_update = []
+            # TODO: indices are not assigned correctly
+            for index in jumped_indices:
+                index_in_tracks = np.where(np.all(tracks == current_track[index], axis=1))[0][0]
+                print(f"index_in_tracks: {index_in_tracks}")
+                indices_to_update.append(np.arange(len(current_track) - index) + index_in_tracks)
+            print(f"Indices to update: {indices_to_update}")
+            
+            for index_list in indices_to_update:
+                # get the new track id
+                new_track_id = lowest_missing_int(unique_track_ids)
+
+                # set the new track id for the split entries
+                tracks[index_list, 0] = new_track_id
+                unique_track_ids = np.unique(tracks[:, 0])
+
+    return tracks
+
+def remove_dot_tracks(tracks):
+    """Remove tracks that are only one frame long."""
+    # get unique track ids
+    unique_track_ids = np.unique(tracks[:, 0])
+
+    # iterate through all unique track ids
+    for track_id in unique_track_ids:
+        # get all entries with the current track id
+        current_track = tracks[tracks[:, 0] == track_id]
+
+        # if the track is only one frame long, remove it
+        if len(current_track) == 1:
+            tracks = np.delete(tracks, np.where(tracks[:, 0] == track_id), axis=0)
+
+    return tracks

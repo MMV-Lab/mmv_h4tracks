@@ -2,4 +2,65 @@
 requires = ["setuptools", "wheel"]
 build-backend = "setuptools.build_meta"
 
+[project]
+name = "mmv_h4tracks"
+version = "1.2.0"
+description = "Human in the loop 2d cell migration analysis"
+authors = [
+    { name = "Lennart Kowitz", email = "lennart.kowitz@isas.de" },
+    { name = "Justin Sonneck", email = "justin.sonneck@isas.de" },
+]
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.9"
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Science/Research",
+    "Framework :: napari",
+    "Topic :: Scientific/Engineering :: Image Processing",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Operating System :: OS Independent",
+    "License :: OSI Approved :: BSD License",
+]
+dependencies = [
+    "numpy",
+    "npe2",
+    "napari-plugin-engine>=0.1.4",
+    "napari",
+    "zarr",
+    "cellpose==2.1.0",
+    "matplotlib",
+    "aicsimageio",
+    "scipy>=1.11.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/MMV-Lab/mmv_h4tracks"
+"Bug Tracker" = "https://github.com/MMV-Lab/mmv_h4tracks/issues"
+Documentation = "https://github.com/MMV-Lab/mmv_h4tracks#README.md"
+"Source Code" = "https://github.com/MMV-Lab/mmv_h4tracks"
+"User Support" = "https://github.com/MMV-Lab/mmv_h4tracks/issues"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+mmv_h4tracks = [
+    "napari.yaml",
+    "custom_models.json",
+    "ressources/*.jpg",
+    "models/Neutrophil_granulocytes",
+    "models/custom_models/.gitkeep",
+]
+
+[project.entry-points."napari.manifest"]
+mmv_h4tracks = "mmv_h4tracks:napari.yaml"
 
