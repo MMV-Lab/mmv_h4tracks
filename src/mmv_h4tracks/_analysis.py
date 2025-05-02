@@ -25,7 +25,7 @@ from skimage import measure
 import math
 
 from ._grabber import grab_layer
-from ._logger import notify
+# from ._logger import notify
 from mmv_h4tracks._logger import handle_exception
 from ._selector import Selector
 from ._writer import save_csv
@@ -186,6 +186,7 @@ class AnalysisWindow(QWidget):
         """
         Selects or unselects all metrics, depending on the current state of the button
         """
+        self.parent.callback_handler.remove_callback_viewer()
         if self.btn_select_all.text() == "Select all":
             for checkbox in self.checkboxes:
                 checkbox.setCheckState(2)
@@ -487,6 +488,7 @@ class AnalysisWindow(QWidget):
         """
         Starts the worker to plot the selected metric
         """
+        self.parent.callback_handler.remove_callback_viewer()
         QApplication.setOverrideCursor(Qt.WaitCursor)
         worker = self._sort_plot_data(self.combobox_plots.currentText())
         worker.returned.connect(self._plot)
@@ -712,6 +714,7 @@ class AnalysisWindow(QWidget):
         """
         Starts the worker to export the selected metrics
         """
+        self.parent.callback_handler.remove_callback_viewer()
         selected_metrics = []
         for checkbox in self.checkboxes:
             if checkbox.checkState():

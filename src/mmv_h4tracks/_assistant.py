@@ -178,6 +178,7 @@ class AssistantWindow(QWidget):
         self.layout().addWidget(content)
 
     def show_speed_outliers_on_click(self):
+        self.parent.callback_handler.remove_callback_viewer()
         self.label_frames.setText("")
         try:
             tracks_layer = grab_layer(
@@ -204,6 +205,7 @@ class AssistantWindow(QWidget):
         self.display_outliers(outliers)
 
     def show_size_outliers_on_click(self):
+        self.parent.callback_handler.remove_callback_viewer()
         self.label_frames.setText("")
         try:
             label_layer = grab_layer(
@@ -235,6 +237,7 @@ class AssistantWindow(QWidget):
         self.display_outliers(outliers)
 
     def show_abrupt_tracks_on_click(self):
+        self.parent.callback_handler.remove_callback_viewer()
         self.label_frames.setText("")
         try:
             label_layer = grab_layer(
@@ -289,6 +292,7 @@ class AssistantWindow(QWidget):
         self.parent.tracking_window.lineedit_filter.setText(outlier_text)
 
     def relabel_cells_on_click(self):
+        self.parent.callback_handler.remove_callback_viewer()
         self.label_frames.setText("")
         try:
             label_layer = grab_layer(
@@ -319,6 +323,7 @@ class AssistantWindow(QWidget):
         # self.viewer.add_labels(relabeled_data, name=label_layer.name)
 
     def align_ids_on_click(self):
+        self.parent.callback_handler.remove_callback_viewer()
         self.label_frames.setText("")
         try:
             label_layer = grab_layer(
@@ -396,6 +401,7 @@ class AssistantWindow(QWidget):
         return segmentation
 
     def show_untracked_cells_on_click(self):
+        self.parent.callback_handler.remove_callback_viewer()
         try:
             label_layer = grab_layer(
                 self.viewer, self.parent.combobox_segmentation.currentText()
@@ -464,6 +470,7 @@ class AssistantWindow(QWidget):
         self.mark_outliers(untracked, "Untracked cells")
 
     def show_tiny_cells_on_click(self):
+        self.parent.callback_handler.remove_callback_viewer()
         try:
             label_layer = grab_layer(
                 self.viewer, self.parent.combobox_segmentation.currentText()

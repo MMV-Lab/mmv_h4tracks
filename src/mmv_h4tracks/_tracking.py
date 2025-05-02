@@ -59,7 +59,6 @@ class TrackingWindow(QWidget):
         except TypeError:
             self.setStyleSheet(napari.qt.get_stylesheet(theme_id="dark"))
 
-        self.cached_callback = []
         self.cached_tracks = None
         self.selected_cells = []
         # initial layers saved in self.parent.initial_layers
@@ -192,6 +191,7 @@ class TrackingWindow(QWidget):
         """
         Runs the coordinate based tracking
         """
+        self.parent.callback_handler.remove_callback_viewer()
 
         def on_yielded(value):
             """
@@ -215,13 +215,13 @@ class TrackingWindow(QWidget):
         """
         Runs the overlap based tracking
         """
+        self.parent.callback_handler.remove_callback_viewer()
         worker = self.worker_overlap_tracking()
         worker.returned.connect(self.process_new_tracks)
 
     @thread_worker(connect={"errored": handle_exception})
     def worker_overlap_tracking(self):
         QApplication.setOverrideCursor(Qt.WaitCursor)
-        self.restore_callbacks()
         self.reset_button_labels()
         label_layer = grab_layer(
             self.viewer, self.parent.combobox_segmentation.currentText()
@@ -289,6 +289,7 @@ class TrackingWindow(QWidget):
             """
             Callback for the overlap based tracking
             """
+            self.parent.callback_handler.remove_callback_viewer()
             if len(event.position) == 2:
                 raise ValueError("2D image can not be tracked.")
 
@@ -309,7 +310,7 @@ class TrackingWindow(QWidget):
             )
             worker.returned.connect(self.evaluate_proposed_track)
 
-        self.set_callback(overlap_tracking_callback)
+        self.parent.callback_handler.add_callback_viewer(overlap_tracking_callback)
         QApplication.setOverrideCursor(Qt.CrossCursor)
 
     @thread_worker(connect={"errored": handle_exception})
@@ -333,7 +334,6 @@ class TrackingWindow(QWidget):
         track: np.ndarray
             The proposed track
         """
-        self.restore_callbacks()
         start_slice = slice_id
         track = []
         MIN_OVERLAP = 0.7
@@ -508,8 +508,8 @@ class TrackingWindow(QWidget):
             except ValueError as exc:
                 handle_exception(exc)
                 self.reset_button_labels
-                self.restore_callbacks()
-                QApplication.restoreOverrideCursor()
+                self.parent.callback_handler.remove_callback_viewer()
+                # QApplication.restoreOverrideCursor()
                 return
             z = int(event.position[0])
             selected_id = label_layer.get_value(event.position)
@@ -542,12 +542,12 @@ class TrackingWindow(QWidget):
             self.reset_button_labels()
             self.selected_cells = []
             self.btn_insert_correspondence.setText(CONFIRM_TEXT)
-            self.set_callback(store_cell_for_link)
+            self.parent.callback_handler.add_callback_viewer(store_cell_for_link)
             QApplication.setOverrideCursor(Qt.CrossCursor)
         else:
             self.reset_button_labels()
-            self.restore_callbacks()
-            QApplication.restoreOverrideCursor()
+            self.parent.callback_handler.remove_callback_viewer()
+            # QApplication.restoreOverrideCursor()
             if self.cached_tracks is not None:
                 msg = QMessageBox()
                 msg.setWindowTitle("napari")
@@ -708,8 +708,8 @@ class TrackingWindow(QWidget):
             except ValueError as exc:
                 handle_exception(exc)
                 self.reset_button_labels
-                self.restore_callbacks()
-                QApplication.restoreOverrideCursor()
+                self.parent.callback_handler.remove_callback_viewer()
+                # QApplication.restoreOverrideCursor()
                 return
             z = int(event.position[0])
             selected_id = label_layer.get_value(event.position)
@@ -730,12 +730,12 @@ class TrackingWindow(QWidget):
             self.reset_button_labels()
             self.selected_cells = []
             self.btn_remove_correspondence.setText(CONFIRM_TEXT)
-            self.set_callback(store_cell_for_unlink)
+            self.parent.callback_handler.add_callback_viewer(store_cell_for_unlink)
             QApplication.setOverrideCursor(Qt.CrossCursor)
         else:
             self.reset_button_labels()
-            self.restore_callbacks()
-            QApplication.restoreOverrideCursor()
+            self.parent.callback_handler.remove_callback_viewer()
+            # QApplication.restoreOverrideCursor()
             self.unlink_stored_cells()
 
     def unlink_stored_cells(self):
@@ -846,6 +846,7 @@ class TrackingWindow(QWidget):
         """
         Filters the tracks layer to only display the selected tracks
         """
+        self.parent.callback_handler.remove_callback_viewer()
         input_text = self.lineedit_filter.text()
         if input_text == "":
             if self.cached_tracks is not None:
@@ -879,6 +880,7 @@ class TrackingWindow(QWidget):
         """
         Displays all tracks
         """
+        self.parent.callback_handler.remove_callback_viewer()
         self.lineedit_filter.setText("")
         if self.cached_tracks is not None:
             self.display_cached_tracks()
@@ -887,6 +889,7 @@ class TrackingWindow(QWidget):
         """
         Deletes the tracks specified in the lineedit_delete text field
         """
+        self.parent.callback_handler.remove_callback_viewer()
         input_text = self.lineedit_delete.text()
         if input_text == "":
             return
@@ -977,6 +980,7 @@ class TrackingWindow(QWidget):
         """
         Deletes all displayed tracks
         """
+        self.parent.callback_handler.remove_callback_viewer()
         tracks_layer = self.get_tracks_layer()
         if tracks_layer is None:
             notify("Please select a valid tracks layer.")
@@ -1192,30 +1196,30 @@ class TrackingWindow(QWidget):
         except ValueError:
             return None
 
-    def restore_callbacks(self):
-        if len(self.viewer.layers) == 0:
-            return
-        label_layer = grab_layer(
-            self.viewer, self.parent.combobox_segmentation.currentText()
-        )
-        if label_layer is None:
-            return
-        for layer in self.viewer.layers:
-            layer.mouse_drag_callbacks = []
-        label_layer.mouse_drag_callbacks = self.cached_callback
-        self.cached_callback = []
+    # def restore_callbacks(self):
+    #     if len(self.viewer.layers) == 0:
+    #         return
+    #     label_layer = grab_layer(
+    #         self.viewer, self.parent.combobox_segmentation.currentText()
+    #     )
+    #     if label_layer is None:
+    #         return
+    #     for layer in self.viewer.layers:
+    #         layer.mouse_drag_callbacks = []
+    #     label_layer.mouse_drag_callbacks = self.cached_callback
+    #     self.cached_callback = []
 
-    def set_callback(self, callback):
-        if len(self.viewer.layers) == 0:
-            return
-        label_layer = grab_layer(
-            self.viewer, self.parent.combobox_segmentation.currentText()
-        )
-        if label_layer is None:
-            return
-        self.cached_callback = label_layer.mouse_drag_callbacks
-        for layer in self.viewer.layers:
-            layer.mouse_drag_callbacks = [callback]
+    # def set_callback(self, callback):
+    #     if len(self.viewer.layers) == 0:
+    #         return
+    #     label_layer = grab_layer(
+    #         self.viewer, self.parent.combobox_segmentation.currentText()
+    #     )
+    #     if label_layer is None:
+    #         return
+    #     self.cached_callback = label_layer.mouse_drag_callbacks
+    #     for layer in self.viewer.layers:
+    #         layer.mouse_drag_callbacks = [callback]
 
     def reset_button_labels(self):
         """
