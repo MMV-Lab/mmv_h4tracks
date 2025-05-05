@@ -509,7 +509,6 @@ class TrackingWindow(QWidget):
                 handle_exception(exc)
                 self.reset_button_labels
                 self.parent.callback_handler.remove_callback_viewer()
-                # QApplication.restoreOverrideCursor()
                 return
             z = int(event.position[0])
             selected_id = label_layer.get_value(event.position)
@@ -547,7 +546,6 @@ class TrackingWindow(QWidget):
         else:
             self.reset_button_labels()
             self.parent.callback_handler.remove_callback_viewer()
-            # QApplication.restoreOverrideCursor()
             if self.cached_tracks is not None:
                 msg = QMessageBox()
                 msg.setWindowTitle("napari")
@@ -709,7 +707,6 @@ class TrackingWindow(QWidget):
                 handle_exception(exc)
                 self.reset_button_labels
                 self.parent.callback_handler.remove_callback_viewer()
-                # QApplication.restoreOverrideCursor()
                 return
             z = int(event.position[0])
             selected_id = label_layer.get_value(event.position)
@@ -735,7 +732,6 @@ class TrackingWindow(QWidget):
         else:
             self.reset_button_labels()
             self.parent.callback_handler.remove_callback_viewer()
-            # QApplication.restoreOverrideCursor()
             self.unlink_stored_cells()
 
     def unlink_stored_cells(self):
@@ -1143,7 +1139,6 @@ class TrackingWindow(QWidget):
         if tracks_layer is None:
             tracks_layer = self.viewer.add_tracks(cells, name="Tracks")
             return
-            # raise ValueError("Can't add to tracks if there are no tracks")
         tracks_objects = [tracks_layer.data]
         results_tracks = []
         if self.cached_tracks is not None:
@@ -1195,31 +1190,6 @@ class TrackingWindow(QWidget):
             return grab_layer(self.viewer, tracks_name)
         except ValueError:
             return None
-
-    # def restore_callbacks(self):
-    #     if len(self.viewer.layers) == 0:
-    #         return
-    #     label_layer = grab_layer(
-    #         self.viewer, self.parent.combobox_segmentation.currentText()
-    #     )
-    #     if label_layer is None:
-    #         return
-    #     for layer in self.viewer.layers:
-    #         layer.mouse_drag_callbacks = []
-    #     label_layer.mouse_drag_callbacks = self.cached_callback
-    #     self.cached_callback = []
-
-    # def set_callback(self, callback):
-    #     if len(self.viewer.layers) == 0:
-    #         return
-    #     label_layer = grab_layer(
-    #         self.viewer, self.parent.combobox_segmentation.currentText()
-    #     )
-    #     if label_layer is None:
-    #         return
-    #     self.cached_callback = label_layer.mouse_drag_callbacks
-    #     for layer in self.viewer.layers:
-    #         layer.mouse_drag_callbacks = [callback]
 
     def reset_button_labels(self):
         """
@@ -1275,7 +1245,6 @@ class TrackingWindow(QWidget):
         """
         Updates a single centroid to account for changed segmentation
         """
-        # starttime = time.time()
         label_layer = grab_layer(
             self.viewer, self.parent.combobox_segmentation.currentText()
         )
@@ -1310,9 +1279,6 @@ class TrackingWindow(QWidget):
             self.display_selected_tracks(filter_values)
         else:
             tracks_layer.data = tracks
-
-        # endtime = time.time()
-        # print(f"Updating single centroid took {endtime - starttime} seconds.")
 
 
 def func(label_data, start_slice, id):

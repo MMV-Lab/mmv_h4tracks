@@ -207,9 +207,7 @@ class SegmentationWindow(QWidget):
                 the event that triggered the callback"""
             self._remove_label(event)
             self.parent.callback_handler.remove_callback_viewer()
-            # self._update_callbacks()
 
-        # self._update_callbacks(_remove_label)
         self.parent.callback_handler.add_callback_viewer(_remove_label)
         QApplication.setOverrideCursor(Qt.CrossCursor)
 
@@ -359,9 +357,7 @@ class SegmentationWindow(QWidget):
             id = self._read_label_id(event)
             self._set_label_id(id)
             self.parent.callback_handler.remove_callback_viewer()
-            # self._update_callbacks()
 
-        # self._update_callbacks(_select_label)
         self.parent.callback_handler.add_callback_viewer(_select_label)
         QApplication.setOverrideCursor(Qt.CrossCursor)
 
@@ -434,9 +430,7 @@ class SegmentationWindow(QWidget):
             """
             self._replace_label(event)
             self.parent.callback_handler.remove_callback_viewer()
-            # self._update_callbacks()
 
-        # self._update_callbacks(_replace_label)
         self.parent.callback_handler.add_callback_viewer(_replace_label)
         QApplication.setOverrideCursor(Qt.CrossCursor)
         """for layer in self.viewer.layers:
@@ -482,13 +476,10 @@ class SegmentationWindow(QWidget):
                 """
                 self._replace_label(event, id)
                 self.parent.callback_handler.remove_callback_viewer()
-                # self._update_callbacks()
 
-            # self._update_callbacks(_assimilate_label)
             self.parent.callback_handler.add_callback_viewer(_assimilate_label)
             QApplication.setOverrideCursor(Qt.CrossCursor)
 
-        # self._update_callbacks(_pick_merge_label)
         self.parent.callback_handler.add_callback_viewer(_pick_merge_label)
         QApplication.setOverrideCursor(Qt.CrossCursor)
 
@@ -558,36 +549,3 @@ class SegmentationWindow(QWidget):
 
         return label_layer.data[tuple(position)]
         # return label_layer.data[z, y, x]
-
-    # def _update_callbacks(self, callback=None):
-    #     """
-    #     Updates the callbacks of all layers
-
-    #     Parameters
-    #     ----------
-    #     callback : function
-    #         the callback to add to the layers
-    #     """
-    #     if not len(self.viewer.layers):
-    #         return
-    #     label_layer = grab_layer(
-    #         self.viewer, self.parent.combobox_segmentation.currentText()
-    #     )
-    #     if callback:
-    #         current_callback = (
-    #             label_layer.mouse_drag_callbacks[0]
-    #             if label_layer.mouse_drag_callbacks
-    #             else None
-    #         )
-    #         if current_callback and current_callback.__qualname__ in ["draw", "pick"]:
-    #             self.cached_callback = current_callback
-    #         for layer in self.viewer.layers:
-    #             layer.mouse_drag_callbacks = [callback]
-    #     else:
-    #         for layer in self.viewer.layers:
-    #             if layer == label_layer and self.cached_callback:
-    #                 layer.mouse_drag_callbacks = [self.cached_callback]
-    #             else:
-    #                 layer.mouse_drag_callbacks = []
-    #         self.cached_callback = None
-    #     QApplication.restoreOverrideCursor()
