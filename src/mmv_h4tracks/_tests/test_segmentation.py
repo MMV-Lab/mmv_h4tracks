@@ -2,7 +2,7 @@
 
 import pytest
 from pathlib import Path
-from aicsimageio import AICSImage
+from bioio import BioImage
 import numpy as np
 
 from mmv_h4tracks import MMVH4TRACKS
@@ -18,11 +18,11 @@ def viewer_with_data(create_widget):
     widget = create_widget
     viewer = widget.viewer
     for file in list(Path(PATH / "images").iterdir()):
-        image = AICSImage(file).get_image_data("ZYX")
+        image = BioImage(file).get_image_data("ZYX")
         name = file.stem
         viewer.add_image(image, name=name)
     for file in list(Path(PATH / "segmentation").iterdir()):
-        image = AICSImage(file).get_image_data("ZYX")
+        image = BioImage(file).get_image_data("ZYX")
         name = file.stem
         viewer.add_labels(image, name=name)
     for file in list(Path(PATH / "tracks").iterdir()):

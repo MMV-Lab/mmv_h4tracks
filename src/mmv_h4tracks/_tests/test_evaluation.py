@@ -4,8 +4,8 @@ import time
 
 import numpy as np
 import pytest
-from aicsimageio import (
-    AICSImage,
+from bioio import (
+    BioImage,
 )
 
 from mmv_h4tracks import MMVH4TRACKS
@@ -38,7 +38,7 @@ def set_widget_up(create_widget):
     viewer = my_widget.viewer
     for file in list(Path(PATH / "segmentation").iterdir()):
         print(file.stem)
-        segmentation = AICSImage(file).get_image_data("ZYX")
+        segmentation = BioImage(file).get_image_data("ZYX")
         name = file.stem
         viewer.add_labels(segmentation, name=name)
     for file in list(Path(PATH / "tracks").iterdir()):

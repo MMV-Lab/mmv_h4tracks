@@ -5,7 +5,7 @@ from pathlib import Path
 
 import napari
 from unittest.mock import patch
-from aicsimageio import AICSImage
+from bioio import BioImage
 
 from mmv_h4tracks import _processing as processing, MMVH4TRACKS
 from mmv_h4tracks._segmentation import SegmentationWindow
@@ -21,7 +21,7 @@ pytestmark = pytest.mark.processing
 def widget_with_segmentation(create_widget):
     widget = create_widget
     path = Path(__file__).parent / "data" / "segmentation" / "test_seg.tiff"
-    segmentation = AICSImage(path).get_image_data("ZYX")
+    segmentation = BioImage(path).get_image_data("ZYX")
     widget.viewer.add_labels(segmentation, name="segmentation")
     return widget
 

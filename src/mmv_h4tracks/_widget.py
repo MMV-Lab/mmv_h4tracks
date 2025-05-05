@@ -41,6 +41,7 @@ from ._segmentation import SegmentationWindow
 from ._tracking import TrackingWindow
 from ._writer import save_zarr
 from ._grabber import grab_layer
+from ._utils import CallbackHandler
 
 
 class MMVH4TRACKS(QWidget):
@@ -81,6 +82,7 @@ class MMVH4TRACKS(QWidget):
         viewer = napari.current_viewer() if viewer is None else viewer
         self.viewer = viewer
         self.initial_layers = [None, None]
+        self.callback_handler = CallbackHandler(self)
 
         ### QObjects
 
@@ -404,6 +406,7 @@ class MMVH4TRACKS(QWidget):
         """
         Opens a dialog for the user to choose a zarr file to open. Checks if any layernames are blocked
         """
+        self.callback_handler.remove_callback_viewer()
         QApplication.setOverrideCursor(Qt.WaitCursor)
         filepath = open_dialog(self)
         file_reader = napari_get_reader(filepath)
@@ -490,6 +493,7 @@ class MMVH4TRACKS(QWidget):
         if not hasattr(self, "zarr"):
             self.save_as()
             return
+        self.callback_handler.remove_callback_viewer()
         QApplication.setOverrideCursor(Qt.WaitCursor)
         self.tracking_window.update_all_centroids()
         raw_name = self.combobox_image.currentText()
@@ -506,6 +510,7 @@ class MMVH4TRACKS(QWidget):
         Opens a dialog for the user to choose a zarr file to save to.
         Fails if not all layers exist
         """
+        self.callback_handler.remove_callback_viewer()
         self.tracking_window.update_all_centroids()
         raw_name = self.combobox_image.currentText()
         raw_layer = grab_layer(self.viewer, raw_name)
@@ -523,6 +528,7 @@ class MMVH4TRACKS(QWidget):
         if not path.endswith(".zarr"):
             path += ".zarr"
         if path == ".zarr":
+            QApplication.restoreOverrideCursor()
             return
         layers = [raw_layer, segmentation_layer, tracks_layer]
 
