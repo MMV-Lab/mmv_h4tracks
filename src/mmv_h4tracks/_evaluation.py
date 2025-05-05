@@ -166,6 +166,7 @@ class EvaluationWindow(QWidget):
         """
         Start the evaluate segmentation worker to keep UI responsive
         """
+        self.parent.callback_handler.remove_callback_viewer()
         worker = self.evaluate_segmentation()
         worker.start()
 
@@ -330,6 +331,7 @@ class EvaluationWindow(QWidget):
         """
         Start the evaluate tracking worker to keep UI responsive
         """
+        self.parent.callback_handler.remove_callback_viewer()
         worker = self.evaluate_tracking()
         worker.start()
 
