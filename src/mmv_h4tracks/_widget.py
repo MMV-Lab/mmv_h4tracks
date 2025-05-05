@@ -528,6 +528,7 @@ class MMVH4TRACKS(QWidget):
         if not path.endswith(".zarr"):
             path += ".zarr"
         if path == ".zarr":
+            QApplication.restoreOverrideCursor()
             return
         layers = [raw_layer, segmentation_layer, tracks_layer]
 

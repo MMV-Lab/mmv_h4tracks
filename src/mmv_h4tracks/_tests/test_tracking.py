@@ -3,7 +3,7 @@
 import pytest
 from unittest.mock import patch
 from pathlib import Path
-from aicsimageio import AICSImage
+from bioio import BioImage
 import numpy as np
 from scipy.ndimage import center_of_mass
 
@@ -23,7 +23,7 @@ def widget_with_seg_trk(create_widget):
     widget = create_widget
     viewer = widget.viewer
     seg_path = Path(PATH / "segmentation" / "test_seg.tiff")
-    seg = AICSImage(seg_path).get_image_data("ZYX")
+    seg = BioImage(seg_path).get_image_data("ZYX")
     viewer.add_labels(seg, name="test_seg")
     trk_path = Path(PATH / "tracks" / "test_trk.npy")
     trk = np.load(trk_path)
@@ -35,7 +35,7 @@ def widget_with_seg_trk_justin(create_widget):
     widget = create_widget
     viewer = widget.viewer
     seg_path = Path(PATH / "segmentation" / "GT.tif")
-    seg = AICSImage(seg_path).get_image_data("ZYX")
+    seg = BioImage(seg_path).get_image_data("ZYX")
     viewer.add_labels(seg, name="GT_seg")
     trk_path = Path(PATH / "tracks" / "GT_tracks.npy")
     trk = np.load(trk_path)
@@ -47,11 +47,11 @@ def viewer_with_data(create_widget):
     widget = create_widget
     viewer = widget.viewer
     for file in list(Path(PATH / "images").iterdir()):
-        image = AICSImage(file).get_image_data("ZYX")
+        image = BioImage(file).get_image_data("ZYX")
         name = file.stem
         viewer.add_image(image, name=name)
     for file in list(Path(PATH / "segmentation").iterdir()):
-        segmentation = AICSImage(file).get_image_data("ZYX")
+        segmentation = BioImage(file).get_image_data("ZYX")
         name = file.stem
         if name == "test_seg" or "test_seg_old":
             continue

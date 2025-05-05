@@ -541,11 +541,11 @@ class TrackingWindow(QWidget):
             self.reset_button_labels()
             self.selected_cells = []
             self.btn_insert_correspondence.setText(CONFIRM_TEXT)
-            self.parent.callback_handler.add_callback_viewer(store_cell_for_link)
+            self.parent.callback_handler.add_callback_viewer(store_cell_for_link, keep_tracking=True)
             QApplication.setOverrideCursor(Qt.CrossCursor)
         else:
             self.reset_button_labels()
-            self.parent.callback_handler.remove_callback_viewer()
+            self.parent.callback_handler.remove_callback_viewer(keep_tracking=True)
             if self.cached_tracks is not None:
                 msg = QMessageBox()
                 msg.setWindowTitle("napari")
@@ -727,11 +727,11 @@ class TrackingWindow(QWidget):
             self.reset_button_labels()
             self.selected_cells = []
             self.btn_remove_correspondence.setText(CONFIRM_TEXT)
-            self.parent.callback_handler.add_callback_viewer(store_cell_for_unlink)
+            self.parent.callback_handler.add_callback_viewer(store_cell_for_unlink, keep_tracking=True)
             QApplication.setOverrideCursor(Qt.CrossCursor)
         else:
             self.reset_button_labels()
-            self.parent.callback_handler.remove_callback_viewer()
+            self.parent.callback_handler.remove_callback_viewer(keep_tracking=True)
             self.unlink_stored_cells()
 
     def unlink_stored_cells(self):
@@ -1202,6 +1202,7 @@ class TrackingWindow(QWidget):
         """
         Updates all centroids to account for changed segmentation
         """
+        self.parent.callback_handler.remove_callback_viewer()
         label_layer = grab_layer(
             self.viewer, self.parent.combobox_segmentation.currentText()
         )
