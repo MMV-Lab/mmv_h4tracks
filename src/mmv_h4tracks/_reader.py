@@ -52,12 +52,17 @@ def napari_get_reader(path):
         path = path[0]
         print(f"Selected {path} as path from list")
 
-    # if we know we cannot read the file, we immediately return None.
-    if not path.endswith(".zarr"):
-        return None
+    # if we can read the file, return the reader function
+    if path.endswith(".zarr"):
+        return zarr_reader
+    elif path.endswith(".ome.tiff") or path.endswith(".ome.tif"):
+        return ome_tiff_reader
 
-    # otherwise we return the *function* that can read ``path``.
-    return zarr_reader
+    # otherwise return None
+    return None
+
+def ome_tiff_reader(filename):
+    pass
 
 
 def zarr_reader(filename):
