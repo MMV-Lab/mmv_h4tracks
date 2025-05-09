@@ -2,8 +2,6 @@ import csv
 import locale
 
 import numpy as np
-import zarr
-import pandas as pd
 from qtpy.QtWidgets import QFileDialog, QMessageBox, QApplication
 
 from ._logger import choice_dialog, notify
@@ -38,7 +36,7 @@ def save_dialog(parent, filetype="*.zarr", directory=""):
     return filepath
 
 
-def save_zarr( zarr_file, layers, cached_tracks):
+def save_zarr(zarr_file, layers, cached_tracks):
     """
     Saves the (changed) layers to a zarr file. Fails if required layers are missing
 
@@ -53,8 +51,7 @@ def save_zarr( zarr_file, layers, cached_tracks):
     """
 
     response = 0
-    if not cached_tracks is None:
-    # if not np.array_equal(layers[2].data, cached_tracks):
+    if cached_tracks is not None:
         response = choice_dialog(
             (
                 "It looks like you have selected only some of the tracks from your tracks layer. "
@@ -72,10 +69,8 @@ def save_zarr( zarr_file, layers, cached_tracks):
     tracks = layers[2].data
     if response == 1:
         tracks = cached_tracks
-    # if response == 0:
-    #     tracks = layers[2]
 
-    if not "raw_data" in zarr_file:
+    if "raw_data" not in zarr_file:
         zarr_file.create_dataset(
             "raw_data",
             shape=layers[0].data.shape,
@@ -118,10 +113,11 @@ def save_csv(file, data):
     else:
         delimiter = ","
     csvfile = open(file[0], "w", newline="")
-    writer = csv.writer(csvfile, delimiter = delimiter)
+    writer = csv.writer(csvfile, delimiter=delimiter)
     [writer.writerow(row) for row in data]
     csvfile.close()
     print("CSV file has been saved.")
+
 
 def convert_np64_to_string(sublist):
     converted_sublist = []

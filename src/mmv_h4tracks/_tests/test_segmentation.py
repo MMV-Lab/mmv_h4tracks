@@ -9,9 +9,11 @@ from mmv_h4tracks import MMVH4TRACKS
 
 PATH = Path(__file__).parent / "data"
 
+
 @pytest.fixture
 def create_widget(make_napari_viewer):
     yield MMVH4TRACKS(make_napari_viewer())
+
 
 @pytest.fixture
 def viewer_with_data(create_widget):
@@ -31,6 +33,7 @@ def viewer_with_data(create_widget):
         viewer.add_tracks(tracks, name=name)
     yield widget
 
+
 @pytest.mark.integration
 @pytest.mark.parametrize("position", [(0, 0, 0), (0, 65, 72), (1, 63, 72)])
 def test_remove_cell_from_tracks(viewer_with_data, position):
@@ -39,6 +42,7 @@ def test_remove_cell_from_tracks(viewer_with_data, position):
         widget.segmentation_window.remove_cell_from_tracks(position)
     except Exception as e:
         pytest.fail(f"An error occurred: {e}")
+
 
 # TODO: test for track layer schema when
 # cell at start/end of track is removed

@@ -21,10 +21,10 @@ from scipy import ndimage
 from scipy.optimize import linear_sum_assignment
 from numba import jit
 
+from ._constants import IOU_THRESHOLD
 from ._logger import notify
 from ._grabber import grab_layer
 from mmv_h4tracks._logger import handle_exception
-from mmv_h4tracks import IOU_THRESHOLD
 
 
 class EvaluationWindow(QWidget):
