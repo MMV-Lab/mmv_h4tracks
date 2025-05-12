@@ -1,4 +1,5 @@
 """Module providing tests for the main widget"""
+
 import numpy as np
 import pytest
 
@@ -9,9 +10,11 @@ AMOUNT_OF_COMBOBOXES = 3
 
 # make_napari_viewer is a pytest fixture that returns a napari viewer object
 
+
 @pytest.fixture
 def create_widget(make_napari_viewer):
     yield MMVH4TRACKS(make_napari_viewer())
+
 
 @pytest.fixture
 def viewer_with_widget(create_widget):
@@ -62,6 +65,7 @@ def add_layers(viewer, amount, names=None):
             np.random.randint(5, size=(20, 4), dtype=int), name=names[amount * 2 + i]
         )
 
+
 @pytest.mark.widget
 @pytest.mark.system
 def test_widget_creation(create_widget):
@@ -75,6 +79,7 @@ def test_widget_creation(create_widget):
         Instance of the main widget
     """
     assert isinstance(create_widget, MMVH4TRACKS)
+
 
 @pytest.mark.combobox
 @pytest.mark.unit

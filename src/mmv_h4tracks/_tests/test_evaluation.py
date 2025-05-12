@@ -1,6 +1,6 @@
 """Module providing tests for the analysis widget"""
+
 from pathlib import Path
-import time
 
 import numpy as np
 import pytest
@@ -12,6 +12,7 @@ from mmv_h4tracks import MMVH4TRACKS
 
 # this tests if the analysis returns the proper values
 PATH = Path(__file__).parent / "data"
+
 
 @pytest.fixture
 def create_widget(make_napari_viewer):
@@ -368,7 +369,9 @@ def test_deleted_edges(set_widget_up, layername, expected_value):
     "layername_seg, layername_tracks, expected_value",
     [("false positive", "added_edge", 7)],
 )
-@pytest.mark.xfail(reason="This tests for a result without waiting for the thread to finish")
+@pytest.mark.xfail(
+    reason="This tests for a result without waiting for the thread to finish"
+)
 def test_fault_value(set_widget_up, layername_seg, layername_tracks, expected_value):
     """
     Test if fault value for tracking evaluation is calculated correctly

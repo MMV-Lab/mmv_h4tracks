@@ -17,7 +17,7 @@ from qtpy.QtWidgets import (
     QComboBox,
     QTabWidget,
     QSizePolicy,
-    # QHBoxLayout,
+    QProgressBar,
 )
 from qtpy.QtCore import Qt
 from qtpy.QtGui import QImage, QPixmap
@@ -35,7 +35,6 @@ from ._assistant import AssistantWindow
 from ._analysis import AnalysisWindow
 from ._evaluation import EvaluationWindow
 
-# from ._logger import notify
 from ._reader import open_dialog, napari_get_reader
 from ._segmentation import SegmentationWindow
 from ._tracking import TrackingWindow
@@ -138,6 +137,13 @@ class MMVH4TRACKS(QWidget):
             self.combobox_tracks,
         ]
 
+        # Progress bar
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setTextVisible(True)
+        self.progress_bar.setFormat("Dummy Loading %p%")
+        self.progress_bar.setMaximum(0)
+        # self.progress_bar.setValue(42)
+
         # Horizontal lines
         line = QWidget()
         line.setFixedHeight(4)
@@ -219,6 +225,7 @@ class MMVH4TRACKS(QWidget):
         widget.layout().addWidget(line2, 9, 0, 1, -1)
         widget.layout().addWidget(h_spacer_5, 10, 0, 1, -1)
         widget.layout().addWidget(tabwidget, 11, 0, 1, -1)
+        widget.layout().addWidget(self.progress_bar, 12, 0, 1, -1)
 
         # Scrollarea allows content to be larger than the assigned space (small monitor)
         scroll_area = QScrollArea()
@@ -231,7 +238,6 @@ class MMVH4TRACKS(QWidget):
         self.setMinimumWidth(540)
         self.setMinimumHeight(900)
 
-        # hotkeys = self.viewer.keymap.keys()
         custom_binds = [
             ("W", self.hotkey_next_free),
             ("G", self.hotkey_overlap_single_tracking),
@@ -514,13 +520,10 @@ class MMVH4TRACKS(QWidget):
         self.tracking_window.update_all_centroids()
         raw_name = self.combobox_image.currentText()
         raw_layer = grab_layer(self.viewer, raw_name)
-        raw_data = grab_layer(self.viewer, raw_name).data
         segmentation_name = self.combobox_segmentation.currentText()
         segmentation_layer = grab_layer(self.viewer, segmentation_name)
-        segmentation_data = grab_layer(self.viewer, segmentation_name).data
         tracks_name = self.combobox_tracks.currentText()
         tracks_layer = grab_layer(self.viewer, tracks_name)
-        track_data = grab_layer(self.viewer, tracks_name).data
 
         dialog = QFileDialog()
         QApplication.setOverrideCursor(Qt.WaitCursor)
@@ -548,3 +551,41 @@ class MMVH4TRACKS(QWidget):
             return max(1, int(multiprocessing.cpu_count() * 0.4))
         else:
             return max(1, int(multiprocessing.cpu_count() * 0.8))
+
+    def set_progress_range(self, min_: int, max_: int):
+        """
+        Sets the range of the progress bar
+
+        Parameters
+        ----------
+        min : int
+            The minimum value of the progress bar
+        max : int
+            The maximum value of the progress bar
+        """
+        self.progress_bar.setMinimum(min_)
+        self.progress_bar.setMaximum(max_)
+        self.progress_bar.setValue(min_)
+
+    def set_progress_value(self, value: int):
+        """
+        Sets the value of the progress bar
+
+        Parameters
+        ----------
+        value : int
+            The value of the progress bar
+        """
+        self.progress_bar.setValue(value)
+
+    def set_progress_text(self, text: str):
+        """
+        Sets the text of the progress bar
+
+        Parameters
+        ----------
+        text : str
+            The text of the progress bar
+        """
+        self.progress_bar.setFormat(text + " %p%")
+        self.progress_bar.setTextVisible(True)

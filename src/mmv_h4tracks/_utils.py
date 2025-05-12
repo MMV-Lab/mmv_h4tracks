@@ -5,18 +5,19 @@ Utility functions for handling callbacks in napari layers.
 from __future__ import annotations
 from typing import TYPE_CHECKING
 
-from PyQt5.QtWidgets import QApplication
+from qtpy.QtWidgets import QApplication
 from napari.layers import Labels
 
-from ._tracking import CONFIRM_TEXT
 if TYPE_CHECKING:
-    from typing import  Callable
-    from PyQt5.QtWidgets import QWidget
+    from typing import Callable
+    from qtpy.QtWidgets import QWidget
     from napari.viewer import Viewer
     from napari.layers import Layer
 
+
 class CallbackHandler:
     """Handles the addition and removal of custom callbacks for napari layers."""
+
     widget: QWidget
     viewer: Viewer
     _added_callback: Callable | None = None
@@ -48,15 +49,16 @@ class CallbackHandler:
                 # Restore original layer mode
                 # Mode needs to be changed for callbacks to work properly
                 if self._cached_layer_mode is not None:
-                    layer.mode = "paint" # Temporarily set to "paint" mode
+                    layer.mode = "paint"  # Temporarily set to "paint" mode
                     layer.mode = self._cached_layer_mode
-                    layer.refresh() # Not sure if refresh is needed
+                    layer.refresh()  # Not sure if refresh is needed
                     self._cached_layer_mode = None
 
     def remove_callback_viewer(self, keep_tracking: bool = False) -> None:
         """Removes the custom callback from all layers in the viewer.
         This should be called by all buttons that don't add a callback
-        Should also be called when exiting callback handling, unless new callback is added."""
+        Should also be called when exiting callback handling, unless new callback is added.
+        """
         for layer in self.viewer.layers:
             self._remove_callback(layer)
         self._added_callback = None
@@ -79,9 +81,11 @@ class CallbackHandler:
             # Set the layer mode to "pan_zoom" to allow for callback functionality
             # Here it does not matter if we are already in "pan_zoom" mode
             layer.mode = "pan_zoom"
-            layer.refresh() # Not sure if refresh is needed
+            layer.refresh()  # Not sure if refresh is needed
 
-    def add_callback_viewer(self, callback: Callable, keep_tracking: bool = False) -> None:  
+    def add_callback_viewer(
+        self, callback: Callable, keep_tracking: bool = False
+    ) -> None:
         """Adds a callback to all layers of the viewer.
         This should be called by all buttons that add a callback"""
         self.remove_callback_viewer(keep_tracking)

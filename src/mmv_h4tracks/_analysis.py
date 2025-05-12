@@ -25,7 +25,7 @@ from skimage import measure
 import math
 
 from ._grabber import grab_layer
-# from ._logger import notify
+
 from mmv_h4tracks._logger import handle_exception
 from ._selector import Selector
 from ._writer import save_csv
@@ -210,6 +210,7 @@ class AnalysisWindow(QWidget):
         nd array
             (N,4) shape array, which contains the ID, average speed, standard deviation of speed and max speed
         """
+        speeds = np.array([])
         for unique_id in np.unique(tracks[:, 0]):
             track = np.delete(tracks, np.where(tracks[:, 0] != unique_id), 0)
             accumulated_distance = []
@@ -222,9 +223,11 @@ class AnalysisWindow(QWidget):
                 max_speed = max(max_speed, distance)
             average = np.around(np.average(accumulated_distance), 3)
             std_deviation = np.around(np.std(accumulated_distance), 3)
-            try:
-                speeds = np.append(speeds, [[unique_id, average, std_deviation, max_speed]], 0)
-            except UnboundLocalError:
+            if speeds.shape[0] > 0:
+                speeds = np.append(
+                    speeds, [[unique_id, average, std_deviation, max_speed]], 0
+                )
+            else:
                 speeds = np.array([[unique_id, average, std_deviation, max_speed]])
         return speeds
 
@@ -270,6 +273,7 @@ class AnalysisWindow(QWidget):
         sizes: nd array
             (N,3) shape array, which contains the ID, average speed and standard deviation of speed
         """
+        retval = np.array([])
         for unique_id in np.unique(tracks[:, 0]):
             track = np.delete(tracks, np.where(tracks[:, 0] != unique_id), 0)
             x = track[-1, 3] - track[0, 3]
@@ -288,9 +292,9 @@ class AnalysisWindow(QWidget):
             if direction >= 360:
                 direction -= 360
             direction = np.around(direction, 3)
-            try:
+            if retval.shape[0] > 0:
                 retval = np.append(retval, [[unique_id, x, y, direction]], 0)
-            except UnboundLocalError:
+            else:
                 retval = np.array([[unique_id, x, y, direction]])
         return retval
 
@@ -308,16 +312,17 @@ class AnalysisWindow(QWidget):
         euclidean_distances: nd array
             (N,3) shape array, which contains the ID, average euclidean distance and track length
         """
+        euclidean_distances = np.array([])
         for id in np.unique(tracks[:, 0]):
             track = np.delete(tracks, np.where(tracks[:, 0] != id), 0)
             x = track[-1, 3] - track[0, 3]
             y = track[0, 2] - track[-1, 2]
             euclidean_distance = np.around(np.sqrt(np.square(x) + np.square(y)), 3)
-            try:
+            if euclidean_distances.shape[0] > 0:
                 euclidean_distances = np.append(
                     euclidean_distances, [[id, euclidean_distance, len(track)]], 0
                 )
-            except UnboundLocalError:
+            else:
                 euclidean_distances = np.array([[id, euclidean_distance, len(track)]])
         return euclidean_distances
 
@@ -335,6 +340,7 @@ class AnalysisWindow(QWidget):
         velocities: nd array
             (N,3) shape array, which contains the ID, velocity and ID again
         """
+        directed_speeds = np.array([])
         euclidean_distances = self._calculate_euclidean_distance(tracks)
         for unique_id in np.unique(tracks[:, 0]):
             euclidean_distance = np.delete(
@@ -342,11 +348,11 @@ class AnalysisWindow(QWidget):
             )
             track = np.delete(tracks, np.where(tracks[:, 0] != unique_id), 0)
             directed_speed = np.around(euclidean_distance[0, 1] / len(track), 3)
-            try:
+            if directed_speeds.shape[0] > 0:
                 directed_speeds = np.append(
                     directed_speeds, [[unique_id, directed_speed, unique_id]], 0
                 )
-            except UnboundLocalError:
+            else:
                 directed_speeds = np.array([[unique_id, directed_speed, unique_id]])
         return directed_speeds
 
@@ -364,6 +370,7 @@ class AnalysisWindow(QWidget):
         accumulated_distances: nd array
             (N,3) shape array, which contains the ID, average accumulated distance and track length
         """
+        accumulated_distances = np.array([])
         for unique_id in np.unique(tracks[:, 0]):
             track = np.delete(tracks, np.where(tracks[:, 0] != unique_id), 0)
             steps = []
@@ -374,13 +381,13 @@ class AnalysisWindow(QWidget):
                     )
                 )
             accumulated_distance = np.around(np.sum(steps), 3)
-            try:
+            if accumulated_distances.shape[0] > 0:
                 accumulated_distances = np.append(
                     accumulated_distances,
                     [[unique_id, accumulated_distance, len(track)]],
                     0,
                 )
-            except UnboundLocalError:
+            else:
                 accumulated_distances = np.array(
                     [[unique_id, accumulated_distance, len(track)]]
                 )
@@ -402,6 +409,7 @@ class AnalysisWindow(QWidget):
         eccentricities: nd array
             (N,3) shape array, which contains the ID, average eccentricity and standard deviation of eccentricity
         """
+        eccentricities = np.array([])
         for unique_id in np.unique(tracks[:, 0]):
             track = np.delete(tracks, np.where(tracks[:, 0] != unique_id), 0)
             eccentricity = []
@@ -411,7 +419,7 @@ class AnalysisWindow(QWidget):
                     (segmentation[track[i, 1]] == seg_id).astype(int)
                 )
                 eccentricity.append(properties[0].eccentricity)
-            try:
+            if eccentricities.shape[0] > 0:
                 eccentricities = np.append(
                     eccentricities,
                     [
@@ -423,7 +431,7 @@ class AnalysisWindow(QWidget):
                     ],
                     0,
                 )
-            except UnboundLocalError:
+            else:
                 eccentricities = np.array(
                     [
                         [
@@ -451,6 +459,7 @@ class AnalysisWindow(QWidget):
         perimeters: nd array
             (N,3) shape array, which contains the ID, average perimeter and standard deviation of perimeter
         """
+        perimeters = np.array([])
         for unique_id in np.unique(tracks[:, 0]):
             track = np.delete(tracks, np.where(tracks[:, 0] != unique_id), 0)
             perimeter = []
@@ -460,7 +469,7 @@ class AnalysisWindow(QWidget):
                     (segmentation[track[i, 1]] == seg_id).astype(int)
                 )
                 perimeter.append(properties[0].perimeter)
-            try:
+            if perimeters.shape[0] > 0:
                 perimeters = np.append(
                     perimeters,
                     [
@@ -472,7 +481,7 @@ class AnalysisWindow(QWidget):
                     ],
                     0,
                 )
-            except UnboundLocalError:
+            else:
                 perimeters = np.array(
                     [
                         [
@@ -558,9 +567,6 @@ class AnalysisWindow(QWidget):
             )
         self.parent.plot_window.setLayout(QVBoxLayout())
         self.parent.plot_window.setWindowTitle(plot_dict["Description"])
-        # description = QLabel(plot_dict["Description"])
-        # description.setMaximumHeight(20)
-        # self.parent.plot_window.layout().addWidget(description)
         self.selector = Selector(self, axes, results)
 
         self.parent.plot_window.layout().addWidget(canvas)
@@ -723,7 +729,9 @@ class AnalysisWindow(QWidget):
         if self.parent.tracking_window.cached_tracks is not None:
             msg = QMessageBox()
             msg.setWindowTitle("napari")
-            msg.setText("Export is only possible if all tracks are displayed! Display all now?")
+            msg.setText(
+                "Export is only possible if all tracks are displayed! Display all now?"
+            )
             msg.addButton("Display all && export", QMessageBox.AcceptRole)
             msg.addButton(QMessageBox.Cancel)
             retval = msg.exec()
@@ -750,7 +758,7 @@ class AnalysisWindow(QWidget):
         if file[0] == "":
             return
 
-        worker = self._export(file, selected_metrics)
+        self._export(file, selected_metrics)
 
     @thread_worker(connect={"errored": handle_exception})
     def _export(self, file, metrics):
@@ -1160,9 +1168,11 @@ class AnalysisWindow(QWidget):
                     directness.append(
                         [
                             euclidean_distance[i, 0],
-                            euclidean_distance[i, 1] / accumulated_distance[i, 1]
-                            if accumulated_distance[i, 1] > 0
-                            else 0,
+                            (
+                                euclidean_distance[i, 1] / accumulated_distance[i, 1]
+                                if accumulated_distance[i, 1] > 0
+                                else 0
+                            ),
                         ]
                     )
 
@@ -1348,7 +1358,6 @@ def calculate_size_single_track(track, segmentation):
         sizes.append(size)
         max_size = max(max_size, size)
         min_size = min(min_size, size)
-        # sizes.append(len(np.where(segmentation[z] == seg_id)[0]))
     average = np.around(np.average(sizes), 3)
     std_deviation = np.around(np.std(sizes), 3)
     return [id, average, std_deviation, min_size, max_size]

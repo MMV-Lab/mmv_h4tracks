@@ -42,6 +42,7 @@ all = [
     "napari[all]",
     "pytest",
     "pytest-qt",
+    "pre-commit",
 ]
 
 [project.urls]
@@ -68,4 +69,3 @@ mmv_h4tracks = [
 
 [project.entry-points."napari.manifest"]
 mmv_h4tracks = "mmv_h4tracks:napari.yaml"
-
