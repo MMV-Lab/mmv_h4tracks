@@ -315,7 +315,9 @@ class AssistantWindow(QWidget):
         label_layer.data = relabeled_data
 
     def align_ids_on_click(self):
-        """Align the IDs of the tracks with the segmentation"""
+        """Align the IDs of the tracks with the segmentation
+        new_segmentation is generated from reference_segmentation and tracks
+        reference_segmentation is not changed"""
         self.parent.callback_handler.remove_callback_viewer()
         self.label_frames.setText("")
         try:
