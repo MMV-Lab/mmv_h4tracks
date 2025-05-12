@@ -27,7 +27,7 @@ You can install `mmv_h4tracks` via [pip]:
 
 By default, CPU is used for segmentation computing. We did our best to optimize the CPU computing time, but still recommend GPU computing for better performance. For more detailed instructions on how to install GPU support look [here](https://github.com/MouseLand/cellpose#gpu-version-cuda-on-windows-or-linux).
 
-<!-- 
+<!--
 
 To install latest development version :
 
@@ -43,7 +43,7 @@ More detailed information and instructions on each topic can be found in the fol
 
 ### Get started
 
-To load your raw data, you can simply drag & drop them into napari. Ensure that the 'Image' combobox displays the correct layer afterward, see example: 
+To load your raw data, you can simply drag & drop them into napari. Ensure that the 'Image' combobox displays the correct layer afterward, see example:
 
 ![Comboboxes](https://github.com/MMV-Lab/mmv_h4tracks/blob/main/docs/figures/combobox.png?raw=true)
 
@@ -70,7 +70,7 @@ The plugin supports adding custom Cellpose models. To do so, simply click on "Ad
 
 
 To train your own Cellpose model, [this](https://cellpose.readthedocs.io/en/latest/train.html) might be helpful.
-In future versions, we plan to support fine-tuning of Cellpose models within the plugin. 
+In future versions, we plan to support fine-tuning of Cellpose models within the plugin.
 
 
 #### Manual curation
@@ -110,7 +110,7 @@ Individual tracks can be deleted using the delete function. Note: These are perm
 The plugin supports the calculation of various metrics, which can be divided into two categories: migration-based (such as speed, direction, ...) and shape-based (such as size, eccentricity, ...). Through the use of these metrics, a comprehensive understanding of the available data can be obtained.
 
 All these metrics can be exported to a .csv file. In addition, the tracks can be filtered with a movement minimum (in pixels) and a minimum track length (in frames). Note: All existing tracks are exported in any case, but their results are presented separately.
- 
+
 The plugin offers the option of filtering the existing tracks according to the metrics. To do this, the corresponding metric can be selected in the plot area and a scatter plot of the data points will be generated using the plot button. Individual data points (/tracks) that are to be displayed can be circled with the mouse and all tracks that are not circled will be hidden. Note: No tracks are deleted in this process. Hiding tracks triggers the filter function in the tracking section, the "Show all tracks" button can display all tracks again as described above.
 
 
@@ -120,7 +120,7 @@ To be aware of the accuracy of your automatic tracking and segmentation results,
 
 To evaluate results, at least two consecutive frames must be manually corrected first. The plugin saves the previously mentioned automatic or loaded results in the background, so no activation via button or similar is necessary before manual correction.
 
-The range of frames to be evaluated can be set, for which the results for segmentation and tracking can be calculated independently of each other. 
+The range of frames to be evaluated can be set, for which the results for segmentation and tracking can be calculated independently of each other.
 
 
 #### Segmentation evaluation
@@ -139,7 +139,7 @@ The assistant tab serves to facilitate the identification of errors within segme
 Recommended filter strategy:
 1. "Show noteworthy tracks" to discover tracks that are not close to the edge and emerge or disappear after the movie starts. Tracks must be gapless, and resulting hits can be indications of errors.
 2. "Show small cells" to double-check if there is any noise/pollution segmented.
-3. "Show untracked cells" to identify untracked segmented instances. 
+3. "Show untracked cells" to identify untracked segmented instances.
 
 The other filters can provide additional support.
 
@@ -148,12 +148,12 @@ The segmentation adaptation functions supplement useful functions with respect t
 
 ## Hotkeys
 
-Here's an overview of the hotkeys. All of them can also be found in the corresponding tooltips. 
+Here's an overview of the hotkeys. All of them can also be found in the corresponding tooltips.
 
 - `W` - Load next free segmentation ID
-- `G` - Overlap-based single cell tracking 
+- `G` - Overlap-based single cell tracking
 - `H` - Separate cells
-- `Q` - Select cell ID 
+- `Q` - Select cell ID
 
 
 ## Development plan

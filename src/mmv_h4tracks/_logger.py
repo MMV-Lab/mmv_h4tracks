@@ -1,5 +1,6 @@
 from qtpy.QtWidgets import QMessageBox, QApplication
 
+
 def notify(text):
     """
     Shows a notification dialog
@@ -13,6 +14,7 @@ def notify(text):
     msg.setWindowTitle("napari")
     msg.setText(text)
     msg.exec()
+
 
 def choice_dialog(text, choices):
     """

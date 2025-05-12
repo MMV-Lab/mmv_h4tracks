@@ -2,7 +2,7 @@ name: mmv_h4tracks
 display_name: MMV_H4Tracks
 schema_version: 0.1.0
 contributions:
-  commands: 
+  commands:
   - id: mmv_h4tracks.make_qwidget
     python_name: mmv_h4tracks._widget:MMVH4TRACKS
     title: Make tracking widget

@@ -20,13 +20,10 @@ from qtpy.QtWidgets import (
 )
 from scipy import ndimage, stats
 
+from ._constants import LINK_TEXT, UNLINK_TEXT, CONFIRM_TEXT, MIN_TRACK_LENGTH
 from ._logger import notify, choice_dialog, handle_exception
 from ._grabber import grab_layer
 import mmv_h4tracks._processing as processing
-
-LINK_TEXT = "Link tracks"
-UNLINK_TEXT = "Unlink tracks"
-CONFIRM_TEXT = "Confirm"
 
 
 class TrackingWindow(QWidget):
@@ -39,8 +36,6 @@ class TrackingWindow(QWidget):
     Methods
     -------
     """
-
-    MIN_TRACK_LENGTH = 5
 
     def __init__(self, parent):
         """
@@ -104,9 +99,6 @@ class TrackingWindow(QWidget):
 
         btn_delete_displayed_tracks = QPushButton("Delete all displayed tracks")
         btn_filter_tracks = QPushButton("Filter")
-        # btn_filter_tracks.setToolTip(
-        #     "In order to display all tracks, clear the filter field and click here"
-        # )
         btn_show_all_tracks = QPushButton("Show all tracks")
         btn_delete_selected_tracks = QPushButton("Delete")
 
@@ -232,7 +224,8 @@ class TrackingWindow(QWidget):
         AMOUNT_OF_PROCESSES = self.parent.get_process_limit()
 
         track_id = 1
-        for start_slice in range(len(label_layer.data) - self.MIN_TRACK_LENGTH):
+        tracks = np.ndarray([])
+        for start_slice in range(len(label_layer.data) - MIN_TRACK_LENGTH):
             threads_input = []
             for label_id in np.unique(label_layer.data[start_slice]):
                 if label_id == 0:
@@ -265,13 +258,13 @@ class TrackingWindow(QWidget):
                 if entry is None:
                     continue
                 for line in entry:
-                    try:
+                    if len(tracks.shape) > 0:
                         tracks = np.r_[tracks, [[track_id] + line]]
-                    except UnboundLocalError:
+                    else:
                         tracks = np.array([[track_id] + line])
                 track_id += 1
 
-        if not "tracks" in locals():
+        if len(tracks.shape) == 0:
             return None
 
         tracks = np.array(tracks)
@@ -337,7 +330,7 @@ class TrackingWindow(QWidget):
         start_slice = slice_id
         track = []
         MIN_OVERLAP = 0.7
-        if segmentation.shape[0] - slice_id < self.MIN_TRACK_LENGTH:
+        if segmentation.shape[0] - slice_id < MIN_TRACK_LENGTH:
             # Cell is too close to the end to have a track long enough
             return track
         cell_indices = np.where(segmentation[slice_id] == selected_cell)
@@ -386,7 +379,7 @@ class TrackingWindow(QWidget):
         proposed_track : list
             The proposed track
         """
-        if len(proposed_track) < self.MIN_TRACK_LENGTH:
+        if len(proposed_track) < MIN_TRACK_LENGTH:
             QApplication.restoreOverrideCursor()
             raise ValueError("Could not find a track of sufficient length.")
         # Check if any of the cells are already tracked
@@ -436,7 +429,7 @@ class TrackingWindow(QWidget):
 
                 elif (
                     existing_entry[0][0] != track_id
-                    and not existing_entry[0][0] in ids_to_change
+                    and existing_entry[0][0] not in ids_to_change
                 ):
                     existing_track = np.array(
                         [
@@ -458,7 +451,7 @@ class TrackingWindow(QWidget):
             self.assign_new_track_id(tracks_layer, old_id, track_id)
 
         if entries_to_add:
-            if len(entries_to_add) < self.MIN_TRACK_LENGTH and track_id == np.amax(
+            if len(entries_to_add) < MIN_TRACK_LENGTH and track_id == np.amax(
                 tracks_layer.data[:, 0] + 1
             ):
                 QApplication.restoreOverrideCursor()
@@ -520,7 +513,7 @@ class TrackingWindow(QWidget):
                 index=selected_id,
             )
             cell = [z, int(np.rint(centroid[0])), int(np.rint(centroid[1]))]
-            if not cell in self.selected_cells:
+            if cell not in self.selected_cells:
                 self.selected_cells.append(cell)
                 self.selected_cells.sort()
 
@@ -541,7 +534,9 @@ class TrackingWindow(QWidget):
             self.reset_button_labels()
             self.selected_cells = []
             self.btn_insert_correspondence.setText(CONFIRM_TEXT)
-            self.parent.callback_handler.add_callback_viewer(store_cell_for_link, keep_tracking=True)
+            self.parent.callback_handler.add_callback_viewer(
+                store_cell_for_link, keep_tracking=True
+            )
             QApplication.setOverrideCursor(Qt.CrossCursor)
         else:
             self.reset_button_labels()
@@ -652,7 +647,7 @@ class TrackingWindow(QWidget):
                 track_line[1]
                 for track_line in tracks_layer.data
                 if track_line[0] in track_id_matches
-                and not track_line[0] in contained_tracks
+                and track_line[0] not in contained_tracks
             ]
             if len(z_values) != len(set(z_values)):
                 # Not sure if there is a simple way to find the offending tracks
@@ -718,7 +713,7 @@ class TrackingWindow(QWidget):
                 index=selected_id,
             )
             cell = [z, int(np.rint(centroid[0])), int(np.rint(centroid[1]))]
-            if not cell in self.selected_cells:
+            if cell not in self.selected_cells:
                 self.selected_cells.append(cell)
                 self.selected_cells.sort(key=lambda x: x[0])
 
@@ -727,7 +722,9 @@ class TrackingWindow(QWidget):
             self.reset_button_labels()
             self.selected_cells = []
             self.btn_remove_correspondence.setText(CONFIRM_TEXT)
-            self.parent.callback_handler.add_callback_viewer(store_cell_for_unlink, keep_tracking=True)
+            self.parent.callback_handler.add_callback_viewer(
+                store_cell_for_unlink, keep_tracking=True
+            )
             QApplication.setOverrideCursor(Qt.CrossCursor)
         else:
             self.reset_button_labels()
@@ -1024,7 +1021,7 @@ class TrackingWindow(QWidget):
         if tracks is None:
             QApplication.restoreOverrideCursor()
             return
-        assert type(tracks) == np.ndarray, "Tracks are not numpy array."
+        assert isinstance(tracks, np.ndarray), "Tracks are not numpy array."
         self.cached_tracks = None
         tracks_layer = self.get_tracks_layer()
         if tracks_layer is None:
@@ -1132,8 +1129,7 @@ class TrackingWindow(QWidget):
             msg.setStandardButtons(QMessageBox.Ok)
             msg.exec_()
             return
-        # if self.cached_tracks is not None:
-        #     raise ValueError("Can't add to tracks if there are cached tracks")
+
         # assume that a track is being reassigned if cache exists
         tracks_layer = self.get_tracks_layer()
         if tracks_layer is None:
