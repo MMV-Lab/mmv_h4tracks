@@ -223,7 +223,7 @@ class AnalysisWindow(QWidget):
                 max_speed = max(max_speed, distance)
             average = np.around(np.average(accumulated_distance), 3)
             std_deviation = np.around(np.std(accumulated_distance), 3)
-            if len(speeds.shape) > 0:
+            if speeds.shape[0] > 0:
                 speeds = np.append(
                     speeds, [[unique_id, average, std_deviation, max_speed]], 0
                 )
@@ -292,7 +292,7 @@ class AnalysisWindow(QWidget):
             if direction >= 360:
                 direction -= 360
             direction = np.around(direction, 3)
-            if len(retval.shape) > 0:
+            if retval.shape[0] > 0:
                 retval = np.append(retval, [[unique_id, x, y, direction]], 0)
             else:
                 retval = np.array([[unique_id, x, y, direction]])
@@ -318,7 +318,7 @@ class AnalysisWindow(QWidget):
             x = track[-1, 3] - track[0, 3]
             y = track[0, 2] - track[-1, 2]
             euclidean_distance = np.around(np.sqrt(np.square(x) + np.square(y)), 3)
-            if len(euclidean_distances.shape) > 0:
+            if euclidean_distances.shape[0] > 0:
                 euclidean_distances = np.append(
                     euclidean_distances, [[id, euclidean_distance, len(track)]], 0
                 )
@@ -348,7 +348,7 @@ class AnalysisWindow(QWidget):
             )
             track = np.delete(tracks, np.where(tracks[:, 0] != unique_id), 0)
             directed_speed = np.around(euclidean_distance[0, 1] / len(track), 3)
-            if len(directed_speeds.shape) > 0:
+            if directed_speeds.shape[0] > 0:
                 directed_speeds = np.append(
                     directed_speeds, [[unique_id, directed_speed, unique_id]], 0
                 )
@@ -381,7 +381,7 @@ class AnalysisWindow(QWidget):
                     )
                 )
             accumulated_distance = np.around(np.sum(steps), 3)
-            if len(accumulated_distances.shape) > 0:
+            if accumulated_distances.shape[0] > 0:
                 accumulated_distances = np.append(
                     accumulated_distances,
                     [[unique_id, accumulated_distance, len(track)]],
@@ -419,7 +419,7 @@ class AnalysisWindow(QWidget):
                     (segmentation[track[i, 1]] == seg_id).astype(int)
                 )
                 eccentricity.append(properties[0].eccentricity)
-            if len(eccentricities.shape) > 0:
+            if eccentricities.shape[0] > 0:
                 eccentricities = np.append(
                     eccentricities,
                     [
@@ -469,7 +469,7 @@ class AnalysisWindow(QWidget):
                     (segmentation[track[i, 1]] == seg_id).astype(int)
                 )
                 perimeter.append(properties[0].perimeter)
-            if len(perimeters.shape) > 0:
+            if perimeters.shape[0] > 0:
                 perimeters = np.append(
                     perimeters,
                     [
