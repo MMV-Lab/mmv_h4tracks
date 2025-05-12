@@ -12,11 +12,9 @@ from qtpy.QtCore import Qt
 from qtpy.QtWidgets import QApplication
 from scipy import ndimage, optimize, spatial
 
-from mmv_h4tracks import APPROX_INF, MAX_MATCHING_DIST
+from ._constants import APPROX_INF, MAX_MATCHING_DIST, CUSTOM_MODEL_PREFIX
 from ._grabber import grab_layer
 from ._logger import handle_exception
-
-CUSTOM_MODEL_PREFIX = "custom_"
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -49,17 +47,30 @@ def segment_slice_cpu(layer_slice, parameters):
         the segmentation mask for the slice
     """
     starttime = time.time()
-    logger.debug("Starting pid: " + str(multiprocessing.current_process().pid) + " for slice at " + str(starttime))
-    logger.info("Segmentation process started")
-    model = models.CellposeModel(
-        gpu=False, pretrained_model=parameters["model_path"]
+    logger.debug(
+        "Starting pid: "
+        + str(multiprocessing.current_process().pid)
+        + " for slice at "
+        + str(starttime)
     )
+    logger.info("Segmentation process started")
+    model = models.CellposeModel(gpu=False, pretrained_model=parameters["model_path"])
     eval_params = parameters
     eval_params.pop("model_path", None)
     mask, _, _ = model.eval(layer_slice, **eval_params)
     endtime = time.time()
-    logger.debug("Ending pid: " + str(multiprocessing.current_process().pid) + " for slice at " + str(endtime) + " after " + str(endtime - starttime) + " seconds")
-    logger.info("Segmentation process finished with runtime: " + str(endtime - starttime))
+    logger.debug(
+        "Ending pid: "
+        + str(multiprocessing.current_process().pid)
+        + " for slice at "
+        + str(endtime)
+        + " after "
+        + str(endtime - starttime)
+        + " seconds"
+    )
+    logger.info(
+        "Segmentation process finished with runtime: " + str(endtime - starttime)
+    )
     return mask
 
 
@@ -134,7 +145,7 @@ def match_centroids(
         try:
             child_centroid = np.around(child_centroids[col_ind[i]])
             child_id = child_ids[col_ind[i]]
-        except:
+        except IndexError:
             continue
 
         matched_pairs.append(
@@ -146,6 +157,7 @@ def match_centroids(
 
     return matched_pairs
 
+
 def read_custom_model_dict():
     """
     Reads the parameters of the custom models from the 'custom_models.json' file and returns them
@@ -155,6 +167,7 @@ def read_custom_model_dict():
             return json.load(file)
     except FileNotFoundError:
         return {}
+
 
 def read_models(widget):
     """
@@ -171,6 +184,7 @@ def read_models(widget):
         if widget.custom_models[custom_model]["filename"] in custom_model_filenames:
             custom_models.append(CUSTOM_MODEL_PREFIX + custom_model)
     return hardcoded_models, custom_models
+
 
 def display_models(widget, hardcoded_models, custom_models):
     """
@@ -536,7 +550,7 @@ def _process_matches(matches):
                 for matched_cell in range(len(matches[slice_id + 1]))
             ]
 
-            if not label in labels:
+            if label not in labels:
                 break
 
             match_number = labels.index(label)
@@ -556,6 +570,7 @@ def _process_matches(matches):
 
     return tracks.astype(int)
 
+
 def remove_frame_from_track(tracks, track_entry):
     """Handles the logic for removing a frame from a track.
     Includes splitting the track if necessary."""
@@ -574,9 +589,13 @@ def remove_frame_from_track(tracks, track_entry):
 
         # get the entries with lower and higher frame
         lower_entries = track[track[:, 1] < frame]
-        lower_indices = np.where(np.any(np.all(tracks[:, None] == lower_entries, axis=2), axis=1))[0]
+        lower_indices = np.where(
+            np.any(np.all(tracks[:, None] == lower_entries, axis=2), axis=1)
+        )[0]
         higher_entries = track[track[:, 1] > frame]
-        higher_indices = np.where(np.any(np.all(tracks[:, None] == higher_entries, axis=2), axis=1))[0]
+        higher_indices = np.where(
+            np.any(np.all(tracks[:, None] == higher_entries, axis=2), axis=1)
+        )[0]
 
         # if only one entry with either lower or higher exists, find index
         # and queue for removal
@@ -599,12 +618,14 @@ def remove_frame_from_track(tracks, track_entry):
 
     return tracks
 
+
 def lowest_missing_int(arr):
     num_set = set(arr)
     i = 1
     while i in num_set:
         i += 1
     return i
+
 
 def split_noncontinuous_tracks(tracks):
     """Splits noncontinuous tracks into separate tracks."""
@@ -629,11 +650,15 @@ def split_noncontinuous_tracks(tracks):
             indices_to_update = []
             # TODO: indices are not assigned correctly
             for index in jumped_indices:
-                index_in_tracks = np.where(np.all(tracks == current_track[index], axis=1))[0][0]
+                index_in_tracks = np.where(
+                    np.all(tracks == current_track[index], axis=1)
+                )[0][0]
                 print(f"index_in_tracks: {index_in_tracks}")
-                indices_to_update.append(np.arange(len(current_track) - index) + index_in_tracks)
+                indices_to_update.append(
+                    np.arange(len(current_track) - index) + index_in_tracks
+                )
             print(f"Indices to update: {indices_to_update}")
-            
+
             for index_list in indices_to_update:
                 # get the new track id
                 new_track_id = lowest_missing_int(unique_track_ids)
@@ -643,6 +668,7 @@ def split_noncontinuous_tracks(tracks):
                 unique_track_ids = np.unique(tracks[:, 0])
 
     return tracks
+
 
 def remove_dot_tracks(tracks):
     """Remove tracks that are only one frame long."""

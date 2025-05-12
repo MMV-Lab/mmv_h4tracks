@@ -1,4 +1,5 @@
 """Module providing functionality for reading data from disk"""
+
 import zarr
 from qtpy.QtWidgets import QFileDialog
 
