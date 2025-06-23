@@ -49,8 +49,6 @@ class AssistantWindow(QWidget):
         label_distance = QLabel("Threshold edge distance")
         label_small_size = QLabel("Threshold size")
         label_FOI = QLabel("Frames of interest:")
-        self.label_frames = QLabel()
-        self.label_frames.setMaximumWidth(335)
 
         # while we support python<=3.11, we can't do multiline f-strings
         speed_tooltip = f"Threshold for the speed change within a track (max/min).\nDefault is {DEFAULT_SPEED_THRESHOLD}"
@@ -66,7 +64,6 @@ class AssistantWindow(QWidget):
         label_distance.setToolTip(distance_tooltip)
         label_small_size.setToolTip(small_size_tooltip)
         label_FOI.setToolTip(foi_tooltip)
-        self.label_frames.setToolTip(foi_tooltip)
 
         # Buttons
         btn_speed = QPushButton("Show speed outliers")
@@ -104,6 +101,10 @@ class AssistantWindow(QWidget):
         self.size_lineedit.setValidator(QDoubleValidator(0, 10000, 2))
         self.distance_lineedit = QLineEdit()
         self.distance_lineedit.setValidator(QDoubleValidator(0, 1000, 2))
+        self.FOI_lineedit = QLineEdit()
+        self.FOI_lineedit.setReadOnly(True)
+        self.FOI_lineedit.setMaximumWidth(335)
+        self.FOI_lineedit.setToolTip(foi_tooltip)
 
         self.tiny_lineedit = QLineEdit()
         self.tiny_lineedit.setValidator(QDoubleValidator(0, 10000, 2))
@@ -153,7 +154,7 @@ class AssistantWindow(QWidget):
         filters_layout.addWidget(self.checkbox_hidden, 5, 0, 1, 2)
         filters_layout.addWidget(btn_untracked, 5, 2, 1, 2)
         filters_layout.addWidget(label_FOI, 6, 0)
-        filters_layout.addWidget(self.label_frames, 6, 1, 1, 3)
+        filters_layout.addWidget(self.FOI_lineedit, 6, 1, 1, 3)
         filters.setLayout(filters_layout)
 
         segmentation_adaptation = QGroupBox("Segmentation adaptation")
@@ -173,7 +174,7 @@ class AssistantWindow(QWidget):
 
     def show_speed_outliers_on_click(self):
         self.parent.callback_handler.remove_callback_viewer()
-        self.label_frames.setText("")
+        self.FOI_lineedit.setText("")
         try:
             tracks_layer = grab_layer(
                 self.viewer, self.parent.combobox_tracks.currentText()
@@ -200,7 +201,7 @@ class AssistantWindow(QWidget):
 
     def show_size_outliers_on_click(self):
         self.parent.callback_handler.remove_callback_viewer()
-        self.label_frames.setText("")
+        self.FOI_lineedit.setText("")
         try:
             label_layer = grab_layer(
                 self.viewer, self.parent.combobox_segmentation.currentText()
@@ -232,7 +233,7 @@ class AssistantWindow(QWidget):
 
     def show_abrupt_tracks_on_click(self):
         self.parent.callback_handler.remove_callback_viewer()
-        self.label_frames.setText("")
+        self.FOI_lineedit.setText("")
         try:
             label_layer = grab_layer(
                 self.viewer, self.parent.combobox_segmentation.currentText()
@@ -287,7 +288,7 @@ class AssistantWindow(QWidget):
 
     def relabel_cells_on_click(self):
         self.parent.callback_handler.remove_callback_viewer()
-        self.label_frames.setText("")
+        self.FOI_lineedit.setText("")
         try:
             label_layer = grab_layer(
                 self.viewer, self.parent.combobox_segmentation.currentText()
@@ -319,7 +320,7 @@ class AssistantWindow(QWidget):
         new_segmentation is generated from reference_segmentation and tracks
         reference_segmentation is not changed"""
         self.parent.callback_handler.remove_callback_viewer()
-        self.label_frames.setText("")
+        self.FOI_lineedit.setText("")
         try:
             label_layer = grab_layer(
                 self.viewer, self.parent.combobox_segmentation.currentText()
@@ -360,34 +361,37 @@ class AssistantWindow(QWidget):
             if new_segmentation[centroid] == 0:
                 print("centroid not in cell")
                 frame = reference_segmentation[track[1]]
-                candidates = np.unique(
-                    frame[
-                        np.maximum(centroid[1] - 20, 0) : np.minimum(
-                            centroid[1] + 20, frame.shape[0]
-                        ),  # Candidates must be located within the edges.
-                        np.maximum(centroid[2] - 20, 0) : np.minimum(
-                            centroid[2] + 20, frame.shape[1]
-                        ),
-                    ]
-                )
-                cell_found = False
-                for id_ in candidates[1:]:
-                    candidate_centroid = center_of_mass(frame, labels=frame, index=id_)
-                    if (
-                        int(np.rint(candidate_centroid[0])) == centroid[1]
-                        and int(np.rint(candidate_centroid[1])) == centroid[2]
-                    ):
-                        new_segmentation[track[1]][frame == id_] = track[0]
-                        cell_found = True
-                        break
-                if not cell_found:
+                id_ = self.find_candidate_cell(frame, centroid)
+                if id_ is None:
                     raise ValueError("Could not find cell")
+                new_segmentation[track[1]][frame == id_] = track[0]
             else:
                 new_segmentation[track[1]][
                     new_segmentation[track[1]]
                     == new_segmentation[track[1], track[2], track[3]]
                 ] = track[0]
         return new_segmentation
+    
+    def find_candidate_cell(self, frame, centroid):
+        """Find a candidate cell in the frame that matches the centroid."""
+        candidates = np.unique(
+            frame[
+                np.maximum(centroid[1] - 20, 0) : np.minimum(
+                    centroid[1] + 20, frame.shape[0]
+                ),
+                np.maximum(centroid[2] - 20, 0) : np.minimum(
+                    centroid[2] + 20, frame.shape[1]
+                ),
+            ]
+        )
+        for id_ in candidates[1:]:
+            candidate_centroid = center_of_mass(frame, labels=frame, index=id_)
+            if (
+                int(np.rint(candidate_centroid[0])) == centroid[1]
+                and int(np.rint(candidate_centroid[1])) == centroid[2]
+            ):
+                return id_
+        return None
 
     def show_untracked_cells_on_click(self):
         self.parent.callback_handler.remove_callback_viewer()
@@ -430,13 +434,14 @@ class AssistantWindow(QWidget):
             )
             for centroid in centroids:
                 centroid = [frame, int(np.rint(centroid[0])), int(np.rint(centroid[1]))]
-                untracked.append(centroid)
+                if centroid[1:] not in tracked_centroids:
+                    untracked.append(centroid)
 
         if len(untracked) > 0:
             unique_frames = set([coord[0] for coord in untracked])
-            self.label_frames.setText(", ".join(map(str, sorted(unique_frames))))
+            self.FOI_lineedit.setText(", ".join(map(str, sorted(unique_frames))))
         else:
-            self.label_frames.setText("")
+            self.FOI_lineedit.setText("")
         self.mark_outliers(untracked, "Untracked cells")
 
     def show_tiny_cells_on_click(self):
@@ -463,9 +468,9 @@ class AssistantWindow(QWidget):
 
         unique_frames = set([coord[0] for coord in tiny])
         if len(unique_frames) > 0:
-            self.label_frames.setText(", ".join(map(str, sorted(unique_frames))))
+            self.FOI_lineedit.setText(", ".join(map(str, sorted(unique_frames))))
         else:
-            self.label_frames.setText("")
+            self.FOI_lineedit.setText("")
 
         self.mark_outliers(tiny, "Tiny cells")
 
