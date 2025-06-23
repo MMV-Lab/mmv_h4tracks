@@ -116,6 +116,7 @@ class AssistantWindow(QWidget):
 
         # Checkboxes
         self.checkbox_hidden = QCheckBox("Include hidden tracks")
+        # does not apply to aligning segmentation IDs
         self.checkbox_hidden.setChecked(True)
         self.checkbox_hidden.setToolTip(
             "Include tracks that are hidden in evaluating the untracked cells"
@@ -335,15 +336,36 @@ class AssistantWindow(QWidget):
         except ValueError:
             print("No tracks layer found")
             return
-        tracks = tracks_layer.data
+        if self.parent.tracking_window.cached_tracks is not None:
+            tracks = self.parent.tracking_window.cached_tracks
+        else:
+            tracks = tracks_layer.data
 
         if 0 in tracks[:, 0]:
             tracks[:, 0] = tracks[:, 0] + 1
 
-        # all IDs are raised to be greater than the greates segmentation and track ID
-        new_segmentation[reference_segmentation > 0] = reference_segmentation[
-            reference_segmentation > 0
-        ] + np.max([np.max(reference_segmentation), np.max(tracks[:, 0])])
+        # all IDs are raised to be greater than the greatest segmentation and track ID
+        # Offset each frame's labels so that no label with the same id exists in two different slices
+        offset = np.max([np.max(reference_segmentation), np.max(tracks[:, 0])])
+
+        # Vectorized relabeling for efficiency
+
+        for frame in range(reference_segmentation.shape[0]):
+            frame_data = reference_segmentation[frame]
+            # Relabel each unique label in the frame to ensure unique IDs, even if touching
+            relabeled = np.zeros_like(frame_data)
+            unique_ids = np.unique(frame_data)
+            unique_ids = unique_ids[unique_ids != 0]
+            offset
+            for uid in unique_ids:
+                mask = frame_data == uid
+                labeled_mask, num = label(mask)
+                if num == 0:
+                    continue
+                labeled_mask[labeled_mask > 0] += offset
+                relabeled += labeled_mask
+                offset += num
+            new_segmentation[frame] = relabeled
 
         for track_id in tqdm(np.unique(tracks[:, 0])):
             new_segmentation = self.adjust_segmentation_ids(

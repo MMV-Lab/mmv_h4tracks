@@ -76,49 +76,9 @@ def ome_zarr_reader(filename):
     Returns
     -------
         zarr.Group"""
-    # read file
-    # calculate tracks from segmentation if applicable
-    # add metadata to layers
     store = parse_url(filename, mode="a").store
     root = zarr.open_group(store=store, mode="a")
     return root, True
-    array_keys = []
-
-    def get_array_keys(group):
-        for key in group.keys():
-            if isinstance(group[key], zarr.core.Array):
-                array_keys.append(key)
-            elif isinstance(group[key], zarr.hierarchy.Group):
-                get_array_keys(group[key])
-
-    get_array_keys(root)
-    print(array_keys)
-    # for key in keys:
-    #     if isinstance(root[key], zarr.core.Array):
-
-    #         print(f"Group: {key}")
-
-    raw_image = root.get("0")
-    segmentation = root.get("labels/Tracked Cells/0")
-    print(f"Raw image: {raw_image}")
-    print(f"Segmentation: {segmentation}")
-    # results = []
-
-    # def recursive_list(group, prefix=""):
-    #     for name, item in group.items():
-    #         path = f"{prefix}/{name}".lstrip("/")
-    #         attrs = dict(item.attrs)  # Copy to a plain dict for safe printing
-    #         results.append((path, attrs))
-    #         if isinstance(item, zarr.hierarchy.Group):
-    #             recursive_list(item, path)
-
-    # recursive_list(root)
-
-    # print(results)
-
-    QApplication.restoreOverrideCursor()
-    raise NotImplementedError("Ome Zarr reading is not implemented yet.")
-
 
 def zarr_reader(filename):
     """
