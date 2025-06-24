@@ -329,7 +329,7 @@ class AssistantWindow(QWidget):
         except ValueError:
             print("No segmentation layer found")
         reference_segmentation = label_layer.data
-        new_segmentation = np.zeros_like(reference_segmentation)
+        # new_segmentation = np.zeros_like(reference_segmentation)
         tracks_name = self.parent.combobox_tracks.currentText()
         try:
             tracks_layer = grab_layer(self.viewer, tracks_name)
@@ -349,25 +349,34 @@ class AssistantWindow(QWidget):
         offset = np.max([np.max(reference_segmentation), np.max(tracks[:, 0])])
 
         # Vectorized relabeling for efficiency
+        def inflate_labels(reference_segmentation, starting_offset=1):
+            output = np.zeros_like(reference_segmentation, dtype=np.int32)
+            offset = starting_offset
 
-        for frame in range(reference_segmentation.shape[0]):
-            frame_data = reference_segmentation[frame]
-            # Relabel each unique label in the frame to ensure unique IDs, even if touching
-            relabeled = np.zeros_like(frame_data)
-            unique_ids = np.unique(frame_data)
-            unique_ids = unique_ids[unique_ids != 0]
-            offset
-            for uid in unique_ids:
-                mask = frame_data == uid
-                labeled_mask, num = label(mask)
-                if num == 0:
+            # Use 4-connectivity in 2D
+            structure = np.array([[0, 1, 0],
+                                [1, 1, 1],
+                                [0, 1, 0]], dtype=bool)
+
+            for z in tqdm(range(reference_segmentation.shape[0]), "Inflating IDs new"):
+                frame = reference_segmentation[z]
+                mask = frame != 0
+                if not np.any(mask):
                     continue
-                labeled_mask[labeled_mask > 0] += offset
-                relabeled += labeled_mask
-                offset += num
-            new_segmentation[frame] = relabeled
 
-        for track_id in tqdm(np.unique(tracks[:, 0])):
+                # Label all connected non-zero regions with 4-connectivity
+                labeled, num_labels = label(mask, structure=structure)
+
+                if num_labels > 0:
+                    labeled[labeled > 0] += offset
+                    output[z] = labeled
+                    offset += num_labels
+
+            return output
+        
+        new_segmentation = inflate_labels(reference_segmentation, starting_offset=offset)
+
+        for track_id in tqdm(np.unique(tracks[:, 0]), "Aligning IDs"):
             new_segmentation = self.adjust_segmentation_ids(
                 new_segmentation,
                 reference_segmentation,

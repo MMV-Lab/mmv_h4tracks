@@ -577,6 +577,7 @@ class MMVH4TRACKS(QWidget):
         # create new file if no file was opened
         # or the file is not an OME-zarr file
         if not hasattr(self, "zarr") or not "multiscales" in self.zarr.attrs:
+            print("Calling save_as")
             self.save_as()
             return
         self.callback_handler.remove_callback_viewer()
@@ -598,13 +599,6 @@ class MMVH4TRACKS(QWidget):
         Opens a dialog for the user to choose a zarr file to save to.
         Fails if not all layers exist
         """
-        self.callback_handler.remove_callback_viewer()
-        self.tracking_window.update_all_centroids()
-        raw_name = self.combobox_image.currentText()
-        raw_layer = grab_layer(self.viewer, raw_name)
-        segmentation_name = self.combobox_segmentation.currentText()
-        segmentation_layer = grab_layer(self.viewer, segmentation_name)
-
         dialog = QFileDialog()
         QApplication.setOverrideCursor(Qt.WaitCursor)
         path = f"{dialog.getSaveFileName()[0]}"
@@ -616,6 +610,14 @@ class MMVH4TRACKS(QWidget):
         if path == ".ome.zarr":
             QApplication.restoreOverrideCursor()
             return
+
+        self.callback_handler.remove_callback_viewer()
+        self.tracking_window.update_all_centroids()
+        raw_name = self.combobox_image.currentText()
+        raw_layer = grab_layer(self.viewer, raw_name)
+        segmentation_name = self.combobox_segmentation.currentText()
+        segmentation_layer = grab_layer(self.viewer, segmentation_name)
+
         layers = [raw_layer, segmentation_layer]
 
         self.assistant_window.align_ids_on_click()
