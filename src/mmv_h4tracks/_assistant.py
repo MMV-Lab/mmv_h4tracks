@@ -13,6 +13,7 @@ from qtpy.QtWidgets import (
 from qtpy.QtGui import QDoubleValidator
 
 import napari
+from collections import defaultdict
 
 from scipy.ndimage import label, center_of_mass
 from tqdm import tqdm
@@ -316,7 +317,7 @@ class AssistantWindow(QWidget):
 
         label_layer.data = relabeled_data
 
-    def align_ids_on_click(self):
+    def align_ids_on_click(self, saving=False):
         """Align the IDs of the tracks with the segmentation
         new_segmentation is generated from reference_segmentation and tracks
         reference_segmentation is not changed"""
@@ -353,76 +354,73 @@ class AssistantWindow(QWidget):
             output = np.zeros_like(reference_segmentation, dtype=np.int32)
             offset = starting_offset
 
-            # Use 4-connectivity in 2D
-            structure = np.array([[0, 1, 0],
-                                [1, 1, 1],
-                                [0, 1, 0]], dtype=bool)
-
-            for z in tqdm(range(reference_segmentation.shape[0]), "Inflating IDs new"):
+            for z in tqdm(range(reference_segmentation.shape[0])):
                 frame = reference_segmentation[z]
-                mask = frame != 0
-                if not np.any(mask):
+                labels = np.unique(frame)
+                labels = labels[labels != 0]
+                if labels.size == 0:
                     continue
 
-                # Label all connected non-zero regions with 4-connectivity
-                labeled, num_labels = label(mask, structure=structure)
+                # Map: label → unique ID
+                mapping = np.arange(offset, offset + labels.size)
+                offset += labels.size
 
-                if num_labels > 0:
-                    labeled[labeled > 0] += offset
-                    output[z] = labeled
-                    offset += num_labels
+                # Use searchsorted for fast replacement
+                sort_idx = np.searchsorted(labels, frame)
+                # Out-of-range values (i.e., zeros) will need masking
+                mask = frame != 0
+                output[z][mask] = mapping[sort_idx[mask]]
 
             return output
         
-        new_segmentation = inflate_labels(reference_segmentation, starting_offset=offset)
+        def inflate_labels_simple(reference_segmentation):
+            """Simple relabeling that does not take the offset into account"""
+            new_segmentation[reference_segmentation > 0] = reference_segmentation[
+                reference_segmentation > 0
+            ] + np.max([np.max(reference_segmentation), np.max(tracks[:, 0])])
+        
+        if saving:
+            new_segmentation = inflate_labels(reference_segmentation, starting_offset=offset)
+        else:
+            new_segmentation = inflate_labels_simple(reference_segmentation)
 
-        for track_id in tqdm(np.unique(tracks[:, 0]), "Aligning IDs"):
-            new_segmentation = self.adjust_segmentation_ids(
-                new_segmentation,
-                reference_segmentation,
-                tracks[tracks[:, 0] == track_id],
-            )
+        # Group tracks by frame index
+        tracks_by_frame = defaultdict(list)
+        for track in tracks:
+            tracks_by_frame[track[1]].append(track)
+
+        for z in tqdm(sorted(tracks_by_frame), desc="Adjusting IDs"):
+            z_tracks = tracks_by_frame[z]
+            ref_slice = reference_segmentation[z]
+            new_slice = new_segmentation[z]
+
+            # Only precompute centroids if any track has val == 0
+            needs_centroids = any(new_slice[track[2], track[3]] == 0 for track in z_tracks)
+            centroids_dict = None
+            if needs_centroids:
+                labels = np.unique(ref_slice)
+                labels = labels[labels != 0]
+                centroids = center_of_mass(ref_slice, labels=ref_slice, index=labels)
+                centroids_dict = {
+                    label: (int(round(c[0])), int(round(c[1])))
+                    for label, c in zip(labels, centroids)
+                }
+
+            for track_id, _, y, x in z_tracks:
+                val = new_slice[y, x]
+                if val == 0:
+                    if centroids_dict is None:
+                        raise ValueError("Centroids not computed")
+                    for label, center in centroids_dict.items():
+                        if center == (y, x):
+                            new_slice[ref_slice == label] = track_id
+                            break
+                    else:
+                        raise ValueError("Could not find cell")
+                else:
+                    new_slice[new_slice == val] = track_id
 
         label_layer.data = new_segmentation
-
-    def adjust_segmentation_ids(self, new_segmentation, reference_segmentation, tracks):
-        """Set the ID of tracked cells to the track ID"""
-        for track in tracks:
-            centroid = (track[1], track[2], track[3])
-            if new_segmentation[centroid] == 0:
-                print("centroid not in cell")
-                frame = reference_segmentation[track[1]]
-                id_ = self.find_candidate_cell(frame, centroid)
-                if id_ is None:
-                    raise ValueError("Could not find cell")
-                new_segmentation[track[1]][frame == id_] = track[0]
-            else:
-                new_segmentation[track[1]][
-                    new_segmentation[track[1]]
-                    == new_segmentation[track[1], track[2], track[3]]
-                ] = track[0]
-        return new_segmentation
-    
-    def find_candidate_cell(self, frame, centroid):
-        """Find a candidate cell in the frame that matches the centroid."""
-        candidates = np.unique(
-            frame[
-                np.maximum(centroid[1] - 20, 0) : np.minimum(
-                    centroid[1] + 20, frame.shape[0]
-                ),
-                np.maximum(centroid[2] - 20, 0) : np.minimum(
-                    centroid[2] + 20, frame.shape[1]
-                ),
-            ]
-        )
-        for id_ in candidates[1:]:
-            candidate_centroid = center_of_mass(frame, labels=frame, index=id_)
-            if (
-                int(np.rint(candidate_centroid[0])) == centroid[1]
-                and int(np.rint(candidate_centroid[1])) == centroid[2]
-            ):
-                return id_
-        return None
 
     def show_untracked_cells_on_click(self):
         self.parent.callback_handler.remove_callback_viewer()

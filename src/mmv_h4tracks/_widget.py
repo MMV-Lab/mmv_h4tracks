@@ -490,12 +490,14 @@ class MMVH4TRACKS(QWidget):
 
     def _load_ome_zarr(self, zarr_file):
         generic_metadata = dict(zarr_file.attrs)
+        labels_metadata = dict(zarr_file.get("labels").attrs)
+        label_name = labels_metadata.get("labels", "Tracked Cells")[0]
         # read raw image
         raw_image = zarr_file.get("0")
         img_metadata = dict(raw_image.attrs)
-        # read semgentation
-        segmentation = zarr_file.get("labels/Tracked Cells/0")
-        seg_metadata = dict(zarr_file.get("labels/Tracked Cells").attrs)
+        # read segmentation
+        segmentation = zarr_file.get(f"labels/{label_name}/0")
+        seg_metadata = dict(zarr_file.get(f"labels/{label_name}").attrs)
         # check if tracks are implied
         filtered_tracks = None
         if "implied_tracks" in seg_metadata and seg_metadata["implied_tracks"]:
@@ -590,7 +592,7 @@ class MMVH4TRACKS(QWidget):
 
         layers = [raw_layer, segmentation_layer]
 
-        self.assistant_window.align_ids_on_click()
+        self.assistant_window.align_ids_on_click(saving=True)
         save_ome_zarr(self.zarr, layers)
         QApplication.restoreOverrideCursor()
 
@@ -620,7 +622,7 @@ class MMVH4TRACKS(QWidget):
 
         layers = [raw_layer, segmentation_layer]
 
-        self.assistant_window.align_ids_on_click()
+        self.assistant_window.align_ids_on_click(saving=True)
         save_ome_zarr(
             path,
             layers)
