@@ -490,14 +490,25 @@ class MMVH4TRACKS(QWidget):
 
     def _load_ome_zarr(self, zarr_file):
         generic_metadata = dict(zarr_file.attrs)
-        labels_metadata = dict(zarr_file.get("labels").attrs)
+        try:
+            labels_metadata = dict(zarr_file.get("labels").attrs)
+        except AttributeError:
+            print("No labels found in OME-Zarr file.")
+            return
         label_name = labels_metadata.get("labels", "Tracked Cells")[0]
         # read raw image
         raw_image = zarr_file.get("0")
-        img_metadata = dict(raw_image.attrs)
+        try:
+            img_metadata = dict(raw_image.attrs)
+        except AttributeError:
+            print("No image metadata found in OME-Zarr file.")
+            return
         # read segmentation
         segmentation = zarr_file.get(f"labels/{label_name}/0")
-        seg_metadata = dict(zarr_file.get(f"labels/{label_name}").attrs)
+        try:
+            seg_metadata = dict(zarr_file.get(f"labels/{label_name}").attrs)
+        except AttributeError:
+            seg_metadata = dict()
         # check if tracks are implied
         filtered_tracks = None
         if "implied_tracks" in seg_metadata and seg_metadata["implied_tracks"]:
