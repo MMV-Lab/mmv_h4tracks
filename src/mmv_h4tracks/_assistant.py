@@ -375,9 +375,11 @@ class AssistantWindow(QWidget):
         
         def inflate_labels_simple(reference_segmentation):
             """Simple relabeling that does not take the offset into account"""
-            new_segmentation[reference_segmentation > 0] = reference_segmentation[
+            output = np.zeros_like(reference_segmentation, dtype=np.int32)
+            output[reference_segmentation > 0] = reference_segmentation[
                 reference_segmentation > 0
             ] + np.max([np.max(reference_segmentation), np.max(tracks[:, 0])])
+            return output
         
         if saving:
             new_segmentation = inflate_labels(reference_segmentation, starting_offset=offset)
