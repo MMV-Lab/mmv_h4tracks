@@ -1,6 +1,5 @@
 """Module providing functionality for reading data from disk"""
 
-from qtpy.QtWidgets import QApplication
 from ome_zarr.io import parse_url
 import zarr
 from qtpy.QtWidgets import QFileDialog

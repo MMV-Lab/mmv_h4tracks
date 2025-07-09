@@ -495,7 +495,8 @@ class MMVH4TRACKS(QWidget):
         except AttributeError:
             print("No labels found in OME-Zarr file.")
             return
-        label_name = labels_metadata.get("labels", "Tracked Cells")[0]
+        label_value = labels_metadata.get("label", "Tracked Cells")
+        label_name = label_value[0] if isinstance(label_value, (list, tuple)) else label_value
         # read raw image
         raw_image = zarr_file.get("0")
         try:
