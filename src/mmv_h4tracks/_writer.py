@@ -3,11 +3,15 @@ import locale
 
 import numpy as np
 from qtpy.QtWidgets import QFileDialog, QMessageBox, QApplication
+from napari.layers import Image, Labels
+import zarr
+from ome_zarr.io import parse_url
+from ome_zarr.writer import write_image, write_labels
 
 from ._logger import choice_dialog, notify
 
 
-def save_dialog(parent, filetype="*.zarr", directory=""):
+def save_dialog(parent, filetype="*.ome.zarr", directory=""):
     """
     Opens a dialog to select a location to save a file
 
@@ -35,65 +39,170 @@ def save_dialog(parent, filetype="*.zarr", directory=""):
     )
     return filepath
 
-
-def save_zarr(zarr_file, layers, cached_tracks):
+def save_ome_zarr(file, layers: list, implied_tracks: bool = True):
     """
-    Saves the (changed) layers to a zarr file. Fails if required layers are missing
+    Save the image, segmentation and tracking data to an OME-zarr file
 
-    Parameters
-    ----------
-    zarr_file : zarr
-        The zarr file to which to save the layers
-    layers : list of layer
-        The layers raw image, segmentation, tracks in order
-    cached_tracks : array
-        The cached tracks layer, can be None
+    path : str
+        Path of the OME-zarr file to write to
+    layers : list
+        List of layers to save, in the order: raw image, segmentation
+    implied_tracks : bool
+        If True, the segmentation ids are equivalent to track ids
     """
+    assert len(layers) == 2, "Only raw image and segmentation layers are supported"
+    assert isinstance(layers[0], Image)
+    assert isinstance(layers[1], Labels)
 
-    response = 0
-    if cached_tracks is not None:
-        response = choice_dialog(
-            (
-                "It looks like you have selected only some of the tracks from your tracks layer. "
-                + "Do you want to save only the selected ones or all of them?"
-            ),
-            [
-                ("Save Selected", QMessageBox.YesRole),  # returns 0
-                ("Save All", QMessageBox.NoRole),  # returns 1
-                QMessageBox.Cancel,  # returns 4194304
-            ],
-        )
-        if response == 4194304:
-            return
-
-    tracks = layers[2].data
-    if response == 1:
-        tracks = cached_tracks
-
-    if "raw_data" not in zarr_file:
-        zarr_file.create_dataset(
-            "raw_data",
-            shape=layers[0].data.shape,
-            dtype="f8",
-            data=layers[0].data,
-        )
-        zarr_file.create_dataset(
-            "segmentation_data",
-            shape=layers[1].data.shape,
-            dtype="i4",
-            data=layers[1].data,
-        )
-        zarr_file.create_dataset(
-            "tracking_data", shape=tracks.shape, dtype="i4", data=tracks
-        )
+    if isinstance(file, str):
+        # create the zarr file
+        store = parse_url(file, mode="w").store
+        root = zarr.group(store=store)
     else:
-        zarr_file["raw_data"][:] = layers[0].data
-        zarr_file["segmentation_data"][:] = layers[1].data
-        zarr_file["tracking_data"].resize(tracks.shape[0], tracks.shape[1])
-        zarr_file["tracking_data"][:] = tracks
-    QApplication.restoreOverrideCursor()
-    notify("Zarr file has been saved.")
+        # zarr file already exists, use it
+        root = file
 
+    # generate the raw image metadata
+    frames = None
+    unit = "unit"
+    if "raw_metadata" in layers[0].metadata:
+        raw_metadata = layers[0].metadata["raw_metadata"].split("\n")
+        try:
+            frames = [string.split("=")[1] for string in raw_metadata if string.startswith("frames")][0]
+        except IndexError:
+            pass
+        try:
+            unit = [string.split("=")[1] for string in raw_metadata if string.startswith("unit")][0]
+        except IndexError:
+            pass
+    axes = "yx"
+    if layers[0].ndim >= 4:
+        z_size = layers[0].data.shape[-3]
+        axes = "zyx"
+    else:
+        z_size = 1
+    if layers[0].rgb:
+        c_size = 3
+        axes = "c" + axes
+    else:
+        c_size = 1
+    axes = "t" + axes
+    x_size = layers[0].data.shape[-2]
+    y_size = layers[0].data.shape[-1]
+    t_size = layers[0].data.shape[0]
+    # dtype = layers[0].dtype
+    scales = layers[0].scale
+    # layer[0].multiscale might not matter explicitly
+    chunk_shape = (1, layers[0].data.shape[1], layers[0].data.shape[2])
+
+    # write the raw image data
+    image_data = np.stack(layers[0].data)
+    if "0" in root:
+        # replace existing image data
+        root["0"] = image_data
+    else:
+        # name omitted as it breaks the writer
+        write_image(
+            image = image_data,
+            group = root,
+            axes = axes,
+            storage_options = dict(chunks=chunk_shape),
+            scaler = None,
+        )
+    
+    axes_metadata = []
+    for axis in axes:
+        if axis == "t":
+            axes_metadata.append({"name": axis, "type": "time"})
+        elif axis == "c":
+            axes_metadata.append({"name": axis, "type": "space"})
+        else:
+            axes_metadata.append({"name": axis, "type": "space", "unit": unit})
+
+    scale_metadata = [round(scale, 6) for scale in scales]
+
+    # write the raw image metadata
+    image_group = root["0"]
+    image_group.attrs["multiscales"] = [{
+        "version": "0.4",
+        "axes": axes_metadata,
+        "datasets": [{
+            "path": "0",
+            "coordinateTransformations": [{
+                "type": "scale",
+                "scale": scale_metadata
+            }]
+        }]
+    }]
+
+    image_group.attrs["omero"] = {
+        "channels": [{
+            "active": True,
+            "label": layers[0].name,
+            "window": {
+                "start": float(layers[0].data.min()),
+                "end": float(layers[0].data.max()),
+                "min": int(layers[0].data.min()),
+                "max": int(layers[0].data.max())
+            },
+            "color": "7F7F7F" # figure out correct color for colormap gray in napari
+        }],
+        "rdefs": {
+            "model": "color",
+            "defaultZ": 0,
+            "defaultT": 0
+        }
+    }
+
+    label_group = root.require_group("labels").require_group("Tracked Cells")
+
+    if "0" in label_group:
+        # replace existing label data
+        label_group["0"] = layers[1].data
+    else:
+        # write the segmentation data
+        write_labels(
+            labels = layers[1].data,
+            group = label_group,
+            name = "Tracked Cells",
+            axes = "tyx",
+            storage_options = dict(chunks=chunk_shape),
+            scaler = None,
+        )
+
+    # write the segmentation metadata
+    label_group = root["labels"]["Tracked Cells"]
+    label_group.attrs["image-label"] = {
+        "source": {"image": "0"},
+        "version": "0.4",
+        "label": layers[1].name,
+    }
+
+    label_group.attrs["multiscales"] = [{
+        "version": "0.4",
+        "axes": axes_metadata,
+        "datasets": [{
+            "path": "0",
+            "coordinateTransformations": [{
+                "type": "scale",
+                "scale": scale_metadata
+            }]
+        }]
+    }]
+
+    # assume passed labels are adjusted to tracking, so always true
+    root["labels"]["Tracked Cells"].attrs["implied_tracks"] = implied_tracks
+
+    # generic metadata
+    root.attrs["Image Dimensions"] = {
+        "x": x_size,
+        "y": y_size,
+        "z": z_size,
+        "t": t_size,
+        "c": c_size
+    }
+    root.attrs["Frames"] = frames
+    print("OME-zarr file has been saved.")
 
 def save_csv(file, data):
     """

@@ -13,6 +13,7 @@ from qtpy.QtWidgets import (
 from qtpy.QtGui import QDoubleValidator
 
 import napari
+from collections import defaultdict
 
 from scipy.ndimage import label, center_of_mass
 from tqdm import tqdm
@@ -49,8 +50,6 @@ class AssistantWindow(QWidget):
         label_distance = QLabel("Threshold edge distance")
         label_small_size = QLabel("Threshold size")
         label_FOI = QLabel("Frames of interest:")
-        self.label_frames = QLabel()
-        self.label_frames.setMaximumWidth(335)
 
         # while we support python<=3.11, we can't do multiline f-strings
         speed_tooltip = f"Threshold for the speed change within a track (max/min).\nDefault is {DEFAULT_SPEED_THRESHOLD}"
@@ -66,7 +65,6 @@ class AssistantWindow(QWidget):
         label_distance.setToolTip(distance_tooltip)
         label_small_size.setToolTip(small_size_tooltip)
         label_FOI.setToolTip(foi_tooltip)
-        self.label_frames.setToolTip(foi_tooltip)
 
         # Buttons
         btn_speed = QPushButton("Show speed outliers")
@@ -104,6 +102,10 @@ class AssistantWindow(QWidget):
         self.size_lineedit.setValidator(QDoubleValidator(0, 10000, 2))
         self.distance_lineedit = QLineEdit()
         self.distance_lineedit.setValidator(QDoubleValidator(0, 1000, 2))
+        self.FOI_lineedit = QLineEdit()
+        self.FOI_lineedit.setReadOnly(True)
+        self.FOI_lineedit.setMaximumWidth(335)
+        self.FOI_lineedit.setToolTip(foi_tooltip)
 
         self.tiny_lineedit = QLineEdit()
         self.tiny_lineedit.setValidator(QDoubleValidator(0, 10000, 2))
@@ -115,6 +117,7 @@ class AssistantWindow(QWidget):
 
         # Checkboxes
         self.checkbox_hidden = QCheckBox("Include hidden tracks")
+        # does not apply to aligning segmentation IDs
         self.checkbox_hidden.setChecked(True)
         self.checkbox_hidden.setToolTip(
             "Include tracks that are hidden in evaluating the untracked cells"
@@ -153,7 +156,7 @@ class AssistantWindow(QWidget):
         filters_layout.addWidget(self.checkbox_hidden, 5, 0, 1, 2)
         filters_layout.addWidget(btn_untracked, 5, 2, 1, 2)
         filters_layout.addWidget(label_FOI, 6, 0)
-        filters_layout.addWidget(self.label_frames, 6, 1, 1, 3)
+        filters_layout.addWidget(self.FOI_lineedit, 6, 1, 1, 3)
         filters.setLayout(filters_layout)
 
         segmentation_adaptation = QGroupBox("Segmentation adaptation")
@@ -173,7 +176,7 @@ class AssistantWindow(QWidget):
 
     def show_speed_outliers_on_click(self):
         self.parent.callback_handler.remove_callback_viewer()
-        self.label_frames.setText("")
+        self.FOI_lineedit.setText("")
         try:
             tracks_layer = grab_layer(
                 self.viewer, self.parent.combobox_tracks.currentText()
@@ -200,7 +203,7 @@ class AssistantWindow(QWidget):
 
     def show_size_outliers_on_click(self):
         self.parent.callback_handler.remove_callback_viewer()
-        self.label_frames.setText("")
+        self.FOI_lineedit.setText("")
         try:
             label_layer = grab_layer(
                 self.viewer, self.parent.combobox_segmentation.currentText()
@@ -232,7 +235,7 @@ class AssistantWindow(QWidget):
 
     def show_abrupt_tracks_on_click(self):
         self.parent.callback_handler.remove_callback_viewer()
-        self.label_frames.setText("")
+        self.FOI_lineedit.setText("")
         try:
             label_layer = grab_layer(
                 self.viewer, self.parent.combobox_segmentation.currentText()
@@ -287,7 +290,7 @@ class AssistantWindow(QWidget):
 
     def relabel_cells_on_click(self):
         self.parent.callback_handler.remove_callback_viewer()
-        self.label_frames.setText("")
+        self.FOI_lineedit.setText("")
         try:
             label_layer = grab_layer(
                 self.viewer, self.parent.combobox_segmentation.currentText()
@@ -314,12 +317,12 @@ class AssistantWindow(QWidget):
 
         label_layer.data = relabeled_data
 
-    def align_ids_on_click(self):
+    def align_ids_on_click(self, saving=False):
         """Align the IDs of the tracks with the segmentation
         new_segmentation is generated from reference_segmentation and tracks
         reference_segmentation is not changed"""
         self.parent.callback_handler.remove_callback_viewer()
-        self.label_frames.setText("")
+        self.FOI_lineedit.setText("")
         try:
             label_layer = grab_layer(
                 self.viewer, self.parent.combobox_segmentation.currentText()
@@ -327,67 +330,99 @@ class AssistantWindow(QWidget):
         except ValueError:
             print("No segmentation layer found")
         reference_segmentation = label_layer.data
-        new_segmentation = np.zeros_like(reference_segmentation)
+        # new_segmentation = np.zeros_like(reference_segmentation)
         tracks_name = self.parent.combobox_tracks.currentText()
         try:
             tracks_layer = grab_layer(self.viewer, tracks_name)
         except ValueError:
             print("No tracks layer found")
             return
-        tracks = tracks_layer.data
+        if self.parent.tracking_window.cached_tracks is not None:
+            tracks = self.parent.tracking_window.cached_tracks
+        else:
+            tracks = tracks_layer.data
 
         if 0 in tracks[:, 0]:
             tracks[:, 0] = tracks[:, 0] + 1
 
-        # all IDs are raised to be greater than the greates segmentation and track ID
-        new_segmentation[reference_segmentation > 0] = reference_segmentation[
-            reference_segmentation > 0
-        ] + np.max([np.max(reference_segmentation), np.max(tracks[:, 0])])
+        # all IDs are raised to be greater than the greatest segmentation and track ID
+        # Offset each frame's labels so that no label with the same id exists in two different slices
+        offset = np.max([np.max(reference_segmentation), np.max(tracks[:, 0])])
 
-        for track_id in tqdm(np.unique(tracks[:, 0])):
-            new_segmentation = self.adjust_segmentation_ids(
-                new_segmentation,
-                reference_segmentation,
-                tracks[tracks[:, 0] == track_id],
-            )
+        # Vectorized relabeling for efficiency
+        def inflate_labels(reference_segmentation, starting_offset=1):
+            output = np.zeros_like(reference_segmentation, dtype=np.int32)
+            offset = starting_offset
+
+            for z in tqdm(range(reference_segmentation.shape[0])):
+                frame = reference_segmentation[z]
+                labels = np.unique(frame)
+                labels = labels[labels != 0]
+                if labels.size == 0:
+                    continue
+
+                # Map: label → unique ID
+                mapping = np.arange(offset, offset + labels.size)
+                offset += labels.size
+
+                # Use searchsorted for fast replacement
+                sort_idx = np.searchsorted(labels, frame)
+                # Out-of-range values (i.e., zeros) will need masking
+                mask = frame != 0
+                output[z][mask] = mapping[sort_idx[mask]]
+
+            return output
+        
+        def inflate_labels_simple(reference_segmentation):
+            """Simple relabeling that does not take the offset into account"""
+            output = np.zeros_like(reference_segmentation, dtype=np.int32)
+            output[reference_segmentation > 0] = reference_segmentation[
+                reference_segmentation > 0
+            ] + np.max([np.max(reference_segmentation), np.max(tracks[:, 0])])
+            return output
+        
+        if saving:
+            new_segmentation = inflate_labels(reference_segmentation, starting_offset=offset)
+        else:
+            new_segmentation = inflate_labels_simple(reference_segmentation)
+
+        # Group tracks by frame index
+        tracks_by_frame = defaultdict(list)
+        for track in tracks:
+            tracks_by_frame[track[1]].append(track)
+
+        for z in tqdm(sorted(tracks_by_frame), desc="Adjusting IDs"):
+            z_tracks = tracks_by_frame[z]
+            ref_slice = reference_segmentation[z]
+            new_slice = new_segmentation[z]
+
+            # Only precompute centroids if any track has val == 0
+            needs_centroids = any(new_slice[track[2], track[3]] == 0 for track in z_tracks)
+            centroids_dict = None
+            if needs_centroids:
+                labels = np.unique(ref_slice)
+                labels = labels[labels != 0]
+                centroids = center_of_mass(ref_slice, labels=ref_slice, index=labels)
+                centroids_dict = {
+                    label: (int(round(c[0])), int(round(c[1])))
+                    for label, c in zip(labels, centroids)
+                }
+
+            for track_id, _, y, x in z_tracks:
+                val = new_slice[y, x]
+                if val == 0:
+                    if centroids_dict is None:
+                        raise ValueError("Centroids not computed")
+                    for label, center in centroids_dict.items():
+                        if center == (y, x):
+                            new_slice[ref_slice == label] = track_id
+                            break
+                    else:
+                        raise ValueError("Could not find cell")
+                else:
+                    new_slice[new_slice == val] = track_id
 
         label_layer.data = new_segmentation
-
-    def adjust_segmentation_ids(self, new_segmentation, reference_segmentation, tracks):
-        """Set the ID of tracked cells to the track ID"""
-        for track in tracks:
-            centroid = (track[1], track[2], track[3])
-            if new_segmentation[centroid] == 0:
-                print("centroid not in cell")
-                frame = reference_segmentation[track[1]]
-                candidates = np.unique(
-                    frame[
-                        np.maximum(centroid[1] - 20, 0) : np.minimum(
-                            centroid[1] + 20, frame.shape[0]
-                        ),  # Candidates must be located within the edges.
-                        np.maximum(centroid[2] - 20, 0) : np.minimum(
-                            centroid[2] + 20, frame.shape[1]
-                        ),
-                    ]
-                )
-                cell_found = False
-                for id_ in candidates[1:]:
-                    candidate_centroid = center_of_mass(frame, labels=frame, index=id_)
-                    if (
-                        int(np.rint(candidate_centroid[0])) == centroid[1]
-                        and int(np.rint(candidate_centroid[1])) == centroid[2]
-                    ):
-                        new_segmentation[track[1]][frame == id_] = track[0]
-                        cell_found = True
-                        break
-                if not cell_found:
-                    raise ValueError("Could not find cell")
-            else:
-                new_segmentation[track[1]][
-                    new_segmentation[track[1]]
-                    == new_segmentation[track[1], track[2], track[3]]
-                ] = track[0]
-        return new_segmentation
 
     def show_untracked_cells_on_click(self):
         self.parent.callback_handler.remove_callback_viewer()
@@ -430,13 +465,14 @@ class AssistantWindow(QWidget):
             )
             for centroid in centroids:
                 centroid = [frame, int(np.rint(centroid[0])), int(np.rint(centroid[1]))]
-                untracked.append(centroid)
+                if centroid[1:] not in tracked_centroids:
+                    untracked.append(centroid)
 
         if len(untracked) > 0:
             unique_frames = set([coord[0] for coord in untracked])
-            self.label_frames.setText(", ".join(map(str, sorted(unique_frames))))
+            self.FOI_lineedit.setText(", ".join(map(str, sorted(unique_frames))))
         else:
-            self.label_frames.setText("")
+            self.FOI_lineedit.setText("")
         self.mark_outliers(untracked, "Untracked cells")
 
     def show_tiny_cells_on_click(self):
@@ -463,9 +499,9 @@ class AssistantWindow(QWidget):
 
         unique_frames = set([coord[0] for coord in tiny])
         if len(unique_frames) > 0:
-            self.label_frames.setText(", ".join(map(str, sorted(unique_frames))))
+            self.FOI_lineedit.setText(", ".join(map(str, sorted(unique_frames))))
         else:
-            self.label_frames.setText("")
+            self.FOI_lineedit.setText("")
 
         self.mark_outliers(tiny, "Tiny cells")
 

@@ -2,6 +2,7 @@ from multiprocessing import Pool
 from threading import Event
 
 import napari
+from tqdm import tqdm
 import numpy as np
 import pandas as pd
 from napari.qt.threading import thread_worker
@@ -1198,6 +1199,7 @@ class TrackingWindow(QWidget):
         """
         Updates all centroids to account for changed segmentation
         """
+        print("Updating all centroids")
         self.parent.callback_handler.remove_callback_viewer()
         label_layer = grab_layer(
             self.viewer, self.parent.combobox_segmentation.currentText()
@@ -1214,7 +1216,7 @@ class TrackingWindow(QWidget):
 
         frames_to_update = []
 
-        for z in range(len(label_data)):
+        for z in tqdm(range(len(label_data))):
             frame_o = original_label_data[z]
             frame = label_data[z]
             if not np.array_equal(frame_o[frame_o > 0], frame[frame > 0]):
@@ -1237,6 +1239,7 @@ class TrackingWindow(QWidget):
         updated_tracks = processing.split_noncontinuous_tracks(updated_tracks)
         updated_tracks = processing.remove_dot_tracks(updated_tracks)
         tracks_layer.data = updated_tracks
+        print("Finished updating all centroids")
 
     def update_single_centroid(self, track_id: int, frame: int):
         """

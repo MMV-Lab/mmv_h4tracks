@@ -26,7 +26,6 @@ from pathlib import Path
 import numpy as np
 import copy
 import cv2
-import zarr
 from napari.layers.image.image import Image
 from napari.layers.labels.labels import Labels
 from napari.layers.tracks.tracks import Tracks
@@ -38,7 +37,7 @@ from ._evaluation import EvaluationWindow
 from ._reader import open_dialog, napari_get_reader
 from ._segmentation import SegmentationWindow
 from ._tracking import TrackingWindow
-from ._writer import save_zarr
+from ._writer import save_ome_zarr
 from ._grabber import grab_layer
 from ._utils import CallbackHandler
 
@@ -141,7 +140,7 @@ class MMVH4TRACKS(QWidget):
         self.progress_bar = QProgressBar()
         self.progress_bar.setTextVisible(True)
         self.progress_bar.setFormat("Dummy Loading %p%")
-        self.progress_bar.setMaximum(0)
+        self.progress_bar.setMaximum(1)
         # self.progress_bar.setValue(42)
 
         # Horizontal lines
@@ -408,32 +407,24 @@ class MMVH4TRACKS(QWidget):
         index = combobox.findText(current_item)
         combobox.setCurrentIndex(index)
 
-    def _load(self):
+    def _clear_layers(self, layer_names):
         """
-        Opens a dialog for the user to choose a zarr file to open. Checks if any layernames are blocked
+        Prompts the user to clear layers with the given names.
+        If the user confirms, the layers are removed from the viewer.
+
+        returns
+        -------
+        bool
+            True if the layers were cleared, False if the user canceled
         """
-        self.callback_handler.remove_callback_viewer()
-        QApplication.setOverrideCursor(Qt.WaitCursor)
-        filepath = open_dialog(self)
-        file_reader = napari_get_reader(filepath)
-
-        try:
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore")
-                zarr_file = file_reader(filepath)
-        except TypeError:
-            QApplication.restoreOverrideCursor()
-            return
-
-        # check all layer names
-        for layername in zarr_file.__iter__():
-            if layername in self.viewer.layers:
+        for layer_name in layer_names:
+            if layer_name in self.viewer.layers:
                 msg = QMessageBox()
                 msg.setWindowTitle("Layer already exists")
-                msg.setText("Found layer with name " + layername)
+                msg.setText("Found layer with name " + layer_name)
                 msg.setInformativeText(
                     "A layer with the name '"
-                    + layername
+                    + layer_name
                     + "' exists already."
                     + " Do you want to delete this layer to proceed?"
                 )
@@ -445,19 +436,28 @@ class MMVH4TRACKS(QWidget):
                 # Cancel
                 if ret == 4194304:
                     QApplication.restoreOverrideCursor()
-                    return
+                    return False
 
                 # YesToAll -> Remove all layers with names in the file
                 if ret == 32768:
-                    for name in zarr_file.__iter__():
+                    for name in layer_names:
                         try:
                             self.viewer.layers.remove(name)
                         except ValueError:
                             pass
-                    break
 
                 # Yes -> Remove this layer
-                self.viewer.layers.remove(layername)
+                self.viewer.layers.remove(layer_name)
+        return True
+
+    def _load_zarr(self, zarr_file):
+        # check all layer names
+        layernames = [
+            layer.name for layer in self.viewer.layers if isinstance(layer, (Image, Labels, Tracks))
+        ]
+        if not self._clear_layers(layernames):
+            # user canceled the operation
+            return
 
         # add layers to viewer
         self.viewer.add_image(zarr_file["raw_data"][:], name="Raw Image")
@@ -480,7 +480,6 @@ class MMVH4TRACKS(QWidget):
         )
         self.viewer.add_tracks(filtered_tracks, name="Tracks")
 
-        self.zarr = zarr_file
         self.initial_layers = [
             copy.deepcopy(segmentation),
             copy.deepcopy(filtered_tracks),
@@ -488,6 +487,99 @@ class MMVH4TRACKS(QWidget):
         self.combobox_image.setCurrentText("Raw Image")
         self.combobox_segmentation.setCurrentText("Segmentation Data")
         self.combobox_tracks.setCurrentText("Tracks")
+
+    def _load_ome_zarr(self, zarr_file):
+        generic_metadata = dict(zarr_file.attrs)
+        try:
+            labels_metadata = dict(zarr_file.get("labels").attrs)
+        except AttributeError:
+            print("No labels found in OME-Zarr file.")
+            return
+        label_value = labels_metadata.get("label", "Tracked Cells")
+        label_name = label_value[0] if isinstance(label_value, (list, tuple)) else label_value
+        # read raw image
+        raw_image = zarr_file.get("0")
+        try:
+            img_metadata = dict(raw_image.attrs)
+        except AttributeError:
+            print("No image metadata found in OME-Zarr file.")
+            return
+        # read segmentation
+        segmentation = zarr_file.get(f"labels/{label_name}/0")
+        try:
+            seg_metadata = dict(zarr_file.get(f"labels/{label_name}").attrs)
+        except AttributeError:
+            seg_metadata = dict()
+        # check if tracks are implied
+        filtered_tracks = None
+        if "implied_tracks" in seg_metadata and seg_metadata["implied_tracks"]:
+            # if so: generate tracks from segmentation
+            seg_data = segmentation[:]
+            tracks = np.array(
+                [
+                    [seg_id, t, *np.round(np.mean(np.argwhere(seg_data[t] == seg_id), axis=0)).astype(int)]
+                    for t in range(seg_data.shape[0])
+                    for seg_id in np.unique(seg_data[t])[np.unique(seg_data[t]) != 0]
+                ],
+                dtype=np.int64,
+            )
+            # filter tracks to exclude single slice tracks
+            count_of_track_ids = np.unique(tracks[:, 0], return_counts=True)
+            filtered_track_ids = np.delete(
+                count_of_track_ids, count_of_track_ids[1] == 1, 1
+            )
+            filtered_tracks = np.delete(
+                tracks,
+                np.where(np.isin(tracks[:, 0], filtered_track_ids[0, :], invert=True)),
+                0,
+            )
+        # clear layers if they exist
+        layernames = ["Raw Image", "Segmentation Data"]
+        if filtered_tracks is not None:
+            layernames.append("Tracks")
+        if not self._clear_layers(layernames):
+            # user canceled the operation
+            return
+        # add layers to viewer
+        raw_layer = self.viewer.add_image(raw_image[:], name="Raw Image")
+        self.viewer.add_labels(segmentation[:], name="Segmentation Data")
+        if filtered_tracks is not None:
+            self.viewer.add_tracks(filtered_tracks, name="Tracks")
+        # add metadata to layers
+        frames = generic_metadata.get("frames", None)
+        unit = next(
+            (ax.get("unit", "unit") for ax in img_metadata["multiscales"][0]["axes"] if ax["name"] in ["z", "y", "x"]),
+            "unit"
+        )
+        raw_layer.metadata["raw_metadata"] = f"frames={frames}\nunit={unit}"
+        # set initial layers
+        self.initial_layers = [
+            copy.deepcopy(segmentation),
+            copy.deepcopy(filtered_tracks) if filtered_tracks is not None else None,
+        ]
+
+    def _load(self):
+        """
+        Opens a dialog for the user to choose an (ome-)zarr file to open. Passes the file for loading.
+        """
+        self.callback_handler.remove_callback_viewer()
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        filepath = open_dialog(self)
+        file_reader = napari_get_reader(filepath)
+
+        try:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                zarr_file, is_ome = file_reader(filepath)
+        except TypeError:
+            QApplication.restoreOverrideCursor()
+            return
+
+        if is_ome:
+            self._load_ome_zarr(zarr_file)
+        else:
+            self._load_zarr(zarr_file)
+        self.zarr = zarr_file
         self.file_interaction.setTitle(Path(filepath).name)
         QApplication.restoreOverrideCursor()
 
@@ -496,7 +588,10 @@ class MMVH4TRACKS(QWidget):
         Writes the changes made to the opened zarr file to disk.
         Fails if no zarr file was opened or not all layers exist
         """
-        if not hasattr(self, "zarr"):
+        # create new file if no file was opened
+        # or the file is not an OME-zarr file
+        if not hasattr(self, "zarr") or not "multiscales" in self.zarr.attrs:
+            print("Calling save_as")
             self.save_as()
             return
         self.callback_handler.remove_callback_viewer()
@@ -506,37 +601,44 @@ class MMVH4TRACKS(QWidget):
         raw_layer = grab_layer(self.viewer, raw_name)
         segmentation_name = self.combobox_segmentation.currentText()
         segmentation_layer = grab_layer(self.viewer, segmentation_name)
-        track_name = self.combobox_tracks.currentText()
-        track_layer = grab_layer(self.viewer, track_name)
-        layers = [raw_layer, segmentation_layer, track_layer]
-        save_zarr(self.zarr, layers, self.tracking_window.cached_tracks)
+
+        layers = [raw_layer, segmentation_layer]
+
+        self.assistant_window.align_ids_on_click(saving=True)
+        save_ome_zarr(self.zarr, layers)
+        QApplication.restoreOverrideCursor()
 
     def save_as(self):
         """
         Opens a dialog for the user to choose a zarr file to save to.
         Fails if not all layers exist
         """
+        dialog = QFileDialog()
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        path = f"{dialog.getSaveFileName()[0]}"
+        # If user tries to save a zarr file without the .ome.zarr extension, we add it
+        if path.endswith(".zarr") and not path.endswith(".ome.zarr"):
+            path = path[: -len(".zarr")] + ".ome.zarr"
+        if not path.endswith(".ome.zarr"):
+            path += ".ome.zarr"
+        if path == ".ome.zarr":
+            QApplication.restoreOverrideCursor()
+            return
+
         self.callback_handler.remove_callback_viewer()
         self.tracking_window.update_all_centroids()
         raw_name = self.combobox_image.currentText()
         raw_layer = grab_layer(self.viewer, raw_name)
         segmentation_name = self.combobox_segmentation.currentText()
         segmentation_layer = grab_layer(self.viewer, segmentation_name)
-        tracks_name = self.combobox_tracks.currentText()
-        tracks_layer = grab_layer(self.viewer, tracks_name)
 
-        dialog = QFileDialog()
-        QApplication.setOverrideCursor(Qt.WaitCursor)
-        path = f"{dialog.getSaveFileName()[0]}"
-        if not path.endswith(".zarr"):
-            path += ".zarr"
-        if path == ".zarr":
-            QApplication.restoreOverrideCursor()
-            return
-        layers = [raw_layer, segmentation_layer, tracks_layer]
+        layers = [raw_layer, segmentation_layer]
 
-        zarrfile = zarr.open(path, mode="w")
-        save_zarr(zarrfile, layers, self.tracking_window.cached_tracks)
+        self.assistant_window.align_ids_on_click(saving=True)
+        save_ome_zarr(
+            path,
+            layers)
+        QApplication.restoreOverrideCursor()
 
     def get_process_limit(self):
         """
