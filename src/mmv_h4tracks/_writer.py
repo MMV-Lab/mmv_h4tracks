@@ -163,7 +163,7 @@ def save_ome_zarr(file, layers: list, implied_tracks: bool = True):
         # write the segmentation data
         write_labels(
             labels = layers[1].data,
-            group = root,
+            group = label_group,
             name = "Tracked Cells",
             axes = "tyx",
             storage_options = dict(chunks=chunk_shape),
