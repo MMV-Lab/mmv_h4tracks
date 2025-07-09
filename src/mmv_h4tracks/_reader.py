@@ -1,5 +1,6 @@
 """Module providing functionality for reading data from disk"""
 
+from ome_zarr.io import parse_url
 import zarr
 from qtpy.QtWidgets import QFileDialog
 
@@ -53,13 +54,30 @@ def napari_get_reader(path):
         path = path[0]
         print(f"Selected {path} as path from list")
 
-    # if we know we cannot read the file, we immediately return None.
-    if not path.endswith(".zarr"):
-        return None
+    # if we can read the file, return the reader function
+    if path.endswith(".ome.zarr"):
+        return ome_zarr_reader
+    elif path.endswith(".zarr"):
+        return zarr_reader
 
-    # otherwise we return the *function* that can read ``path``.
-    return zarr_reader
+    # otherwise return None
+    return None
 
+def ome_zarr_reader(filename):
+    """
+    Take an OME-Zarr file name and read the file in.
+    Try to read any metadata we can and put it in the layers
+    
+    Parameters
+    ----------
+    filename : str
+        Path to a .ome.zarr file
+    Returns
+    -------
+        zarr.Group"""
+    store = parse_url(filename, mode="a").store
+    root = zarr.open_group(store=store, mode="a")
+    return root, True
 
 def zarr_reader(filename):
     """
@@ -74,4 +92,4 @@ def zarr_reader(filename):
     -------
         Array or Group
     """
-    return zarr.open(filename, mode="a")
+    return zarr.open(filename, mode="a"), False
