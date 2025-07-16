@@ -382,7 +382,8 @@ class TrackingWindow(QWidget):
         """
         if len(proposed_track) < MIN_TRACK_LENGTH:
             QApplication.restoreOverrideCursor()
-            raise ValueError("Could not find a track of sufficient length.")
+            notify("Could not find a track of sufficient length.")
+            return
         # Check if any of the cells are already tracked
         tracks_layer = self.get_tracks_layer()
         if tracks_layer is None:
