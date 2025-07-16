@@ -297,7 +297,8 @@ class TrackingWindow(QWidget):
 
             selected_cell = label_layer.get_value(event.position)
             if selected_cell == 0:
-                raise ValueError("The background can not be tracked.")
+                notify("The background can not be tracked.")
+                return
 
             worker = self.worker_single_overlap_tracking(
                 label_layer.data, int(event.position[0]), selected_cell
