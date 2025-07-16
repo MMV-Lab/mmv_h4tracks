@@ -850,7 +850,7 @@ class TrackingWindow(QWidget):
             return
         try:
             tracks_to_display = [
-                int(track_id) for track_id in input_text.split(",") if track_id != ""
+                int(track_id) for track_id in input_text.split(",") if track_id.strip() != ""
             ]
         except ValueError:
             notify("Please use a comma separated list of integers (whole numbers).")
