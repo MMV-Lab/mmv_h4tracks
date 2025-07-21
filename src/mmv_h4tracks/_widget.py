@@ -242,6 +242,7 @@ class MMVH4TRACKS(QWidget):
             ("G", self.hotkey_overlap_single_tracking),
             ("H", self.hotkey_separate),
             ("Q", self.hotkey_select_id),
+            ("ctrl+T", self.create_implicit_tracks),
         ]
         for custom_bind in custom_binds:
             old_bind = viewer.bind_key(*custom_bind, overwrite=True)
@@ -510,41 +511,18 @@ class MMVH4TRACKS(QWidget):
             seg_metadata = dict(zarr_file.get(f"labels/{label_name}").attrs)
         except AttributeError:
             seg_metadata = dict()
-        # check if tracks are implied
-        filtered_tracks = None
-        if "implied_tracks" in seg_metadata and seg_metadata["implied_tracks"]:
-            # if so: generate tracks from segmentation
-            seg_data = segmentation[:]
-            tracks = np.array(
-                [
-                    [seg_id, t, *np.round(np.mean(np.argwhere(seg_data[t] == seg_id), axis=0)).astype(int)]
-                    for t in range(seg_data.shape[0])
-                    for seg_id in np.unique(seg_data[t])[np.unique(seg_data[t]) != 0]
-                ],
-                dtype=np.int64,
-            )
-            # filter tracks to exclude single slice tracks
-            count_of_track_ids = np.unique(tracks[:, 0], return_counts=True)
-            filtered_track_ids = np.delete(
-                count_of_track_ids, count_of_track_ids[1] == 1, 1
-            )
-            filtered_tracks = np.delete(
-                tracks,
-                np.where(np.isin(tracks[:, 0], filtered_track_ids[0, :], invert=True)),
-                0,
-            )
         # clear layers if they exist
         layernames = ["Raw Image", "Segmentation Data"]
-        if filtered_tracks is not None:
-            layernames.append("Tracks")
         if not self._clear_layers(layernames):
             # user canceled the operation
             return
         # add layers to viewer
         raw_layer = self.viewer.add_image(raw_image[:], name="Raw Image")
         self.viewer.add_labels(segmentation[:], name="Segmentation Data")
-        if filtered_tracks is not None:
-            self.viewer.add_tracks(filtered_tracks, name="Tracks")
+
+        # check if tracks are implied
+        if "implied_tracks" in seg_metadata and seg_metadata["implied_tracks"]:
+            self.create_implicit_tracks(None)
         # add metadata to layers
         frames = generic_metadata.get("frames", None)
         unit = next(
@@ -552,11 +530,42 @@ class MMVH4TRACKS(QWidget):
             "unit"
         )
         raw_layer.metadata["raw_metadata"] = f"frames={frames}\nunit={unit}"
-        # set initial layers
-        self.initial_layers = [
-            copy.deepcopy(segmentation),
-            copy.deepcopy(filtered_tracks) if filtered_tracks is not None else None,
-        ]
+        # set initial layer
+        self.initial_layers[0] = copy.deepcopy(segmentation)
+
+    def create_implicit_tracks(self, _):
+        """
+        Creates implicit tracks from the segmentation data.
+        Can be called with a hotkey.
+        Ignored parameter _ is required for the hotkey binding.
+        Hotkey call passes viewer.
+        """
+        if _ is not None:
+            print("Secret unlocked!")
+        seg_data = self.viewer.layers["Segmentation Data"].data
+        tracks = np.array(
+            [
+                [seg_id, t, *np.round(np.mean(np.argwhere(seg_data[t] == seg_id), axis=0)).astype(int)]
+                for t in range(seg_data.shape[0])
+                for seg_id in np.unique(seg_data[t])[np.unique(seg_data[t]) != 0]
+            ],
+            dtype=np.int64,
+        )
+        # filter tracks to exclude single slice tracks
+        count_of_track_ids = np.unique(tracks[:, 0], return_counts=True)
+        filtered_track_ids = np.delete(
+            count_of_track_ids, count_of_track_ids[1] == 1, 1
+        )
+        filtered_tracks = np.delete(
+            tracks,
+            np.where(np.isin(tracks[:, 0], filtered_track_ids[0, :], invert=True)),
+            0,
+        )
+        if not self._clear_layers(["Tracks"]):
+            # user canceled the operation
+            return
+        self.viewer.add_tracks(filtered_tracks, name="Tracks")
+        self.initial_layers[1] = copy.deepcopy(filtered_tracks)
 
     def _load(self):
         """

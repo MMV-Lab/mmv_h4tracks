@@ -297,7 +297,8 @@ class TrackingWindow(QWidget):
 
             selected_cell = label_layer.get_value(event.position)
             if selected_cell == 0:
-                raise ValueError("The background can not be tracked.")
+                notify("The background can not be tracked.")
+                return
 
             worker = self.worker_single_overlap_tracking(
                 label_layer.data, int(event.position[0]), selected_cell
@@ -382,7 +383,8 @@ class TrackingWindow(QWidget):
         """
         if len(proposed_track) < MIN_TRACK_LENGTH:
             QApplication.restoreOverrideCursor()
-            raise ValueError("Could not find a track of sufficient length.")
+            notify("Could not find a track of sufficient length.")
+            return
         # Check if any of the cells are already tracked
         tracks_layer = self.get_tracks_layer()
         if tracks_layer is None:
@@ -848,7 +850,7 @@ class TrackingWindow(QWidget):
             return
         try:
             tracks_to_display = [
-                int(track_id) for track_id in input_text.split(",") if track_id != ""
+                int(track_id) for track_id in input_text.split(",") if track_id.strip() != ""
             ]
         except ValueError:
             notify("Please use a comma separated list of integers (whole numbers).")
