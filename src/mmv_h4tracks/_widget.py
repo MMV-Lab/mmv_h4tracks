@@ -36,7 +36,7 @@ from ._evaluation import EvaluationWindow
 
 from ._reader import open_dialog, napari_get_reader
 from ._segmentation import SegmentationWindow
-from ._tracking import TrackingWindow
+from ._tracking import TrackingWindow, calculate_medoid
 from ._writer import save_ome_zarr
 from ._grabber import grab_layer
 from ._utils import CallbackHandler
@@ -243,6 +243,7 @@ class MMVH4TRACKS(QWidget):
             ("H", self.hotkey_separate),
             ("Q", self.hotkey_select_id),
             ("ctrl+T", self.create_implicit_tracks),
+            ("ctrl+A", self.hotkey_display_all)
         ]
         for custom_bind in custom_binds:
             old_bind = viewer.bind_key(*custom_bind, overwrite=True)
@@ -295,6 +296,12 @@ class MMVH4TRACKS(QWidget):
         Hotkey for select ID
         """
         self.segmentation_window._add_select_callback()
+
+    def hotkey_display_all(self, _):
+        """
+        Hotkey for displaying all tracks
+        """
+        self.tracking_window.show_all_tracks_on_click()
 
     def update_evaluation_limits(self, event):
         """
@@ -496,7 +503,7 @@ class MMVH4TRACKS(QWidget):
         except AttributeError:
             print("No labels found in OME-Zarr file.")
             return
-        label_value = labels_metadata.get("label", "Tracked Cells")
+        label_value = labels_metadata.get("labels", "TrackedCells")
         label_name = label_value[0] if isinstance(label_value, (list, tuple)) else label_value
         # read raw image
         raw_image = zarr_file.get("0")
@@ -543,14 +550,44 @@ class MMVH4TRACKS(QWidget):
         if _ is not None:
             print("Secret unlocked!")
         seg_data = self.viewer.layers["Segmentation Data"].data
-        tracks = np.array(
-            [
-                [seg_id, t, *np.round(np.mean(np.argwhere(seg_data[t] == seg_id), axis=0)).astype(int)]
-                for t in range(seg_data.shape[0])
-                for seg_id in np.unique(seg_data[t])[np.unique(seg_data[t]) != 0]
-            ],
-            dtype=np.int64,
-        )
+
+        tracks = []
+
+        for t in range(seg_data.shape[0]):
+            frame = seg_data[t]
+
+            # extract unique labels, excluding background (0)
+            labels = np.unique(frame)
+            labels = labels[labels != 0]
+
+            coords_all = np.argwhere(frame)
+
+            for seg_id in labels:
+                coords = coords_all[frame[tuple(coords_all.T)] == seg_id]
+
+                centroid = np.round(np.mean(coords, axis=0)).astype(int)
+
+                if (
+                    0 <= centroid[0] < frame.shape[0] and
+                    0 <= centroid[1] < frame.shape[1] and
+                    frame[tuple(centroid)] == seg_id
+                ):
+                    final_coord = centroid
+                else:
+                    print(f"calculating medoid for seg_id {seg_id} at time {t}")
+                    final_coord = calculate_medoid(frame, seg_id)
+
+                tracks.append([seg_id, t, *final_coord])
+
+        tracks = np.array(tracks, dtype=np.int64)
+        # tracks = np.array(
+        #     [
+        #         [seg_id, t, *np.round(np.mean(np.argwhere(seg_data[t] == seg_id), axis=0)).astype(int)]
+        #         for t in range(seg_data.shape[0])
+        #         for seg_id in np.unique(seg_data[t])[np.unique(seg_data[t]) != 0]
+        #     ],
+        #     dtype=np.int64,
+        # )
         # filter tracks to exclude single slice tracks
         count_of_track_ids = np.unique(tracks[:, 0], return_counts=True)
         filtered_track_ids = np.delete(

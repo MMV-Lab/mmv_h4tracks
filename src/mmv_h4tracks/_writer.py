@@ -154,24 +154,19 @@ def save_ome_zarr(file, layers: list, implied_tracks: bool = True):
         }
     }
 
-    label_group = root.require_group("labels").require_group("Tracked Cells")
+    # write the segmentation data
+    write_labels(
+        labels = layers[1].data,
+        group = root, #label_group,
+        name = "TrackedCells",
+        axes = "tyx",
+        storage_options = dict(chunks=chunk_shape),
+        scaler = None,
+    )
 
-    if "0" in label_group:
-        # replace existing label data
-        label_group["0"] = layers[1].data
-    else:
-        # write the segmentation data
-        write_labels(
-            labels = layers[1].data,
-            group = label_group,
-            name = "Tracked Cells",
-            axes = "tyx",
-            storage_options = dict(chunks=chunk_shape),
-            scaler = None,
-        )
-
+    assert "0" in root["labels"]["TrackedCells"], "Label data was not written correctly."
     # write the segmentation metadata
-    label_group = root["labels"]["Tracked Cells"]
+    label_group = root["labels"]["TrackedCells"]
     label_group.attrs["image-label"] = {
         "source": {"image": "0"},
         "version": "0.4",
@@ -191,7 +186,7 @@ def save_ome_zarr(file, layers: list, implied_tracks: bool = True):
     }]
 
     # assume passed labels are adjusted to tracking, so always true
-    root["labels"]["Tracked Cells"].attrs["implied_tracks"] = implied_tracks
+    root["labels"]["TrackedCells"].attrs["implied_tracks"] = implied_tracks
 
     # generic metadata
     root.attrs["Image Dimensions"] = {
