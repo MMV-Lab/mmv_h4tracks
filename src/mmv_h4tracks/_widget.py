@@ -580,15 +580,6 @@ class MMVH4TRACKS(QWidget):
                 tracks.append([seg_id, t, *final_coord])
 
         tracks = np.array(tracks, dtype=np.int64)
-        # tracks = np.array(
-        #     [
-        #         [seg_id, t, *np.round(np.mean(np.argwhere(seg_data[t] == seg_id), axis=0)).astype(int)]
-        #         for t in range(seg_data.shape[0])
-        #         for seg_id in np.unique(seg_data[t])[np.unique(seg_data[t]) != 0]
-        #     ],
-        #     dtype=np.int64,
-        # )
-        # filter tracks to exclude single slice tracks
         count_of_track_ids = np.unique(tracks[:, 0], return_counts=True)
         filtered_track_ids = np.delete(
             count_of_track_ids, count_of_track_ids[1] == 1, 1

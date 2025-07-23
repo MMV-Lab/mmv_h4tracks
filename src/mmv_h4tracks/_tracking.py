@@ -20,14 +20,11 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 from scipy import ndimage, stats
-from scipy.spatial.distance import cdist
 
 from ._constants import LINK_TEXT, UNLINK_TEXT, CONFIRM_TEXT, MIN_TRACK_LENGTH
 from ._logger import notify, choice_dialog, handle_exception
 from ._grabber import grab_layer
 import mmv_h4tracks._processing as processing
-
-import time
 
 
 class TrackingWindow(QWidget):
@@ -536,7 +533,8 @@ class TrackingWindow(QWidget):
             cell = [z, int(np.rint(centroid[0])), int(np.rint(centroid[1]))]
             if label_layer.data[*cell] != selected_id:
                 # centroid outside of the cell, calculate medoid instead
-                medoid = [z, *calculate_medoid(label_layer.data[z], selected_id)]
+                coords = np.argwhere(label_layer.data[z] == selected_id)
+                medoid = [z, *calculate_medoid(coords)]
                 print(medoid)
                 cell = medoid
             if cell not in self.selected_cells:
@@ -1433,32 +1431,8 @@ def update_centroid(labels: np.ndarray, tracks: np.ndarray, track_entry: np.ndar
     return None
 
 
-def calculate_medoid(frame: np.ndarray, cell_id: int) -> tuple:
-    # Get coordinates of all pixels belonging to the given cell_id
-    starttime = time.time()
-    coords = np.argwhere(frame == cell_id)
-
-    if coords.shape[0] == 0:
-        raise ValueError(f"No pixels found for cell_id={cell_id}")
-
-    # Compute pairwise distances
-    distances = cdist(coords, coords, metric="euclidean")
-
-    # Sum distances for each pixel and find the one with the smallest total distance
-    total_distances = distances.sum(axis=1)
-    medoid_index = np.argmin(total_distances)
-    medoid_coords = tuple(int(v) for v in coords[medoid_index])  # (row, col)
-
-    # print(f"(calculate_medoid) Time taken: {time.time() - starttime:.4f} seconds")
-    starttime = time.time()
-    other = fast_medoid(coords)
-    # print(f"(fast_medoid) Time taken: {time.time() - starttime:.4f} seconds")
-    # print(f"Medoid coords: {medoid_coords}, Fast medoid coords: {other}. Equal: {medoid_coords == other}")
-    print(f"using medoid: {other}")
-    return other
-
-# Check if we want to use this instead of the medoid calculation above
-def fast_medoid(coords):
+def calculate_medoid(coords: np.ndarray) -> np.ndarray:
+    """Calculates the medoid of a cell in a given frame."""    
     dists = np.sum(np.abs(coords[:, None] - coords[None, :]), axis=-1)
     medoid_idx = np.argmin(np.sum(dists, axis=1))
     return coords[medoid_idx]

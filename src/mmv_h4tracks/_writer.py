@@ -2,13 +2,11 @@ import csv
 import locale
 
 import numpy as np
-from qtpy.QtWidgets import QFileDialog, QMessageBox, QApplication
+from qtpy.QtWidgets import QFileDialog
 from napari.layers import Image, Labels
 import zarr
 from ome_zarr.io import parse_url
 from ome_zarr.writer import write_image, write_labels
-
-from ._logger import choice_dialog, notify
 
 
 def save_dialog(parent, filetype="*.ome.zarr", directory=""):
