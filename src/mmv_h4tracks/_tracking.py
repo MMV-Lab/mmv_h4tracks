@@ -535,7 +535,7 @@ class TrackingWindow(QWidget):
                 # centroid outside of the cell, calculate medoid instead
                 coords = np.argwhere(label_layer.data[z] == selected_id)
                 medoid = [z, *calculate_medoid(coords)]
-                print(medoid)
+                notify(f"Calculated medoid: {medoid}")
                 cell = medoid
             if cell not in self.selected_cells:
                 self.selected_cells.append(cell)
@@ -1416,7 +1416,7 @@ def update_centroid(labels: np.ndarray, tracks: np.ndarray, track_entry: np.ndar
     
     # if no exact match, check if it is a medoid
     medoids = [
-        calculate_medoid(frame_data, label)
+        calculate_medoid(np.argwhere(frame_data == label))
         for label in unique_labels
         if label != 0
     ]
@@ -1432,7 +1432,25 @@ def update_centroid(labels: np.ndarray, tracks: np.ndarray, track_entry: np.ndar
 
 
 def calculate_medoid(coords: np.ndarray) -> np.ndarray:
-    """Calculates the medoid of a cell in a given frame."""    
+    """
+    Calculates the medoid of a set of points in a given frame.
+
+    A medoid is the point in a set of points that minimizes the sum of distances
+    to all other points in the set. It is a robust measure of central tendency,
+    often used in clustering and data analysis.
+
+    This function computes the pairwise Manhattan distances between all points
+    in the input array and identifies the point with the smallest total distance
+    to all others as the medoid.
+
+    Parameters:
+        coords (np.ndarray): A 2D NumPy array of shape (n, 2), where each row
+            represents the (y, x) coordinates of a point.
+
+    Returns:
+        np.ndarray: A 1D NumPy array of shape (2,) representing the (y, x)
+        coordinates of the medoid.
+    """
     dists = np.sum(np.abs(coords[:, None] - coords[None, :]), axis=-1)
     medoid_idx = np.argmin(np.sum(dists, axis=1))
     return coords[medoid_idx]

@@ -162,7 +162,8 @@ def save_ome_zarr(file, layers: list, implied_tracks: bool = True):
         scaler = None,
     )
 
-    assert "0" in root["labels"]["TrackedCells"], "Label data was not written correctly."
+    if "0" not in root["labels"]["TrackedCells"]:
+        raise ValueError("Label data was not written correctly. The expected key '0' is missing in 'TrackedCells'.")
     # write the segmentation metadata
     label_group = root["labels"]["TrackedCells"]
     label_group.attrs["image-label"] = {
