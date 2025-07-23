@@ -574,8 +574,8 @@ class MMVH4TRACKS(QWidget):
                 ):
                     final_coord = centroid
                 else:
-                    print(f"calculating medoid for seg_id {seg_id} at time {t}")
-                    final_coord = calculate_medoid(frame, seg_id)
+                    coords = np.argwhere(frame == seg_id)
+                    final_coord = calculate_medoid(coords)
 
                 tracks.append([seg_id, t, *final_coord])
 
