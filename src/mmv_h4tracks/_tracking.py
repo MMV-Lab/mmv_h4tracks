@@ -417,7 +417,7 @@ class TrackingWindow(QWidget):
             existing_entry = [
                 track for track in tracks_layer.data if np.all(track[1:4] == entry)
             ]
-            if len(existing_entry) > 1 and track_id is None:
+            if len(existing_entry) > 1 and (track_id is None or track_id > existing_entry[0][0]):
                 track_id = existing_entry[0][0]
             diverging_entries = [
                 track
@@ -435,7 +435,7 @@ class TrackingWindow(QWidget):
             if not existing_entry:
                 entries_to_add.append(entry)
             else:
-                if track_id is None:
+                if track_id is None or track_id > existing_entry[0][0]:
                     track_id = existing_entry[0][0]
                     existing_track = np.array(
                         [track for track in tracks_layer.data if track[0] == track_id]
@@ -587,6 +587,30 @@ class TrackingWindow(QWidget):
         if len(self.selected_cells) < 2:
             notify("Please select more than one cell to connect!")
             return
+        
+        tracks_layer = self.get_tracks_layer()
+        # check which tracks have been clicked
+        track_id_matches = []
+        for cell in self.selected_cells:
+            if tracks_layer is None:
+                break
+            for track_line in tracks_layer.data:
+                if np.all(track_line[1:4] == cell):
+                    track_id_matches.append(int(track_line[0]))
+
+        track_id_matches = sorted(list(set(track_id_matches)))
+
+        # auto select all cells from those tracks
+        if len(track_id_matches) > 0:
+            for track_id in track_id_matches:
+                track = tracks_layer.data[tracks_layer.data[:, 0] == track_id]
+                for track_line in track:
+                    # avoid adding duplicates
+                    if not np.any(np.all(track_line[1:4] == np.array(self.selected_cells), axis=1)):
+                        self.selected_cells.append(track_line[1:4].astype(int).tolist())
+
+        self.selected_cells = sorted(self.selected_cells, key=lambda x: x[0])
+
         # assure no two selected cells are from the same slice
         if len(np.asarray(self.selected_cells)[:, 0]) != len(
             set(np.asarray(self.selected_cells)[:, 0])
@@ -596,6 +620,7 @@ class TrackingWindow(QWidget):
                 f"Looks like you selected multiple cells in slice {most_common_value}. You can only connect cells from different slices."
             )
             return
+        
         # assure there is no gap in z between the selected cells
         if (
             np.max(np.asarray(self.selected_cells)[:, 0])
@@ -615,97 +640,30 @@ class TrackingWindow(QWidget):
             )
             return
 
-        tracks_layer = self.get_tracks_layer()
-
-        track_id_matches = []
-        for cell in self.selected_cells:
-            if tracks_layer is None:
-                break
-            for track_line in tracks_layer.data:
-                if np.all(track_line[1:4] == cell):
-                    track_id_matches.append(track_line[0])
-
-        track_id_matches = list(set(track_id_matches))
-
-        contained_tracks = []
-        cell_tuples = [tuple(cell) for cell in self.selected_cells]
-        for track_id in track_id_matches:
-            track = tracks_layer.data[tracks_layer.data[:, 0] == track_id]
-            track_tuples = [tuple(track_line[1:4]) for track_line in track]
-            # check if all of track's cells are in the selected cells
-            if all(track_tuple in cell_tuples for track_tuple in track_tuples):
-                contained_tracks.append(track_id)
-                self.remove_entries_from_tracks([track_entry for track_entry in track])
-
-        if len(track_id_matches) - len(contained_tracks) == 0:
-            self.add_track_to_tracks(np.array(self.selected_cells))
-            if tracks_layer is None:
-                tracks_layer = self.get_tracks_layer()
-        elif len(track_id_matches) - len(contained_tracks) == 1:
-            touched_track_id = [
-                track_id
-                for track_id in track_id_matches
-                if track_id not in contained_tracks
-            ][0]
-            track = tracks_layer.data[tracks_layer.data[:, 0] == touched_track_id]
-            entries_to_add = []
-            for cell in self.selected_cells:
-                tracked = False
-                for track_line in track:
-                    if cell[0] == track_line[1]:
-                        if not np.all(cell == track_line[1:4]):
-                            notify(
-                                f"You selected a cell in frame {cell[0]}, but track {touched_track_id} already contains a cell in this frame."
-                            )
-                            return
-                        else:
-                            tracked = True
-                if not tracked:
-                    # only add the cell if it is not already in the track
-                    entries_to_add.append(cell)
-            self.add_entries_to_tracks(entries_to_add, touched_track_id)
-        else:
-            # multiple tracks contain cells from the selected cells & are not contained
-            # check if more than one track has same z
-            z_values = [
-                track_line[1]
-                for track_line in tracks_layer.data
-                if track_line[0] in track_id_matches
-                and track_line[0] not in contained_tracks
-            ]
-            if len(z_values) != len(set(z_values)):
-                # Not sure if there is a simple way to find the offending tracks
-                notify(
-                    "Connecting tracks that contain cells in the same slice is not possible."
-                )
-                return
-            entries_not_to_add = []
-            for touched_track_id in [
-                track_id
-                for track_id in track_id_matches
-                if track_id not in contained_tracks
-            ]:
-                track = tracks_layer.data[tracks_layer.data[:, 0] == touched_track_id]
-                for cell in self.selected_cells:
-                    for track_line in track:
-                        if cell[0] == track_line[1]:
-                            if not np.all(cell == track_line[1:4]):
-                                notify(
-                                    f"You selected a cell in frame {cell[0]}, but track {touched_track_id} already contains a cell in this frame."
-                                )
-                                return
-                            # cell should not be added since it would be duplicate
-                            entries_not_to_add.append(cell)
-            entries_to_add = [
-                list(cell)
-                for cell in set(tuple(entry) for entry in self.selected_cells)
-                - set(tuple(entry) for entry in entries_not_to_add)
-            ]
-            if len(entries_to_add) > 0:
-                self.add_entries_to_tracks(entries_to_add, track_id_matches[0])
-
+        # reassign track ids if multiple tracks were clicked
         for track_id in track_id_matches[1:]:
             self.assign_new_track_id(tracks_layer, track_id, track_id_matches[0])
+
+        entries_to_add = []
+        # check which clicked cells are not already in the tracks
+        for cell in self.selected_cells:
+            tracked = False
+            for track_line in tracks_layer.data:
+                if np.all(track_line[1:4] == cell):
+                    tracked = True
+                    break
+            if not tracked:
+                entries_to_add.append(cell)
+                
+        # determine the track id to use
+        # either use lowest id of clicked tracks or lowest missing id
+        track_ids = set(track_line[0] for track_line in tracks_layer.data)
+        lowest_missing_id = 1
+        while lowest_missing_id in track_ids:
+            lowest_missing_id += 1
+        track_id = track_id_matches[0] if len(track_id_matches) > 0 else lowest_missing_id
+        if len(entries_to_add) > 0:
+            self.add_entries_to_tracks(entries_to_add, track_id)
 
     def unlink_tracks_on_click(self):
         """
