@@ -274,7 +274,22 @@ class TrackingWindow(QWidget):
         QApplication.restoreOverrideCursor()
         return df.values
 
-    def single_overlap_tracking_on_click(self):
+    def _add_auto_track_callback(self):
+        """
+        Adds a callback to the viewer to track cells on click
+        """
+        try:
+            _ = grab_layer(self.viewer, self.parent.combobox_segmentation.currentText())
+        except ValueError as exc:
+            handle_exception(exc)
+            return
+
+        self.parent.callback_handler.add_callback_viewer(
+            self.single_overlap_tracking_on_click
+        )
+        QApplication.setOverrideCursor(Qt.CrossCursor)
+
+    def single_overlap_tracking_on_click(self, *_):
         if self.cached_tracks is not None:
             notify("New tracks can only be added if all tracks are displayed.")
             return
@@ -516,6 +531,12 @@ class TrackingWindow(QWidget):
                 index=selected_id,
             )
             cell = [z, int(np.rint(centroid[0])), int(np.rint(centroid[1]))]
+            if label_layer.data[*cell] != selected_id:
+                # centroid outside of the cell, calculate medoid instead
+                coords = np.argwhere(label_layer.data[z] == selected_id)
+                medoid = [z, *calculate_medoid(coords)]
+                notify(f"Calculated medoid: {medoid}")
+                cell = medoid
             if cell not in self.selected_cells:
                 self.selected_cells.append(cell)
                 self.selected_cells.sort()
@@ -850,7 +871,9 @@ class TrackingWindow(QWidget):
             return
         try:
             tracks_to_display = [
-                int(track_id) for track_id in input_text.split(",") if track_id.strip() != ""
+                int(track_id)
+                for track_id in input_text.split(",")
+                if track_id.strip() != ""
             ]
         except ValueError:
             notify("Please use a comma separated list of integers (whole numbers).")
@@ -1390,7 +1413,44 @@ def update_centroid(labels: np.ndarray, tracks: np.ndarray, track_entry: np.ndar
             continue
         if distance < closest_candidate[1]:
             closest_candidate = [centroid, distance]
+    
+    # if no exact match, check if it is a medoid
+    medoids = [
+        calculate_medoid(np.argwhere(frame_data == label))
+        for label in unique_labels
+        if label != 0
+    ]
+    if (old_y, old_x) in medoids:
+        # if the old centroid is a medoid, return it
+        return np.array([track_id, z, old_y, old_x])
+
+    # assume cell has been modified, use closest candidate
     if closest_candidate[0] is not None:
         y, x = closest_candidate[0]
         return np.array([track_id, z, y, x])
     return None
+
+
+def calculate_medoid(coords: np.ndarray) -> np.ndarray:
+    """
+    Calculates the medoid of a set of points in a given frame.
+
+    A medoid is the point in a set of points that minimizes the sum of distances
+    to all other points in the set. It is a robust measure of central tendency,
+    often used in clustering and data analysis.
+
+    This function computes the pairwise Manhattan distances between all points
+    in the input array and identifies the point with the smallest total distance
+    to all others as the medoid.
+
+    Parameters:
+        coords (np.ndarray): A 2D NumPy array of shape (n, 2), where each row
+            represents the (y, x) coordinates of a point.
+
+    Returns:
+        np.ndarray: A 1D NumPy array of shape (2,) representing the (y, x)
+        coordinates of the medoid.
+    """
+    dists = np.sum(np.abs(coords[:, None] - coords[None, :]), axis=-1)
+    medoid_idx = np.argmin(np.sum(dists, axis=1))
+    return coords[medoid_idx]

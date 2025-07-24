@@ -63,18 +63,18 @@ class SegmentationWindow(QWidget):
         )
 
         btn_free_label = QPushButton("Next free ID")
-        btn_free_label.setToolTip("Load next free segmentation label \n\n" "Hotkey: E")
+        btn_free_label.setToolTip("Load next free segmentation label \n\n" "Hotkey: W")
 
         btn_false_merge = QPushButton("Separate")
         btn_false_merge.setToolTip(
-            "Split two separate parts of the same label into two"
+            "Split two separate parts of the same label into two \n\n" "Hotkey: H"
         )
 
         btn_false_cut = QPushButton("Merge cell")
         btn_false_cut.setToolTip("Merge two separate labels into one")
 
         btn_grab_label = QPushButton("Select ID")
-        btn_grab_label.setToolTip("Load selected segmentation label")
+        btn_grab_label.setToolTip("Load selected segmentation label \n\n" "Hotkey: Q")
 
         self.btn_segment = QPushButton("Run Segmentation")
         btn_segment_tooltip = (
