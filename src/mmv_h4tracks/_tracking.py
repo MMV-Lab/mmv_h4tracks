@@ -417,6 +417,8 @@ class TrackingWindow(QWidget):
             existing_entry = [
                 track for track in tracks_layer.data if np.all(track[1:4] == entry)
             ]
+            # If there are multiple existing entries, select the smallest track_id
+            # to ensure consistency and avoid conflicts.
             if len(existing_entry) > 1 and (track_id is None or track_id > existing_entry[0][0]):
                 track_id = existing_entry[0][0]
             diverging_entries = [
@@ -602,18 +604,19 @@ class TrackingWindow(QWidget):
 
         # auto select all cells from those tracks
         if len(track_id_matches) > 0:
+            selected_cells_array = np.array(self.selected_cells)
             for track_id in track_id_matches:
                 track = tracks_layer.data[tracks_layer.data[:, 0] == track_id]
                 for track_line in track:
                     # avoid adding duplicates
-                    if not np.any(np.all(track_line[1:4] == np.array(self.selected_cells), axis=1)):
+                    if not np.any(np.all(track_line[1:4] == selected_cells_array, axis=1)):
                         self.selected_cells.append(track_line[1:4].astype(int).tolist())
 
         self.selected_cells = sorted(self.selected_cells, key=lambda x: x[0])
 
         # assure no two selected cells are from the same slice
-        if len(np.asarray(self.selected_cells)[:, 0]) != len(
-            set(np.asarray(self.selected_cells)[:, 0])
+        if len(selected_cells_array[:, 0]) != len(
+            set(selected_cells_array[:, 0])
         ):
             most_common_value = stats.mode(np.array(self.selected_cells)[:, 0])[0]
             notify(
@@ -641,6 +644,8 @@ class TrackingWindow(QWidget):
             return
 
         # reassign track ids if multiple tracks were clicked
+        # Assumption: `track_id_matches` is sorted, and the first element (track_id_matches[0])
+        # is used as the target ID. Ensure `track_id_matches` is sorted before this point.
         for track_id in track_id_matches[1:]:
             self.assign_new_track_id(tracks_layer, track_id, track_id_matches[0])
 
