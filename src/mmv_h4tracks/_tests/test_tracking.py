@@ -167,7 +167,7 @@ def test_link_stored_cells_enclosed(create_widget):
     window.selected_cells = [[0, 1, 1], [1, 1, 1], [2, 1, 1], [3, 1, 1]]
     window.link_stored_cells()
     post_tracks = widget.viewer.layers["Tracks"].data
-    expected_result = np.array([[1, 0, 1, 1], [1, 1, 1, 1], [1, 2, 1, 1], [1, 3, 1, 1]])
+    expected_result = np.array([[0, 0, 1, 1], [0, 1, 1, 1], [0, 2, 1, 1], [0, 3, 1, 1]])
     print(post_tracks)
     assert np.array_equal(post_tracks, expected_result)
 
@@ -539,8 +539,8 @@ class TestLink:
         @pytest.mark.parametrize(
             "cell2",
             [
-                [4, 387, 399],
-                [4, 401, 385],
+                [6, 383, 391],
+                [7, 383, 395],
             ],
         )
         @patch("mmv_h4tracks._tracking.notify")
@@ -552,8 +552,12 @@ class TestLink:
             tracking_widget.selected_cells = [cell1, cell2]
             tracking_widget.link_tracks_on_click()
             check_schema(widget)
+            missing_frames = list(range(cell1[0] + 1, cell2[0]))
+            # cell1_1 has a connected cell in frame 3, so we remove it from expected frames
+            if cell1 == [2, 393, 393]:
+                missing_frames.remove(3)
             mock_notify.assert_called_once_with(
-                "Gaps in the tracks are not supported yet. Please also select cells in frames [3]."
+                f"Gaps in the tracks are not supported yet. Please also select cells in frames {missing_frames}."
             )
 
         @pytest.mark.parametrize(
@@ -577,8 +581,8 @@ class TestLink:
             check_schema(widget)
 
             valid_call_args = [
-                f"You selected a cell in frame {frame}, but track {track_id} already contains a cell in this frame."
-                for frame, track_id in [[6, 9], [6, 15], [3, 12], [4, 61]]
+                f"Looks like you selected multiple cells in slice {frame}. You can only connect cells from different slices."
+                for frame in [6, 15, 3, 4]
             ]
             assert mock_notify.call_count == 1
             assert mock_notify.call_args[0][0] in valid_call_args
