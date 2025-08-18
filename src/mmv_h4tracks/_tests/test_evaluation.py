@@ -97,7 +97,7 @@ def add_layers(viewer):
 # test if rounding works correctly
 @pytest.mark.unit
 @pytest.mark.parametrize("value", *[np.linspace(0, 1, 11)])
-def test_round_half_up(set_widget_up, value):
+def test_round_half_up(value):
     from mmv_h4tracks._evaluation import round_half_up
 
     if value < 0.5:
@@ -182,7 +182,7 @@ def test_segmentation_evaluation(get_widget, score, area, frames):
             elif score == "ap50":
                 assert window._calculate_ap50(gt, seg) == 0.75
 
-
+# TODO: slow setup & call
 @pytest.mark.eval
 @pytest.mark.eval_tracking
 @pytest.mark.unit
@@ -213,7 +213,7 @@ def test_false_positives(set_widget_up, layername, expected_value):
     fp = window.get_segmentation_fault(gt_seg, eval_seg, func)
     assert fp == expected_value
 
-
+# TODO: slow call
 @pytest.mark.eval
 @pytest.mark.eval_tracking
 @pytest.mark.unit
@@ -250,7 +250,7 @@ def test_false_negatives(set_widget_up, layername, expected_value, gt):
     fn = window.get_segmentation_fault(gt_seg, eval_seg, func)
     assert fn == expected_value
 
-
+# TODO: slow call
 @pytest.mark.eval
 @pytest.mark.eval_tracking
 @pytest.mark.unit
@@ -279,7 +279,7 @@ def test_split_cells(set_widget_up, layername, expected_value):
     sc = window.get_segmentation_fault(gt_seg, eval_seg, func)
     assert sc == expected_value
 
-
+# TODO: slow setup
 @pytest.mark.eval
 @pytest.mark.eval_tracking
 @pytest.mark.unit

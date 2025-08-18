@@ -601,10 +601,10 @@ class TrackingWindow(QWidget):
                     track_id_matches.append(int(track_line[0]))
 
         track_id_matches = sorted(list(set(track_id_matches)))
+        selected_cells_array = np.array(self.selected_cells)
 
         # auto select all cells from those tracks
         if len(track_id_matches) > 0:
-            selected_cells_array = np.array(self.selected_cells)
             for track_id in track_id_matches:
                 track = tracks_layer.data[tracks_layer.data[:, 0] == track_id]
                 for track_line in track:
@@ -613,12 +613,14 @@ class TrackingWindow(QWidget):
                         self.selected_cells.append(track_line[1:4].astype(int).tolist())
 
         self.selected_cells = sorted(self.selected_cells, key=lambda x: x[0])
+        selected_cells_array = np.array(self.selected_cells)
+        print(f"Selected cells array (sorted): {selected_cells_array}")
 
         # assure no two selected cells are from the same slice
-        if len(selected_cells_array[:, 0]) != len(
+        if len(selected_cells_array) > 0 and len(selected_cells_array[:, 0]) != len(
             set(selected_cells_array[:, 0])
         ):
-            most_common_value = stats.mode(np.array(self.selected_cells)[:, 0])[0]
+            most_common_value = stats.mode(selected_cells_array[:, 0])[0]
             notify(
                 f"Looks like you selected multiple cells in slice {most_common_value}. You can only connect cells from different slices."
             )
@@ -652,6 +654,9 @@ class TrackingWindow(QWidget):
         entries_to_add = []
         # check which clicked cells are not already in the tracks
         for cell in self.selected_cells:
+            if tracks_layer is None:
+                entries_to_add = self.selected_cells
+                break
             tracked = False
             for track_line in tracks_layer.data:
                 if np.all(track_line[1:4] == cell):
@@ -662,7 +667,9 @@ class TrackingWindow(QWidget):
                 
         # determine the track id to use
         # either use lowest id of clicked tracks or lowest missing id
-        track_ids = set(track_line[0] for track_line in tracks_layer.data)
+        track_ids = set()
+        if tracks_layer is not None:
+            track_ids = set(track_line[0] for track_line in tracks_layer.data)
         lowest_missing_id = 1
         while lowest_missing_id in track_ids:
             lowest_missing_id += 1
@@ -1122,7 +1129,8 @@ class TrackingWindow(QWidget):
         # assume that a track is being reassigned if cache exists
         tracks_layer = self.get_tracks_layer()
         if tracks_layer is None:
-            tracks_layer = self.viewer.add_tracks(cells, name="Tracks")
+            new_tracks = [np.insert(cell, 0, track_id) for cell in cells]
+            tracks_layer = self.viewer.add_tracks(new_tracks, name="Tracks")
             return
         tracks_objects = [tracks_layer.data]
         results_tracks = []
