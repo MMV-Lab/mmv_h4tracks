@@ -357,18 +357,6 @@ def _track_segmentation(widget):
             return
         
     time2 = time.time()
-    print(f"checking for tracks layer took {time2 - time1} seconds")
-
-    # these two calls are slow (30-40 seconds each)
-    extended_centroids = _calculate_centroids_parallel(widget, data)
-    time3 = time.time()
-    print(f"calculating centroids took {time3 - time2} seconds")
-    matches = _match_centroids_parallel(widget, extended_centroids)
-    time4 = time.time()
-    print(f"matching centroids took {time4 - time3} seconds")
-
-    tracks = _process_matches(matches)
-    time5 = time.time()
     logger.info(f"checking for tracks layer took {time2 - time1} seconds")
 
     # these two calls are slow (30-40 seconds each)
