@@ -336,8 +336,11 @@ def _track_segmentation(widget):
     widget, tracks, tracks_name
         the widget, the tracks and the name of the tracks layer
     """
+    starttime = time.time()
     QApplication.setOverrideCursor(Qt.WaitCursor)
     data = _get_segmentation_data(widget)
+    time1 = time.time()
+    logger.info(f"getting segmentation data took {time1 - starttime} seconds")
 
     # check for tracks layer
     _, collision = _check_for_tracks_layer(widget)
@@ -352,11 +355,21 @@ def _track_segmentation(widget):
         if ret == 65536:
             QApplication.restoreOverrideCursor()
             return
+        
+    time2 = time.time()
+    logger.info(f"checking for tracks layer took {time2 - time1} seconds")
 
+    # these two calls are slow (30-40 seconds each)
     extended_centroids = _calculate_centroids_parallel(widget, data)
+    time3 = time.time()
+    logger.info(f"calculating centroids took {time3 - time2} seconds")
     matches = _match_centroids_parallel(widget, extended_centroids)
+    time4 = time.time()
+    logger.info(f"matching centroids took {time4 - time3} seconds")
 
     tracks = _process_matches(matches)
+    time5 = time.time()
+    logger.info(f"processing matches took {time5 - time4} seconds")
     QApplication.restoreOverrideCursor()
     return tracks
 

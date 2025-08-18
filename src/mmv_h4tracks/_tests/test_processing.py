@@ -86,7 +86,7 @@ def test_display_models(create_widget):
         == "Neutrophil_granulocytes"
     )
 
-
+# TODO: ~45 second call, even timed out at some point (60s)
 @pytest.mark.integration
 @pytest.mark.schema
 def test_track_segmentation_schema(widget_with_segmentation, qtbot):
@@ -116,7 +116,8 @@ def test_track_segmentation_schema(widget_with_segmentation, qtbot):
         trk_data = result
 
     worker.returned.connect(capture_result)
-    with qtbot.waitSignal(worker.returned, timeout=60000) as blocker:
+    # can take up to ~70 seconds, so long timeout
+    with qtbot.waitSignal(worker.returned, timeout=90000) as blocker:
         blocker.wait()
     # check:
     # - tracking layer data exists
