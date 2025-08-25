@@ -79,7 +79,7 @@ class MMVH4TRACKS(QWidget):
         super().__init__(parent=parent)
         viewer = napari.current_viewer() if viewer is None else viewer
         self.viewer = viewer
-        self.initial_layers = [None, None]
+        self.align_cache = [None, None]
         self.callback_handler = CallbackHandler(self)
 
         ### QObjects
@@ -488,7 +488,7 @@ class MMVH4TRACKS(QWidget):
         )
         self.viewer.add_tracks(filtered_tracks, name="Tracks")
 
-        self.initial_layers = [
+        self.align_cache = [
             copy.deepcopy(segmentation),
             copy.deepcopy(filtered_tracks),
         ]
@@ -537,8 +537,8 @@ class MMVH4TRACKS(QWidget):
             "unit"
         )
         raw_layer.metadata["raw_metadata"] = f"frames={frames}\nunit={unit}"
-        # set initial layer
-        self.initial_layers[0] = copy.deepcopy(segmentation)
+        # set alignment cache
+        self.align_cache[0] = copy.deepcopy(segmentation)
 
     def create_implicit_tracks(self, _):
         """
@@ -593,7 +593,7 @@ class MMVH4TRACKS(QWidget):
             # user canceled the operation
             return
         self.viewer.add_tracks(filtered_tracks, name="Tracks")
-        self.initial_layers[1] = copy.deepcopy(filtered_tracks)
+        self.align_cache[1] = copy.deepcopy(filtered_tracks)
 
     def _load(self):
         """
