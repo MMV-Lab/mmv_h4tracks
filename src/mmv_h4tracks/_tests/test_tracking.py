@@ -9,6 +9,7 @@ from scipy.ndimage import center_of_mass
 
 from mmv_h4tracks import MMVH4TRACKS
 from mmv_h4tracks._constants import LINK_TEXT, UNLINK_TEXT
+import mmv_h4tracks._tracking as tracking
 
 PATH = Path(__file__).parent / "data"
 
@@ -1020,6 +1021,52 @@ class TestUpdateSingleCentroid:
     #         # check if error msg is correct - how??
     #         pass
 
+
+@pytest.mark.unit
+@pytest.mark.misc
+def test_update_centroid_modified(widget_with_seg_trk):
+    widget = widget_with_seg_trk
+
+    # adjust a single cell so centroid is changed
+    segmentation_layer = widget.viewer.layers["test_seg"]
+    segmentation_layer.data[5, 390:410, 920:940] = 44
+
+    tracks = widget.viewer.layers["test_trk"].data
+
+    # run update_centroid
+    retval = tracking.update_centroid(segmentation_layer.data, tracks, [44, 5, 403, 930])
+    assert retval is not None
+    print(retval)
+    assert np.array_equal([44, 5, 400, 930], retval)
+
+@pytest.mark.unit
+@pytest.mark.misc
+def test_update_centroid_medoid(widget_with_seg_trk):
+    widget = widget_with_seg_trk
+
+    # adjust single cell so centroid is outside of cell
+    segmentation_layer = widget.viewer.layers["test_seg"]
+    segmentation_layer.data[5, 390:410, 920:940] = 44
+    segmentation_layer.data[5, 385:405, 915:940] = 0
+    # it is now a horseshoe
+
+    tracks = widget.viewer.layers["test_trk"].data
+
+    retval = tracking.update_centroid(segmentation_layer.data, tracks, [44, 5, 403, 930])
+    assert retval is not None
+    print(retval)
+    assert np.array_equal([44, 5, 407, 930], retval)
+
+@pytest.mark.integration
+@pytest.mark.misc
+@pytest.mark.new
+def test_update_all_centroids_manual(widget_with_seg_trk):
+    widget = widget_with_seg_trk
+    window = widget.tracking_window
+
+    # run update_all_centroids
+    window.update_all_centroids()
+    assert True
 
 # @pytest.mark.integration
 # @pytest.mark.misc
