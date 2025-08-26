@@ -665,9 +665,11 @@ class TrackingWindow(QWidget):
                 
         # determine the track id to use
         # either use lowest id of clicked tracks or lowest missing id
-        track_ids = set()
+
         if tracks_layer is not None:
             track_ids = set(track_line[0] for track_line in tracks_layer.data)
+        else:
+            track_ids = set()
         lowest_missing_id = 1
         while lowest_missing_id in track_ids:
             lowest_missing_id += 1
