@@ -392,7 +392,7 @@ def test_fault_value(set_widget_up, layername_seg, layername_tracks, expected_va
     window = widget.evaluation_window
     eval_seg = viewer.layers[viewer.layers.index(layername_seg)].data
     eval_tracks = viewer.layers[viewer.layers.index(layername_tracks)].data
-    widget.align_cache = [eval_seg, eval_tracks]
+    widget.eval_cache = [eval_seg, eval_tracks]
     widget.combobox_segmentation.setCurrentIndex(
         widget.combobox_segmentation.findText("GT")
     )

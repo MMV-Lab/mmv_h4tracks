@@ -57,8 +57,6 @@ class TrackingWindow(QWidget):
 
         self.cached_tracks = None
         self.selected_cells = []
-        # initial layers saved in self.parent.align_cache
-        # segmentation -> 0, tracks -> 1
 
         ### QObjects
 
@@ -1024,7 +1022,7 @@ class TrackingWindow(QWidget):
             self.viewer.add_tracks(tracks, name="Tracks")
         else:
             tracks_layer.data = tracks
-        self.parent.align_cache[1] = tracks
+        self.parent.eval_cache[1] = tracks
         QApplication.restoreOverrideCursor()
 
     def remove_entries_from_tracks(self, cells: list):
@@ -1208,7 +1206,8 @@ class TrackingWindow(QWidget):
 
         label_data = np.array(label_layer.data)
         tracks = np.array(tracks_layer.data)
-        original_label_data = np.array(self.parent.align_cache[0])
+        original_label_data = np.array(self.parent.align_cache)
+        print(original_label_data)
 
         frames_to_update = []
 
@@ -1240,7 +1239,7 @@ class TrackingWindow(QWidget):
         updated_tracks = processing.remove_dot_tracks(updated_tracks)
         tracks_layer.data = updated_tracks
         print("Finished updating all centroids")
-        self.parent.align_cache = [label_data, updated_tracks]
+        self.parent.align_cache = label_data
 
     def update_single_centroid(self, track_id: int, frame: int):
         """

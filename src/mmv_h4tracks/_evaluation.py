@@ -182,7 +182,7 @@ class EvaluationWindow(QWidget):
         except ValueError as exc:
             handle_exception(exc)
             return
-        eval_seg = self.parent.align_cache[0]
+        eval_seg = self.parent.eval_cache[0]
         if eval_seg is None:
             notify(
                 "Segmentation and Tracks must be imported from zarr currently! (Drag and drop will be supported in the future). As a work-around for now export your data as zarr and import it."
@@ -350,8 +350,8 @@ class EvaluationWindow(QWidget):
             handle_exception(exc)
             return
 
-        eval_tracks = self.parent.align_cache[1]
-        eval_seg = self.parent.align_cache[0]
+        eval_tracks = self.parent.eval_cache[1]
+        eval_seg = self.parent.eval_cache[0]
         if eval_tracks is None or eval_seg is None:
             notify(
                 "Segmentation and Tracks must be imported from zarr currently! (Drag and drop will be supported in the future). As a work-around for now export your data as zarr and import it."
