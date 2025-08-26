@@ -1209,7 +1209,6 @@ class TrackingWindow(QWidget):
         label_data = np.array(label_layer.data)
         tracks = np.array(tracks_layer.data)
         original_label_data = np.array(self.parent.align_cache)
-        print(original_label_data)
 
         frames_to_update = []
 
