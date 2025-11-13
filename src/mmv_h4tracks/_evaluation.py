@@ -730,6 +730,9 @@ def get_matching_cell(base_layer, comparison_layer, base_id, z):
             max_intersection_over_union = intersection_over_union
             best_match_id = comparison_id
 
+    if 0 <max_intersection_over_union < 1:
+        print(f"Warning: IoU score {max_intersection_over_union} for cell {base_id} in z {z}")
+        
     if max_intersection_over_union < IOU_THRESHOLD:
         return 0
 
