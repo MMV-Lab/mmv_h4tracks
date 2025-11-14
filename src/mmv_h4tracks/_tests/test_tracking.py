@@ -1059,7 +1059,6 @@ def test_update_centroid_medoid(widget_with_seg_trk):
 
 @pytest.mark.integration
 @pytest.mark.misc
-@pytest.mark.new
 def test_update_all_centroids_manual(widget_with_seg_trk):
     widget = widget_with_seg_trk
     window = widget.tracking_window

@@ -277,7 +277,7 @@ def _segment_image(widget, demo=False):
             mask = np.asarray(mask)
 
     if not demo:
-        widget.parent.align_cache[0] = mask
+        widget.parent.align_cache = mask
     QApplication.restoreOverrideCursor()
     logger.info("Segmentation finished")
     return widget, mask
@@ -422,7 +422,7 @@ def _add_tracks_to_viewer(params):
     else:
         tracks_layer.data = tracks
     widget.parent.tracks = tracks
-    widget.parent.align_cache[1] = tracks
+    widget.parent.eval_cache[1] = tracks
     widget.parent.combobox_tracks.setCurrentText(layername)
 
 

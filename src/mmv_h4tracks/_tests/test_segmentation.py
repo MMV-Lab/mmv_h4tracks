@@ -8,6 +8,8 @@ import numpy as np
 from mmv_h4tracks import MMVH4TRACKS
 
 PATH = Path(__file__).parent / "data"
+IMAGE_EXTENSIONS = {".tif", ".tiff"}
+TRACK_EXTENSIONS = {".npy"}
 
 
 @pytest.fixture
@@ -19,15 +21,21 @@ def create_widget(make_napari_viewer):
 def viewer_with_data(create_widget):
     widget = create_widget
     viewer = widget.viewer
-    for file in list(Path(PATH / "images").iterdir()):
+    for file in Path(PATH / "images").iterdir():
+        if not file.is_file() or file.suffix.lower() not in IMAGE_EXTENSIONS:
+            continue
         image = BioImage(file).get_image_data("ZYX")
         name = file.stem
         viewer.add_image(image, name=name)
-    for file in list(Path(PATH / "segmentation").iterdir()):
+    for file in Path(PATH / "segmentation").iterdir():
+        if not file.is_file() or file.suffix.lower() not in IMAGE_EXTENSIONS:
+            continue
         image = BioImage(file).get_image_data("ZYX")
         name = file.stem
         viewer.add_labels(image, name=name)
-    for file in list(Path(PATH / "tracks").iterdir()):
+    for file in Path(PATH / "tracks").iterdir():
+        if not file.is_file() or file.suffix.lower() not in TRACK_EXTENSIONS:
+            continue
         tracks = np.load(file)
         name = file.stem
         viewer.add_tracks(tracks, name=name)

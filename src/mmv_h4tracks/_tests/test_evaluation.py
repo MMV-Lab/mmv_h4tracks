@@ -12,6 +12,8 @@ from mmv_h4tracks import MMVH4TRACKS
 
 # this tests if the analysis returns the proper values
 PATH = Path(__file__).parent / "data"
+IMAGE_EXTENSIONS = {".tif", ".tiff"}
+TRACK_EXTENSIONS = {".npy"}
 
 
 @pytest.fixture
@@ -37,12 +39,16 @@ def set_widget_up(create_widget):
     SEGMENTATION_GT = "GT"
     my_widget = create_widget
     viewer = my_widget.viewer
-    for file in list(Path(PATH / "segmentation").iterdir()):
+    for file in Path(PATH / "segmentation").iterdir():
+        if not file.is_file() or file.suffix.lower() not in IMAGE_EXTENSIONS:
+            continue
         print(file.stem)
         segmentation = BioImage(file).get_image_data("ZYX")
         name = file.stem
         viewer.add_labels(segmentation, name=name)
-    for file in list(Path(PATH / "tracks").iterdir()):
+    for file in Path(PATH / "tracks").iterdir():
+        if not file.is_file() or file.suffix.lower() not in TRACK_EXTENSIONS:
+            continue
         print(file.stem)
         tracks = np.load(file)
         name = file.stem
@@ -320,6 +326,46 @@ def test_added_edges(set_widget_up, layername, expected_value):
     _, ae = window.get_track_fault(gt_seg, gt_tracks, eval_seg, eval_tracks)
     assert ae == expected_value
 
+@pytest.mark.new
+@pytest.mark.eval
+@pytest.mark.eval_tracking
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "layername, expected_value",
+    [
+        ("added_edge", 0),
+        ("deleted_edge", 4),
+        ("centroid_outside", 2),
+        ("falsely_cut_tracks", 0),
+        ("switch", 4),
+    ],
+)
+def test_added_edges_changed_seg(set_widget_up, layername, expected_value):
+    """
+    Test if added edges are calculated correctly when segmentation is changed
+
+    Parameters
+    ----------
+    set_widget_up : MMVTracking
+        Instance of the main widget
+    layername : str
+        Name of the label layer to evaluate
+    expected_vale : float
+        Expected fault value for added edges
+    """
+    widget = set_widget_up
+    viewer = widget.viewer
+    window = widget.evaluation_window
+    gt_seg = viewer.layers[viewer.layers.index("GT")].data
+    eval_seg = viewer.layers[viewer.layers.index("seg_changed")].data
+    gt_tracks = viewer.layers[viewer.layers.index("GT_tracks")].data
+    eval_tracks_layer = viewer.layers[viewer.layers.index(layername)]
+    widget.combobox_tracks.setCurrentIndex(widget.combobox_tracks.findText(layername))
+    bounds = (0, gt_seg.shape[0])
+    window.adjust_centroids(eval_seg, eval_tracks_layer, bounds)
+    eval_tracks = eval_tracks_layer.data
+    _, ae = window.get_track_fault(gt_seg, gt_tracks, eval_seg, eval_tracks)
+    assert ae == expected_value
 
 @pytest.mark.eval
 @pytest.mark.eval_tracking
@@ -361,6 +407,47 @@ def test_deleted_edges(set_widget_up, layername, expected_value):
     de, _ = window.get_track_fault(gt_seg, gt_tracks, eval_seg, eval_tracks)
     assert de == expected_value
 
+@pytest.mark.new
+@pytest.mark.eval
+@pytest.mark.eval_tracking
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "layername, expected_value",
+    [
+        ("deleted_edge", 0),
+        ("added_edge", 5),
+        ("centroid_outside", 2),
+        ("falsely_cut_tracks", 0),
+        ("switch", 4),
+    ],
+)
+def test_deleted_edges(set_widget_up, layername, expected_value):
+    """
+    Test if deleted edges are calculated correctly
+
+    Parameters
+    ----------
+    set_widget_up : MMVTracking
+        Instance of the main widget
+    layername : str
+        Name of the label layer to evaluate
+    expected_vale : int
+        Expected fault value for deleted edges
+    """
+    widget = set_widget_up
+    viewer = widget.viewer
+    window = widget.evaluation_window
+    gt_seg = viewer.layers[viewer.layers.index("GT")].data
+    eval_seg = viewer.layers[viewer.layers.index("seg_changed")].data
+    gt_tracks = viewer.layers[viewer.layers.index("GT_tracks")].data
+    eval_tracks_layer = viewer.layers[viewer.layers.index(layername)]
+    widget.combobox_tracks.setCurrentIndex(widget.combobox_tracks.findText(layername))
+    bounds = (0, gt_seg.shape[0])
+    window.adjust_centroids(gt_seg, eval_tracks_layer, bounds)
+    eval_tracks = eval_tracks_layer.data
+    de, _ = window.get_track_fault(gt_seg, gt_tracks, eval_seg, eval_tracks)
+    assert de == expected_value
+
 
 @pytest.mark.eval
 @pytest.mark.eval_tracking
@@ -392,7 +479,7 @@ def test_fault_value(set_widget_up, layername_seg, layername_tracks, expected_va
     window = widget.evaluation_window
     eval_seg = viewer.layers[viewer.layers.index(layername_seg)].data
     eval_tracks = viewer.layers[viewer.layers.index(layername_tracks)].data
-    widget.align_cache = [eval_seg, eval_tracks]
+    widget.eval_cache = [eval_seg, eval_tracks]
     widget.combobox_segmentation.setCurrentIndex(
         widget.combobox_segmentation.findText("GT")
     )
