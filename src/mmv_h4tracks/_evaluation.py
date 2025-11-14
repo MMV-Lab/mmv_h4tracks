@@ -167,7 +167,11 @@ class EvaluationWindow(QWidget):
         Start the evaluate segmentation worker to keep UI responsive
         """
         self.parent.callback_handler.remove_callback_viewer()
+        print("Segmentation evaluation started…")
         worker = self.evaluate_segmentation()
+        worker.finished.connect(
+            lambda: print("Segmentation evaluation finished.")
+        )
         worker.start()
 
     @thread_worker
@@ -332,7 +336,11 @@ class EvaluationWindow(QWidget):
         Start the evaluate tracking worker to keep UI responsive
         """
         self.parent.callback_handler.remove_callback_viewer()
+        print("Tracking evaluation started…")
         worker = self.evaluate_tracking()
+        worker.finished.connect(
+            lambda: print("Tracking evaluation finished.")
+        )
         worker.start()
 
     @thread_worker
@@ -730,9 +738,6 @@ def get_matching_cell(base_layer, comparison_layer, base_id, z):
             max_intersection_over_union = intersection_over_union
             best_match_id = comparison_id
 
-    if 0 <max_intersection_over_union < 1:
-        print(f"Warning: IoU score {max_intersection_over_union} for cell {base_id} in z {z}")
-        
     if max_intersection_over_union < IOU_THRESHOLD:
         return 0
 
