@@ -167,7 +167,11 @@ class EvaluationWindow(QWidget):
         Start the evaluate segmentation worker to keep UI responsive
         """
         self.parent.callback_handler.remove_callback_viewer()
+        print("Segmentation evaluation started…")
         worker = self.evaluate_segmentation()
+        worker.finished.connect(
+            lambda: print("Segmentation evaluation finished.")
+        )
         worker.start()
 
     @thread_worker
@@ -182,7 +186,7 @@ class EvaluationWindow(QWidget):
         except ValueError as exc:
             handle_exception(exc)
             return
-        eval_seg = self.parent.align_cache[0]
+        eval_seg = self.parent.eval_cache[0]
         if eval_seg is None:
             notify(
                 "Segmentation and Tracks must be imported from zarr currently! (Drag and drop will be supported in the future). As a work-around for now export your data as zarr and import it."
@@ -332,7 +336,11 @@ class EvaluationWindow(QWidget):
         Start the evaluate tracking worker to keep UI responsive
         """
         self.parent.callback_handler.remove_callback_viewer()
+        print("Tracking evaluation started…")
         worker = self.evaluate_tracking()
+        worker.finished.connect(
+            lambda: print("Tracking evaluation finished.")
+        )
         worker.start()
 
     @thread_worker
@@ -350,8 +358,8 @@ class EvaluationWindow(QWidget):
             handle_exception(exc)
             return
 
-        eval_tracks = self.parent.align_cache[1]
-        eval_seg = self.parent.align_cache[0]
+        eval_tracks = self.parent.eval_cache[1]
+        eval_seg = self.parent.eval_cache[0]
         if eval_tracks is None or eval_seg is None:
             notify(
                 "Segmentation and Tracks must be imported from zarr currently! (Drag and drop will be supported in the future). As a work-around for now export your data as zarr and import it."
