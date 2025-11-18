@@ -37,7 +37,12 @@ def save_dialog(parent, filetype="*.ome.zarr", directory=""):
     )
     return filepath
 
-def save_ome_zarr(file, layers: list, implied_tracks: bool = True):
+def save_ome_zarr(
+    file,
+    layers: list,
+    implied_tracks: bool = True,
+    raw_data_was_multiscale: bool = False,
+):
     """
     Save the image, segmentation and tracking data to an OME-zarr file
 
@@ -47,6 +52,9 @@ def save_ome_zarr(file, layers: list, implied_tracks: bool = True):
         List of layers to save, in the order: raw image, segmentation
     implied_tracks : bool
         If True, the segmentation ids are equivalent to track ids
+    raw_data_was_multiscale : bool
+        If True, the original data was multiscale and should be saved as multiscale.
+        If False, save only the finest level (layers[0].data[0])
     """
     assert len(layers) == 2, "Only raw image and segmentation layers are supported"
     assert isinstance(layers[0], Image)
@@ -73,40 +81,118 @@ def save_ome_zarr(file, layers: list, implied_tracks: bool = True):
             unit = [string.split("=")[1] for string in raw_metadata if string.startswith("unit")][0]
         except IndexError:
             pass
-    axes = "yx"
-    if layers[0].ndim >= 4:
-        z_size = layers[0].data.shape[-3]
-        axes = "zyx"
-    else:
-        z_size = 1
-    if layers[0].rgb:
-        c_size = 3
-        axes = "c" + axes
-    else:
-        c_size = 1
-    axes = "t" + axes
-    x_size = layers[0].data.shape[-2]
-    y_size = layers[0].data.shape[-1]
-    t_size = layers[0].data.shape[0]
-    # dtype = layers[0].dtype
+    # Get shape from layer data (always multiscale list for display)
+    original_shape = layers[0].data[0].shape
+    # Get scales from layer (needed for metadata)
     scales = layers[0].scale
-    # layer[0].multiscale might not matter explicitly
-    chunk_shape = (1, layers[0].data.shape[1], layers[0].data.shape[2])
-
+    
     # write the raw image data
-    image_data = np.stack(layers[0].data)
-    if "0" in root:
-        # replace existing image data
-        root["0"] = image_data
+    # Layer data is always a multiscale list for display
+    if raw_data_was_multiscale:
+        # Save all multiscale levels
+        image_data_list = layers[0].data
+        # Prepare first level - ensure it has time dimension
+        first_level = image_data_list[0]
+        if first_level.ndim == 3:
+            first_level = np.stack([first_level])
+        # Calculate axes based on final shape
+        final_shape = first_level.shape
+        axes = "yx"
+        if len(final_shape) >= 4:
+            z_size = final_shape[-3]
+            axes = "zyx"
+        else:
+            z_size = 1
+        if layers[0].rgb:
+            c_size = 3
+            axes = "c" + axes
+        else:
+            c_size = 1
+        axes = "t" + axes
+        x_size = final_shape[-2]
+        y_size = final_shape[-1]
+        t_size = final_shape[0]
+        # chunk_shape should match spatial dimensions (excluding time)
+        if len(final_shape) == 4:  # TZYX
+            chunk_shape = (1, final_shape[1], final_shape[2], final_shape[3])
+        elif len(final_shape) == 3:  # TYX
+            chunk_shape = (1, final_shape[1], final_shape[2])
+        else:
+            chunk_shape = (1, final_shape[1], final_shape[2])
+        
+        # Remove existing multiscale data if present
+        for key in list(root.keys()):
+            if key.isdigit():
+                del root[key]
+        # Write first level with write_image to set up structure, then write others directly
+        if "0" in root:
+            root["0"] = first_level
+        else:
+            write_image(
+                image=first_level,
+                group=root,
+                axes=axes,
+                storage_options=dict(chunks=chunk_shape),
+                scaler=None,
+            )
+        # Write remaining levels directly
+        for i in range(1, len(image_data_list)):
+            level_data = image_data_list[i]
+            if level_data.ndim == 3:
+                level_data = np.stack([level_data])
+            root[str(i)] = level_data
     else:
-        # name omitted as it breaks the writer
-        write_image(
-            image = image_data,
-            group = root,
-            axes = axes,
-            storage_options = dict(chunks=chunk_shape),
-            scaler = None,
-        )
+        # Save only the finest level (single resolution)
+        image_data = layers[0].data[0]
+        # Ensure it has time dimension (stack only if 3D)
+        # If already 4D, assume it already has time dimension
+        if image_data.ndim == 3:
+            image_data = np.stack([image_data])
+        
+        # Calculate axes based on final shape
+        final_shape = image_data.shape
+        ndim = len(final_shape)
+        axes = "yx"
+        if ndim >= 4:
+            z_size = final_shape[-3]
+            axes = "zyx"
+        else:
+            z_size = 1
+        if layers[0].rgb:
+            c_size = 3
+            axes = "c" + axes
+        else:
+            c_size = 1
+        axes = "t" + axes
+        # Verify axes length matches dimensions
+        if len(axes) != ndim:
+            raise ValueError(
+                f"Axes length ({len(axes)}) must match number of dimensions ({ndim}). "
+                f"Shape: {final_shape}, Axes: {axes}"
+            )
+        x_size = final_shape[-2]
+        y_size = final_shape[-1]
+        t_size = final_shape[0]
+        # chunk_shape should match spatial dimensions (excluding time)
+        if len(final_shape) == 4:  # TZYX
+            chunk_shape = (1, final_shape[1], final_shape[2], final_shape[3])
+        elif len(final_shape) == 3:  # TYX
+            chunk_shape = (1, final_shape[1], final_shape[2])
+        else:
+            chunk_shape = (1, final_shape[1], final_shape[2])
+        
+        if "0" in root:
+            # replace existing image data
+            root["0"] = image_data
+        else:
+            # name omitted as it breaks the writer
+            write_image(
+                image=image_data,
+                group=root,
+                axes=axes,
+                storage_options=dict(chunks=chunk_shape),
+                scaler=None,
+            )
     
     axes_metadata = []
     for axis in axes:
@@ -120,28 +206,53 @@ def save_ome_zarr(file, layers: list, implied_tracks: bool = True):
     scale_metadata = [round(scale, 6) for scale in scales]
 
     # write the raw image metadata
-    image_group = root["0"]
-    image_group.attrs["multiscales"] = [{
-        "version": "0.4",
-        "axes": axes_metadata,
-        "datasets": [{
+    # For multiscale, use root group; for single, use "0" group
+    if raw_data_was_multiscale:
+        image_group = root
+        # Create datasets list for all multiscale levels
+        datasets = []
+        for i in range(len(image_data_list)):
+            # Calculate scale for this level (each level is 2x downsampled from previous)
+            # Level 0 (finest) has original scale, level 1 has 2x scale, level 2 has 4x scale, etc.
+            level_scale = [s * (2 ** i) for s in scale_metadata]
+            datasets.append({
+                "path": str(i),
+                "coordinateTransformations": [{
+                    "type": "scale",
+                    "scale": [round(s, 6) for s in level_scale]
+                }]
+            })
+        # Get data min/max for omero metadata (across all levels)
+        data_min = min(level.min() for level in image_data_list)
+        data_max = max(level.max() for level in image_data_list)
+    else:
+        image_group = root["0"]
+        datasets = [{
             "path": "0",
             "coordinateTransformations": [{
                 "type": "scale",
                 "scale": scale_metadata
             }]
         }]
+        # Get data min/max for omero metadata (single level)
+        data_min = image_data.min()
+        data_max = image_data.max()
+    
+    image_group.attrs["multiscales"] = [{
+        "version": "0.4",
+        "axes": axes_metadata,
+        "datasets": datasets
     }]
-
+    
     image_group.attrs["omero"] = {
         "channels": [{
             "active": True,
             "label": layers[0].name,
             "window": {
-                "start": float(layers[0].data.min()),
-                "end": float(layers[0].data.max()),
-                "min": int(layers[0].data.min()),
-                "max": int(layers[0].data.max())
+                "start": float(data_min),
+                "end": float(data_max),
+                "min": int(data_min),
+                "max": int(data_max)
             },
             "color": "7F7F7F" # figure out correct color for colormap gray in napari
         }],
@@ -153,12 +264,19 @@ def save_ome_zarr(file, layers: list, implied_tracks: bool = True):
     }
 
     # write the segmentation data
+    # Calculate chunk_shape for segmentation (3D: TYX)
+    seg_shape = layers[1].data.shape
+    if len(seg_shape) == 3:  # TYX
+        seg_chunk_shape = (1, seg_shape[1], seg_shape[2])
+    else:
+        seg_chunk_shape = (1, seg_shape[1], seg_shape[2]) if len(seg_shape) >= 3 else (1, seg_shape[0], seg_shape[1])
+    
     write_labels(
         labels = layers[1].data,
         group = root, #label_group,
         name = "TrackedCells",
         axes = "tyx",
-        storage_options = dict(chunks=chunk_shape),
+        storage_options = dict(chunks=seg_chunk_shape),
         scaler = None,
     )
 

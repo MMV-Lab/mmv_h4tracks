@@ -93,3 +93,60 @@ def zarr_reader(filename):
         Array or Group
     """
     return zarr.open(filename, mode="a"), False
+
+
+def is_raw_data_multiscale_zarr(zarr_file):
+    """
+    Check if raw_data in a zarr file is multiscale.
+    
+    Parameters
+    ----------
+    zarr_file : zarr.Group
+        The zarr file/group to check
+        
+    Returns
+    -------
+    bool
+        True if raw_data is multiscale (zarr.Group), False if single array
+    """
+    raw_data_source = zarr_file.get("raw_data")
+    return isinstance(raw_data_source, zarr.Group)
+
+
+def is_raw_data_multiscale_ome_zarr(zarr_file):
+    """
+    Check if raw image in an OME-Zarr file is multiscale.
+    
+    For multiscale files, metadata is on root group.
+    For single resolution files, metadata is on "0" group.
+    
+    Parameters
+    ----------
+    zarr_file : zarr.Group
+        The OME-Zarr file/group to check
+        
+    Returns
+    -------
+    bool
+        True if image is multiscale (multiple datasets in multiscales metadata), False otherwise
+    """
+    # Check root attrs first (for multiscale files)
+    try:
+        root_metadata = dict(zarr_file.attrs)
+        multiscales_metadata = root_metadata.get("multiscales", [])
+        if multiscales_metadata and len(multiscales_metadata[0].get("datasets", [])) > 1:
+            return True
+    except (AttributeError, KeyError, IndexError):
+        pass
+    
+    # Check "0" group attrs (for single resolution files)
+    try:
+        raw_image = zarr_file.get("0")
+        img_metadata = dict(raw_image.attrs)
+        multiscales_metadata = img_metadata.get("multiscales", [])
+        if multiscales_metadata and len(multiscales_metadata[0].get("datasets", [])) > 1:
+            return True
+    except (AttributeError, KeyError, IndexError):
+        pass
+    
+    return False
