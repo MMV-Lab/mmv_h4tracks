@@ -253,7 +253,7 @@ class MMVH4TRACKS(QWidget):
             ("G", self.hotkey_overlap_single_tracking),
             ("H", self.hotkey_separate),
             ("Q", self.hotkey_select_id),
-            ("ctrl+T", self.create_implicit_tracks),
+            ("ctrl+T", self.create_implicit_tracks_wrapper),
             ("ctrl+A", self.hotkey_display_all)
         ]
         for custom_bind in custom_binds:
@@ -534,7 +534,9 @@ class MMVH4TRACKS(QWidget):
 
         # Check if tracks are implied
         if metadata["implied_tracks"]:
-            self.create_implicit_tracks(None)
+            filtered_tracks = self.create_implicit_tracks()
+            self.viewer.add_tracks(filtered_tracks, name="Tracks")
+            self.eval_cache[1] = copy.deepcopy(filtered_tracks)
         
         # Add metadata to layers
         raw_layer.metadata["raw_metadata"] = f"frames={metadata['frames']}\nunit={metadata['unit']}"
@@ -543,15 +545,16 @@ class MMVH4TRACKS(QWidget):
         self.align_cache = copy.deepcopy(segmentation)
         self.eval_cache[0] = copy.deepcopy(segmentation)
 
-    def create_implicit_tracks(self, _):
+    def create_implicit_tracks(self):
         """
         Creates implicit tracks from the segmentation data.
-        Can be called with a hotkey.
-        Ignored parameter _ is required for the hotkey binding.
-        Hotkey call passes viewer.
+        
+        Returns
+        -------
+        np.ndarray
+            Array of filtered tracks with shape (n_tracks, 4) where columns are
+            [track_id, time, y, x]. Tracks that only exist in a single frame are filtered out.
         """
-        if _ is not None:
-            print("Secret unlocked!")
         segmentation_name = self.combobox_segmentation.currentText()
         seg_layer = grab_layer(self.viewer, segmentation_name)
         seg_data = seg_layer.data
@@ -594,9 +597,21 @@ class MMVH4TRACKS(QWidget):
             np.where(np.isin(tracks[:, 0], filtered_track_ids[0, :], invert=True)),
             0,
         )
+        return filtered_tracks
+
+    def create_implicit_tracks_wrapper(self, _):
+        """
+        Wrapper function for creating implicit tracks and adding them to the viewer.
+        Can be called with a hotkey.
+        Ignored parameter _ is required for the hotkey binding.
+        Hotkey call passes viewer.
+        """
+        if _ is not None:
+            print("Secret unlocked!")
         if not self._clear_layers(["Tracks"]):
             # user canceled the operation
             return
+        filtered_tracks = self.create_implicit_tracks()
         self.viewer.add_tracks(filtered_tracks, name="Tracks")
         self.eval_cache[1] = copy.deepcopy(filtered_tracks)
 
