@@ -41,7 +41,7 @@ def save_ome_zarr(
     file,
     layers: list,
     implied_tracks: bool = True,
-    raw_data_was_multiscale: bool = False,
+    is_multiscale: bool = False,
 ):
     """
     Save the image, segmentation and tracking data to an OME-zarr file
@@ -52,7 +52,7 @@ def save_ome_zarr(
         List of layers to save, in the order: raw image, segmentation
     implied_tracks : bool
         If True, the segmentation ids are equivalent to track ids
-    raw_data_was_multiscale : bool
+    is_multiscale : bool
         If True, the original data was multiscale and should be saved as multiscale.
         If False, save only the finest level (layers[0].data[0])
     """
@@ -88,7 +88,7 @@ def save_ome_zarr(
     
     # write the raw image data
     # Layer data is always a multiscale list for display
-    if raw_data_was_multiscale:
+    if is_multiscale:
         # Save all multiscale levels
         image_data_list = layers[0].data
         # Prepare first level - ensure it has time dimension
@@ -207,7 +207,7 @@ def save_ome_zarr(
 
     # write the raw image metadata
     # For multiscale, use root group; for single, use "0" group
-    if raw_data_was_multiscale:
+    if is_multiscale:
         image_group = root
         # Create datasets list for all multiscale levels
         datasets = []

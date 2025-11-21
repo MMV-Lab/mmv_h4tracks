@@ -37,8 +37,9 @@ from ._evaluation import EvaluationWindow
 from ._reader import (
     open_dialog,
     napari_get_reader,
-    is_raw_data_multiscale_zarr,
-    is_raw_data_multiscale_ome_zarr,
+    check_multiscale_image,
+    load_zarr_data,
+    load_ome_zarr_data,
 )
 from ._segmentation import SegmentationWindow
 from ._tracking import TrackingWindow, calculate_medoid
@@ -90,7 +91,7 @@ class MMVH4TRACKS(QWidget):
         self.eval_cache = [None, None]
         self.callback_handler = CallbackHandler(self)
         # track if original raw data was multiscale
-        self.raw_data_was_multiscale = False
+        self.is_multiscale = False
 
         ### QObjects
 
@@ -477,46 +478,24 @@ class MMVH4TRACKS(QWidget):
             # user canceled the operation
             return
 
-        # add layers to viewer
-        self.raw_data_was_multiscale = is_raw_data_multiscale_zarr(zarr_file)
-        raw_data_source = zarr_file["raw_data"]
-        if self.raw_data_was_multiscale:
-            # Original was multiscale - get all numeric keys and sort them
-            numeric_keys = sorted([int(k) for k in raw_data_source.keys() if k.isdigit()])
-            raw_levels = [raw_data_source[str(k)][:] for k in numeric_keys]
-        else:
-            # Original was single array
-            raw_data = raw_data_source[:]
-            raw_levels = _build_multiscale(raw_data)
+        # Load data from zarr file
+        raw_levels, segmentation, filtered_tracks, self.is_multiscale = load_zarr_data(zarr_file)
+        
+        # Add layers to viewer
         contrast_limits = (
             float(raw_levels[0].min()),
             float(raw_levels[0].max()),
         )
         self.viewer.add_image(
             raw_levels,
-            name="Raw Image (multiscale)",
+            name="Raw Image",
             multiscale=True,
             contrast_limits=contrast_limits,
         )
-        segmentation = zarr_file["segmentation_data"][:]
-
         self.viewer.add_labels(segmentation, name="Segmentation Data")
-        # save tracks so we can delete one slice tracks first
-        tracks = zarr_file["tracking_data"][:]
-        # Filter track ids of tracks that just occur once
-        count_of_track_ids = np.unique(tracks[:, 0], return_counts=True)
-        filtered_track_ids = np.delete(
-            count_of_track_ids, count_of_track_ids[1] == 1, 1
-        )
-
-        # Remove tracks that only exist in one slice
-        filtered_tracks = np.delete(
-            tracks,
-            np.where(np.isin(tracks[:, 0], filtered_track_ids[0, :], invert=True)),
-            0,
-        )
         self.viewer.add_tracks(filtered_tracks, name="Tracks")
 
+        # Set widget state
         self.align_cache = copy.deepcopy(segmentation)
         self.eval_cache = [
             copy.deepcopy(segmentation),
@@ -527,88 +506,40 @@ class MMVH4TRACKS(QWidget):
         self.combobox_tracks.setCurrentText("Tracks")
 
     def _load_ome_zarr(self, zarr_file):
-        generic_metadata = dict(zarr_file.attrs)
+        # Load data from OME-Zarr file
         try:
-            labels_metadata = dict(zarr_file.get("labels").attrs)
-        except AttributeError:
-            print("No labels found in OME-Zarr file.")
+            raw_levels, segmentation, metadata, self.is_multiscale = load_ome_zarr_data(zarr_file)
+        except ValueError as e:
+            print(f"Error loading OME-Zarr file: {e}")
             return
-        label_value = labels_metadata.get("labels", "TrackedCells")
-        label_name = label_value[0] if isinstance(label_value, (list, tuple)) else label_value
-        # Check if original was multiscale first
-        self.raw_data_was_multiscale = is_raw_data_multiscale_ome_zarr(zarr_file)
         
-        # Read raw image metadata - for multiscale, it's on root; for single, it's on "0"
-        if self.raw_data_was_multiscale:
-            # Multiscale: metadata is on root group
-            try:
-                img_metadata = dict(zarr_file.attrs)
-                if not img_metadata:
-                    print(f"Warning: root attrs is empty. Available keys in root: {list(zarr_file.keys())}")
-            except AttributeError:
-                print("No image metadata found in OME-Zarr file.")
-                return
-            # Original was multiscale - read all levels
-            if "multiscales" not in img_metadata or len(img_metadata["multiscales"]) == 0:
-                print("Warning: multiscales metadata not found in root, trying to infer from available datasets")
-                # Fallback: look for numeric keys in root
-                numeric_keys = sorted([int(k) for k in zarr_file.keys() if k.isdigit()])
-                if len(numeric_keys) > 1:
-                    raw_levels = [zarr_file.get(str(k))[:] for k in numeric_keys]
-                else:
-                    print("Error: Could not determine multiscale structure")
-                    return
-            else:
-                datasets = img_metadata["multiscales"][0]["datasets"]
-                raw_levels = [zarr_file.get(ds["path"])[:] for ds in datasets]
-        else:
-            # Single resolution: metadata is on "0" group
-            raw_image = zarr_file.get("0")
-            try:
-                img_metadata = dict(raw_image.attrs)
-            except AttributeError:
-                print("No image metadata found in OME-Zarr file.")
-                return
-            # Original was single resolution
-            raw_levels = _build_multiscale(raw_image[:])
-        # read segmentation
-        segmentation = zarr_file.get(f"labels/{label_name}/0")
-        try:
-            seg_metadata = dict(zarr_file.get(f"labels/{label_name}").attrs)
-        except AttributeError:
-            seg_metadata = dict()
-        # clear layers if they exist
+        # Clear layers if they exist
         layernames = ["Raw Image", "Segmentation Data"]
         if not self._clear_layers(layernames):
             # user canceled the operation
             return
-        # add layers to viewer
+        
+        # Add layers to viewer
         contrast_limits = (
             float(raw_levels[0].min()),
             float(raw_levels[0].max()),
         )
         raw_layer = self.viewer.add_image(
             raw_levels,
-            name="Raw Image (multiscale)",
+            name="Raw Image",
             multiscale=True,
             contrast_limits=contrast_limits,
         )
         self.viewer.add_labels(segmentation[:], name="Segmentation Data")
 
-        # check if tracks are implied
-        if "implied_tracks" in seg_metadata and seg_metadata["implied_tracks"]:
+        # Check if tracks are implied
+        if metadata["implied_tracks"]:
             self.create_implicit_tracks(None)
-        # add metadata to layers
-        frames = generic_metadata.get("frames", None)
-        # Try to get unit from multiscales metadata if available
-        unit = "unit"
-        if "multiscales" in img_metadata and len(img_metadata["multiscales"]) > 0:
-            unit = next(
-                (ax.get("unit", "unit") for ax in img_metadata["multiscales"][0].get("axes", []) if ax.get("name") in ["z", "y", "x"]),
-                "unit"
-            )
-        raw_layer.metadata["raw_metadata"] = f"frames={frames}\nunit={unit}"
-        # set alignment cache
+        
+        # Add metadata to layers
+        raw_layer.metadata["raw_metadata"] = f"frames={metadata['frames']}\nunit={metadata['unit']}"
+        
+        # Set alignment cache
         self.align_cache = copy.deepcopy(segmentation)
         self.eval_cache[0] = copy.deepcopy(segmentation)
 
@@ -621,7 +552,9 @@ class MMVH4TRACKS(QWidget):
         """
         if _ is not None:
             print("Secret unlocked!")
-        seg_data = self.viewer.layers["Segmentation Data"].data
+        segmentation_name = self.combobox_segmentation.currentText()
+        seg_layer = grab_layer(self.viewer, segmentation_name)
+        seg_data = seg_layer.data
 
         tracks = []
 
@@ -714,7 +647,7 @@ class MMVH4TRACKS(QWidget):
         layers = [raw_layer, segmentation_layer]
 
         self.assistant_window.align_ids_on_click(saving=True)
-        save_ome_zarr(self.zarr, layers, raw_data_was_multiscale=self.raw_data_was_multiscale)
+        save_ome_zarr(self.zarr, layers, is_multiscale=self.is_multiscale)
         QApplication.restoreOverrideCursor()
 
     def save_as(self):
@@ -747,7 +680,7 @@ class MMVH4TRACKS(QWidget):
         save_ome_zarr(
             path,
             layers,
-            raw_data_was_multiscale=self.raw_data_was_multiscale)
+            is_multiscale=self.is_multiscale)
         QApplication.restoreOverrideCursor()
 
     def get_process_limit(self):
@@ -803,13 +736,3 @@ class MMVH4TRACKS(QWidget):
         self.progress_bar.setTextVisible(True)
 
 
-def _build_multiscale(image: np.ndarray):
-    """Return list of progressively downsampled versions of the given image."""
-    levels = [image]
-    current = image
-    for _ in range(3):
-        if any(dim <= 1 for dim in current.shape[-2:]):
-            break
-        current = current[..., ::2, ::2]
-        levels.append(current)
-    return levels
