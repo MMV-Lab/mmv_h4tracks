@@ -34,7 +34,13 @@ from ._assistant import AssistantWindow
 from ._analysis import AnalysisWindow
 from ._evaluation import EvaluationWindow
 
-from ._reader import open_dialog, napari_get_reader
+from ._reader import (
+    open_dialog,
+    napari_get_reader,
+    check_multiscale_image,
+    load_zarr_data,
+    load_ome_zarr_data,
+)
 from ._segmentation import SegmentationWindow
 from ._tracking import TrackingWindow, calculate_medoid
 from ._writer import save_ome_zarr
@@ -84,6 +90,8 @@ class MMVH4TRACKS(QWidget):
         # cache segmentation&tracks since creation
         self.eval_cache = [None, None]
         self.callback_handler = CallbackHandler(self)
+        # track if original raw data was multiscale
+        self.is_multiscale = False
 
         ### QObjects
 
@@ -245,7 +253,7 @@ class MMVH4TRACKS(QWidget):
             ("G", self.hotkey_overlap_single_tracking),
             ("H", self.hotkey_separate),
             ("Q", self.hotkey_select_id),
-            ("ctrl+T", self.create_implicit_tracks),
+            ("ctrl+T", self.create_implicit_tracks_wrapper),
             ("ctrl+A", self.hotkey_display_all)
         ]
         for custom_bind in custom_binds:
@@ -470,27 +478,24 @@ class MMVH4TRACKS(QWidget):
             # user canceled the operation
             return
 
-        # add layers to viewer
-        self.viewer.add_image(zarr_file["raw_data"][:], name="Raw Image")
-        segmentation = zarr_file["segmentation_data"][:]
-
+        # Load data from zarr file
+        raw_levels, segmentation, filtered_tracks, self.is_multiscale = load_zarr_data(zarr_file)
+        
+        # Add layers to viewer
+        contrast_limits = (
+            float(raw_levels[0].min()),
+            float(raw_levels[0].max()),
+        )
+        self.viewer.add_image(
+            raw_levels,
+            name="Raw Image",
+            multiscale=True,
+            contrast_limits=contrast_limits,
+        )
         self.viewer.add_labels(segmentation, name="Segmentation Data")
-        # save tracks so we can delete one slice tracks first
-        tracks = zarr_file["tracking_data"][:]
-        # Filter track ids of tracks that just occur once
-        count_of_track_ids = np.unique(tracks[:, 0], return_counts=True)
-        filtered_track_ids = np.delete(
-            count_of_track_ids, count_of_track_ids[1] == 1, 1
-        )
-
-        # Remove tracks that only exist in one slice
-        filtered_tracks = np.delete(
-            tracks,
-            np.where(np.isin(tracks[:, 0], filtered_track_ids[0, :], invert=True)),
-            0,
-        )
         self.viewer.add_tracks(filtered_tracks, name="Tracks")
 
+        # Set widget state
         self.align_cache = copy.deepcopy(segmentation)
         self.eval_cache = [
             copy.deepcopy(segmentation),
@@ -501,60 +506,58 @@ class MMVH4TRACKS(QWidget):
         self.combobox_tracks.setCurrentText("Tracks")
 
     def _load_ome_zarr(self, zarr_file):
-        generic_metadata = dict(zarr_file.attrs)
+        # Load data from OME-Zarr file
         try:
-            labels_metadata = dict(zarr_file.get("labels").attrs)
-        except AttributeError:
-            print("No labels found in OME-Zarr file.")
+            raw_levels, segmentation, metadata, self.is_multiscale = load_ome_zarr_data(zarr_file)
+        except ValueError as e:
+            print(f"Error loading OME-Zarr file: {e}")
             return
-        label_value = labels_metadata.get("labels", "TrackedCells")
-        label_name = label_value[0] if isinstance(label_value, (list, tuple)) else label_value
-        # read raw image
-        raw_image = zarr_file.get("0")
-        try:
-            img_metadata = dict(raw_image.attrs)
-        except AttributeError:
-            print("No image metadata found in OME-Zarr file.")
-            return
-        # read segmentation
-        segmentation = zarr_file.get(f"labels/{label_name}/0")
-        try:
-            seg_metadata = dict(zarr_file.get(f"labels/{label_name}").attrs)
-        except AttributeError:
-            seg_metadata = dict()
-        # clear layers if they exist
+        
+        # Clear layers if they exist
         layernames = ["Raw Image", "Segmentation Data"]
         if not self._clear_layers(layernames):
             # user canceled the operation
             return
-        # add layers to viewer
-        raw_layer = self.viewer.add_image(raw_image[:], name="Raw Image")
+        
+        # Add layers to viewer
+        contrast_limits = (
+            float(raw_levels[0].min()),
+            float(raw_levels[0].max()),
+        )
+        raw_layer = self.viewer.add_image(
+            raw_levels,
+            name="Raw Image",
+            multiscale=True,
+            contrast_limits=contrast_limits,
+        )
         self.viewer.add_labels(segmentation[:], name="Segmentation Data")
 
-        # check if tracks are implied
-        if "implied_tracks" in seg_metadata and seg_metadata["implied_tracks"]:
-            self.create_implicit_tracks(None)
-        # add metadata to layers
-        frames = generic_metadata.get("frames", None)
-        unit = next(
-            (ax.get("unit", "unit") for ax in img_metadata["multiscales"][0]["axes"] if ax["name"] in ["z", "y", "x"]),
-            "unit"
-        )
-        raw_layer.metadata["raw_metadata"] = f"frames={frames}\nunit={unit}"
-        # set alignment cache
+        # Check if tracks are implied
+        if metadata["implied_tracks"]:
+            filtered_tracks = self.create_implicit_tracks()
+            self.viewer.add_tracks(filtered_tracks, name="Tracks")
+            self.eval_cache[1] = copy.deepcopy(filtered_tracks)
+        
+        # Add metadata to layers
+        raw_layer.metadata["raw_metadata"] = f"frames={metadata['frames']}\nunit={metadata['unit']}"
+        
+        # Set alignment cache
         self.align_cache = copy.deepcopy(segmentation)
         self.eval_cache[0] = copy.deepcopy(segmentation)
 
-    def create_implicit_tracks(self, _):
+    def create_implicit_tracks(self):
         """
         Creates implicit tracks from the segmentation data.
-        Can be called with a hotkey.
-        Ignored parameter _ is required for the hotkey binding.
-        Hotkey call passes viewer.
+        
+        Returns
+        -------
+        np.ndarray
+            Array of filtered tracks with shape (n_tracks, 4) where columns are
+            [track_id, time, y, x]. Tracks that only exist in a single frame are filtered out.
         """
-        if _ is not None:
-            print("Secret unlocked!")
-        seg_data = self.viewer.layers["Segmentation Data"].data
+        segmentation_name = self.combobox_segmentation.currentText()
+        seg_layer = grab_layer(self.viewer, segmentation_name)
+        seg_data = seg_layer.data
 
         tracks = []
 
@@ -594,9 +597,21 @@ class MMVH4TRACKS(QWidget):
             np.where(np.isin(tracks[:, 0], filtered_track_ids[0, :], invert=True)),
             0,
         )
+        return filtered_tracks
+
+    def create_implicit_tracks_wrapper(self, _):
+        """
+        Wrapper function for creating implicit tracks and adding them to the viewer.
+        Can be called with a hotkey.
+        Ignored parameter _ is required for the hotkey binding.
+        Hotkey call passes viewer.
+        """
+        if _ is not None:
+            print("Secret unlocked!")
         if not self._clear_layers(["Tracks"]):
             # user canceled the operation
             return
+        filtered_tracks = self.create_implicit_tracks()
         self.viewer.add_tracks(filtered_tracks, name="Tracks")
         self.eval_cache[1] = copy.deepcopy(filtered_tracks)
 
@@ -647,7 +662,7 @@ class MMVH4TRACKS(QWidget):
         layers = [raw_layer, segmentation_layer]
 
         self.assistant_window.align_ids_on_click(saving=True)
-        save_ome_zarr(self.zarr, layers)
+        save_ome_zarr(self.zarr, layers, is_multiscale=self.is_multiscale)
         QApplication.restoreOverrideCursor()
 
     def save_as(self):
@@ -679,7 +694,8 @@ class MMVH4TRACKS(QWidget):
         self.assistant_window.align_ids_on_click(saving=True)
         save_ome_zarr(
             path,
-            layers)
+            layers,
+            is_multiscale=self.is_multiscale)
         QApplication.restoreOverrideCursor()
 
     def get_process_limit(self):
@@ -733,3 +749,5 @@ class MMVH4TRACKS(QWidget):
         """
         self.progress_bar.setFormat(text + " %p%")
         self.progress_bar.setTextVisible(True)
+
+
