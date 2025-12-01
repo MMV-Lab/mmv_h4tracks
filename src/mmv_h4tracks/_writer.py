@@ -81,16 +81,34 @@ def save_ome_zarr(
             unit = [string.split("=")[1] for string in raw_metadata if string.startswith("unit")][0]
         except IndexError:
             pass
-    # Get shape from layer data (always multiscale list for display)
-    original_shape = layers[0].data[0].shape
+    
+    # Check if the image layer is multiscale or single resolution
+    # Multiscale layers have data as a list/tuple of arrays (one per resolution level)
+    # Single resolution layers have data as a numpy array
+    layer_data = layers[0].data
+    # Check actual layer structure: multiscale if list/tuple with more than 1 element
+    is_layer_multiscale = isinstance(layer_data, (list, tuple)) and len(layer_data) > 1
+    
+    # Determine how to save:
+    # - If is_multiscale is True: original data was multiscale, save all levels
+    # - If is_multiscale is False: save as single resolution (use first level if layer is multiscale for display)
+    save_as_multiscale = is_multiscale
+    
+    # Get shape from layer data
+    if isinstance(layer_data, (list, tuple)) and len(layer_data) > 0:
+        # Layer is multiscale (or list with one element) - get shape from first level
+        original_shape = layer_data[0].shape
+    else:
+        # Layer is single resolution array
+        original_shape = layer_data.shape
+    
     # Get scales from layer (needed for metadata)
     scales = layers[0].scale
     
     # write the raw image data
-    # Layer data is always a multiscale list for display
-    if is_multiscale:
+    if save_as_multiscale:
         # Save all multiscale levels
-        image_data_list = layers[0].data
+        image_data_list = layer_data
         # Prepare first level - ensure it has time dimension
         first_level = image_data_list[0]
         if first_level.ndim == 3:
@@ -143,7 +161,11 @@ def save_ome_zarr(
             root[str(i)] = level_data
     else:
         # Save only the finest level (single resolution)
-        image_data = layers[0].data[0]
+        # Handle both cases: data as array or data as list with one element
+        if isinstance(layer_data, (list, tuple)) and len(layer_data) > 0:
+            image_data = layer_data[0]
+        else:
+            image_data = layer_data
         # Ensure it has time dimension (stack only if 3D)
         # If already 4D, assume it already has time dimension
         if image_data.ndim == 3:
@@ -207,7 +229,7 @@ def save_ome_zarr(
 
     # write the raw image metadata
     # For multiscale, use root group; for single, use "0" group
-    if is_multiscale:
+    if save_as_multiscale:
         image_group = root
         # Create datasets list for all multiscale levels
         datasets = []

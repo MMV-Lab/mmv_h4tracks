@@ -297,8 +297,6 @@ class TrackingWindow(QWidget):
             Callback for the overlap based tracking
             """
             self.parent.callback_handler.remove_callback_viewer()
-            if len(event.position) == 2:
-                raise ValueError("2D image can not be tracked.")
 
             try:
                 label_layer = grab_layer(
@@ -308,13 +306,19 @@ class TrackingWindow(QWidget):
                 handle_exception(exc)
                 return
 
-            selected_cell = label_layer.get_value(event.position)
+            # Extract position based on segmentation layer dimensionality
+            ndim = label_layer.data.ndim
+            if ndim == 2:
+                raise ValueError("2D image can not be tracked.")
+            position = tuple(int(round(p)) for p in event.position[-ndim:])
+
+            selected_cell = label_layer.get_value(position)
             if selected_cell == 0:
                 notify("The background can not be tracked.")
                 return
 
             worker = self.worker_single_overlap_tracking(
-                label_layer.data, int(event.position[0]), selected_cell
+                label_layer.data, int(position[0]), selected_cell
             )
             worker.returned.connect(self.evaluate_proposed_track)
 
@@ -509,9 +513,6 @@ class TrackingWindow(QWidget):
             """
             Callback for the unlink function to store the selected cells
             """
-            if len(event.position) == 2:
-                raise ValueError("2D image can not be tracked.")
-
             try:
                 label_layer = grab_layer(
                     self.viewer, self.parent.combobox_segmentation.currentText()
@@ -521,19 +522,40 @@ class TrackingWindow(QWidget):
                 self.reset_button_labels
                 self.parent.callback_handler.remove_callback_viewer()
                 return
-            z = int(event.position[0])
-            selected_id = label_layer.get_value(event.position)
+
+            # Extract position based on segmentation layer dimensionality
+            # For multiscale layers, data is a list/tuple, so get ndim from first level
+            if isinstance(label_layer.data, (list, tuple)):
+                ndim = label_layer.data[0].ndim
+                # Get the actual data array (first level for multiscale)
+                data_array = label_layer.data[0]
+            else:
+                ndim = label_layer.data.ndim
+                data_array = label_layer.data
+            if ndim == 2:
+                raise ValueError("2D image can not be tracked.")
+            position = tuple(int(round(p)) for p in event.position[-ndim:])
+            z = int(position[0])
+            selected_id = label_layer.get_value(position)
             if selected_id == 0:
                 raise ValueError("The background can not be tracked.")
             centroid = ndimage.center_of_mass(
-                label_layer.data[z],
-                labels=label_layer.data[z],
+                data_array[z],
+                labels=data_array[z],
                 index=selected_id,
             )
-            cell = [z, int(np.rint(centroid[0])), int(np.rint(centroid[1]))]
-            if label_layer.data[*cell] != selected_id:
+            # Ensure centroid elements are converted to Python scalars
+            # Convert to numpy array first to handle both tuple and array returns
+            centroid = np.asarray(centroid)
+            cell = [z, int(np.rint(centroid[0].item())), int(np.rint(centroid[1].item()))]
+            # For multiscale, need to check against first level
+            if isinstance(label_layer.data, (list, tuple)):
+                check_data = label_layer.data[0]
+            else:
+                check_data = label_layer.data
+            if check_data[*cell] != selected_id:
                 # centroid outside of the cell, calculate medoid instead
-                coords = np.argwhere(label_layer.data[z] == selected_id)
+                coords = np.argwhere(data_array[z] == selected_id)
                 medoid = [z, *calculate_medoid(coords)]
                 notify(f"Calculated medoid: {medoid}")
                 cell = medoid
@@ -686,8 +708,6 @@ class TrackingWindow(QWidget):
             """
             Callback for the unlink function to store the selected cells
             """
-            if len(event.position) == 2:
-                raise ValueError("2D image can not be tracked.")
             try:
                 label_layer = grab_layer(
                     self.viewer, self.parent.combobox_segmentation.currentText()
@@ -697,16 +717,32 @@ class TrackingWindow(QWidget):
                 self.reset_button_labels
                 self.parent.callback_handler.remove_callback_viewer()
                 return
-            z = int(event.position[0])
-            selected_id = label_layer.get_value(event.position)
+
+            # Extract position based on segmentation layer dimensionality
+            # For multiscale layers, data is a list/tuple, so get ndim from first level
+            if isinstance(label_layer.data, (list, tuple)):
+                ndim = label_layer.data[0].ndim
+                # Get the actual data array (first level for multiscale)
+                data_array = label_layer.data[0]
+            else:
+                ndim = label_layer.data.ndim
+                data_array = label_layer.data
+            if ndim == 2:
+                raise ValueError("2D image can not be tracked.")
+            position = tuple(int(round(p)) for p in event.position[-ndim:])
+            z = int(position[0])
+            selected_id = label_layer.get_value(position)
             if selected_id == 0:
                 raise ValueError("The background can not be tracked.")
             centroid = ndimage.center_of_mass(
-                label_layer.data[z],
-                labels=label_layer.data[z],
+                data_array[z],
+                labels=data_array[z],
                 index=selected_id,
             )
-            cell = [z, int(np.rint(centroid[0])), int(np.rint(centroid[1]))]
+            # Ensure centroid elements are converted to Python scalars
+            # Convert to numpy array first to handle both tuple and array returns
+            centroid = np.asarray(centroid)
+            cell = [z, int(np.rint(centroid[0].item())), int(np.rint(centroid[1].item()))]
             if cell not in self.selected_cells:
                 self.selected_cells.append(cell)
                 self.selected_cells.sort(key=lambda x: x[0])
