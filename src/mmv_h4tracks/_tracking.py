@@ -546,8 +546,8 @@ class TrackingWindow(QWidget):
             )
             # Ensure centroid elements are converted to Python scalars
             # Convert to numpy array first to handle both tuple and array returns
-            centroid = np.asarray(centroid)
-            cell = [z, int(np.rint(centroid[0].item())), int(np.rint(centroid[1].item()))]
+            centroid = [int(np.rint(c.item())) for c in np.asarray(centroid)]
+            cell = [z, centroid[0], centroid[1]]
             # For multiscale, need to check against first level
             if isinstance(label_layer.data, (list, tuple)):
                 check_data = label_layer.data[0]
@@ -730,7 +730,7 @@ class TrackingWindow(QWidget):
             if ndim == 2:
                 raise ValueError("2D image can not be tracked.")
             position = tuple(int(round(p)) for p in event.position[-ndim:])
-            z = int(position[0])
+            z = position[0]
             selected_id = label_layer.get_value(position)
             if selected_id == 0:
                 raise ValueError("The background can not be tracked.")
@@ -741,8 +741,8 @@ class TrackingWindow(QWidget):
             )
             # Ensure centroid elements are converted to Python scalars
             # Convert to numpy array first to handle both tuple and array returns
-            centroid = np.asarray(centroid)
-            cell = [z, int(np.rint(centroid[0].item())), int(np.rint(centroid[1].item()))]
+            centroid = [int(np.rint(c.item())) for c in np.asarray(centroid)]
+            cell = [z, centroid[0], centroid[1]]
             if cell not in self.selected_cells:
                 self.selected_cells.append(cell)
                 self.selected_cells.sort(key=lambda x: x[0])

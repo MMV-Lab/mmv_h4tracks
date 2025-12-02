@@ -68,7 +68,7 @@ def create_mock_event(position):
 
 @pytest.fixture
 def widget_with_multiscale_2d_seg(create_widget):
-    """Create widget with multiscale 2D segmentation and tracks."""
+    """Create widget with multiscale 2D segmentation."""
     widget = create_widget
     viewer = widget.viewer
     
@@ -84,18 +84,7 @@ def widget_with_multiscale_2d_seg(create_widget):
     # Add multiscale segmentation layer
     viewer.add_labels(seg_levels, name="test_seg_2d_multiscale", multiscale=True)
     
-    # Create tracks data matching the segmentation
-    # Tracks format: [track_id, frame, y, x]
-    # For 2D, frame is always 0
-    tracks = np.array([
-        [1, 0, 5, 5],  # Track 1 at frame 0, position (5, 5)
-        [2, 0, 7, 7],  # Track 2 at frame 0, position (7, 7)
-    ], dtype=np.int32)
-    
-    viewer.add_tracks(tracks, name="test_tracks_2d")
-    
     widget.combobox_segmentation.setCurrentText("test_seg_2d_multiscale")
-    widget.combobox_tracks.setCurrentText("test_tracks_2d")
     
     return widget
 
@@ -141,7 +130,7 @@ def widget_with_multiscale_3d_seg(create_widget):
 
 @pytest.fixture
 def widget_with_single_2d_seg(create_widget):
-    """Create widget with single resolution 2D segmentation and tracks."""
+    """Create widget with single resolution 2D segmentation."""
     widget = create_widget
     viewer = widget.viewer
     
@@ -154,18 +143,7 @@ def widget_with_single_2d_seg(create_widget):
     # Add single resolution segmentation layer
     viewer.add_labels(seg_2d, name="test_seg_2d_single")
     
-    # Create tracks data matching the segmentation
-    # Tracks format: [track_id, frame, y, x]
-    # For 2D, frame is always 0
-    tracks = np.array([
-        [1, 0, 5, 5],  # Track 1 at frame 0, position (5, 5)
-        [2, 0, 7, 7],  # Track 2 at frame 0, position (7, 7)
-    ], dtype=np.int32)
-    
-    viewer.add_tracks(tracks, name="test_tracks_2d")
-    
     widget.combobox_segmentation.setCurrentText("test_seg_2d_single")
-    widget.combobox_tracks.setCurrentText("test_tracks_2d")
     
     return widget
 

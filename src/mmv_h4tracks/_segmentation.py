@@ -228,7 +228,7 @@ class SegmentationWindow(QWidget):
         
         # Extract position based on segmentation layer dimensionality
         ndim = label_layer.data.ndim
-        position = tuple(event.position[-ndim:])
+        position = [int(round(p)) for p in event.position[-ndim:]]
         self.remove_cell_from_tracks(position)
 
         # replace label with 0 to make it background
