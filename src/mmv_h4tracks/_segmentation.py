@@ -220,7 +220,16 @@ class SegmentationWindow(QWidget):
         event : Event
             the event that triggered the callback
         """
-        self.remove_cell_from_tracks(event.position)
+        label_layer = grab_layer(
+            self.viewer, self.parent.combobox_segmentation.currentText()
+        )
+        if label_layer is None:
+            return
+        
+        # Extract position based on segmentation layer dimensionality
+        ndim = label_layer.data.ndim
+        position = [int(round(p)) for p in event.position[-ndim:]]
+        self.remove_cell_from_tracks(position)
 
         # replace label with 0 to make it background
         self._replace_label(event, 0)
@@ -246,6 +255,10 @@ class SegmentationWindow(QWidget):
             return
 
         position = [int(round(p)) for p in position]
+        # Use position matching the segmentation layer dimensionality
+        ndim = label_layer.data.ndim
+        if len(position) > ndim:
+            position = position[-ndim:]
         selected_id = label_layer.data[tuple(position)]
         if selected_id == 0:
             print("no cell")
@@ -488,7 +501,9 @@ class SegmentationWindow(QWidget):
             notify("Please make sure the label layer exists!")
             return
 
-        position = [int(round(p)) for p in event.position]
+        # Extract position based on segmentation layer dimensionality
+        ndim = label_layer.data.ndim
+        position = [int(round(p)) for p in event.position[-ndim:]]
 
         if id == -1:
             id = self._get_free_label_id(label_layer)
@@ -521,6 +536,8 @@ class SegmentationWindow(QWidget):
             notify("Please make sure the label layer exists!")
             return
 
-        position = [int(round(p)) for p in event.position]
+        # Extract position based on segmentation layer dimensionality
+        ndim = label_layer.data.ndim
+        position = [int(round(p)) for p in event.position[-ndim:]]
 
         return label_layer.data[tuple(position)]

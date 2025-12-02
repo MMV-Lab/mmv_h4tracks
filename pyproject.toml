@@ -36,6 +36,7 @@ dependencies = [
     "matplotlib",
     "bioio",
     "scipy>=1.11.0",
+    "ome-zarr",
 ]
 [project.optional-dependencies]
 all = [

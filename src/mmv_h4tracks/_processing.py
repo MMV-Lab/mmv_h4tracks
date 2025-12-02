@@ -246,10 +246,45 @@ def _segment_image(widget, demo=False):
 
     viewer = widget.viewer
 
-    data = grab_layer(viewer, widget.parent.combobox_image.currentText()).data
+    layer = grab_layer(viewer, widget.parent.combobox_image.currentText())
+    
+    # Check if the image layer is multiscale or single resolution
+    # Multiscale layers have data as a list/tuple of arrays (one per resolution level)
+    # Single resolution layers have data as a numpy array
+    if isinstance(layer.data, (list, tuple)) and len(layer.data) > 0:
+        # Multiscale layer - get full resolution (first level, level 0)
+        data = layer.data[0]
+    elif isinstance(layer.data, np.ndarray):
+        # Single resolution layer - use data directly
+        data = layer.data
+    else:
+        # Fallback: try to access as indexable, or use directly
+        try:
+            data = layer.data[0] if hasattr(layer.data, '__getitem__') else layer.data
+        except (TypeError, IndexError, AttributeError):
+            data = layer.data
+    
+    # Convert to numpy array to ensure we have the actual data, not a lazy view/proxy
+    # This is critical for multiscale layers where data might be lazy-loaded
+    data = np.asarray(data)
+    
+    # Remove trivial dimensions (size 1) for processing
+    original_shape = data.shape
+    data_squeezed = np.squeeze(data)
+    
+    # Check if data is 2D or 3D after removing trivial dimensions
+    if data_squeezed.ndim not in [2, 3]:
+        raise ValueError(
+            f"Data must be 2D or 3D after removing trivial dimensions. "
+            f"Original shape: {original_shape}, shape after removing trivial dimensions: {data_squeezed.shape}"
+        )
 
+    # Track which dimensions were removed (size 1 in original) and their positions
+    # This will be used to restore the shape later
+    removed_dims = [i for i, size in enumerate(original_shape) if size == 1]
+    
     if demo:
-        data = data[0:5]
+        data_squeezed = data_squeezed[0:5]
 
     selected_model = widget.combobox_segmentation.currentText()
     parameters = _get_parameters(widget, selected_model)
@@ -259,22 +294,61 @@ def _segment_image(widget, demo=False):
         model = models.CellposeModel(
             gpu=True, pretrained_model=parameters.pop("model_path")
         )
-        mask = []
-        for layer_slice in data:
-            layer_mask, _, _ = model.eval(layer_slice, **parameters)
-            mask.append(layer_mask)
-        mask = np.array(mask)
+        if data_squeezed.ndim == 2:
+            # For 2D data, process directly as a single image
+            mask, _, _ = model.eval(data_squeezed, **parameters)
+            # Keep as 2D - shape restoration will handle adding dimensions back
+        else:
+            # For 3D data, iterate over first dimension
+            mask = []
+            for layer_slice in data_squeezed:
+                layer_mask, _, _ = model.eval(layer_slice, **parameters)
+                mask.append(layer_mask)
+            mask = np.array(mask)
     else:
         logger.info("Using CPU for segmentation")
         # set process limit
         AMOUNT_OF_PROCESSES = widget.parent.get_process_limit()
         logger.debug("Amount of processes: " + str(AMOUNT_OF_PROCESSES))
 
-        data_with_parameters = [(layer_slice, parameters) for layer_slice in data]
+        if data_squeezed.ndim == 2:
+            # For 2D data, process directly as a single image
+            mask = segment_slice_cpu(data_squeezed, parameters)
+            # Keep as 2D - shape restoration will handle adding dimensions back
+        else:
+            # For 3D data, iterate over first dimension
+            data_with_parameters = [(layer_slice, parameters) for layer_slice in data_squeezed]
 
-        with Pool(AMOUNT_OF_PROCESSES) as p:
-            mask = p.starmap(segment_slice_cpu, data_with_parameters)
+            with Pool(AMOUNT_OF_PROCESSES) as p:
+                mask = p.starmap(segment_slice_cpu, data_with_parameters)
+                mask = np.asarray(mask)
+
+    # Ensure mask is a proper numpy array before shape restoration
+    if isinstance(mask, list):
+        # Check if all masks have the same shape
+        if len(mask) > 0:
+            first_shape = mask[0].shape
+            if not all(m.shape == first_shape for m in mask):
+                logger.warning(f"Masks have different shapes. First: {first_shape}, others may differ.")
+                # Try to convert anyway - this might create an object array
             mask = np.asarray(mask)
+        else:
+            raise ValueError("Mask list is empty - no segmentation results")
+    
+    # Ensure integer dtype for labels
+    if mask.dtype != np.int32 and mask.dtype != np.int64:
+        mask = mask.astype(np.int32)
+    
+    # Restore original shape by adding back removed dimensions
+    # Add dimensions back starting from the lowest index to maintain correct positions
+    for dim_idx in sorted(removed_dims):
+        mask = np.expand_dims(mask, axis=dim_idx)
+    
+    # Final validation
+    if mask.size == 0:
+        raise ValueError("Mask is empty after processing")
+    if np.all(mask == 0):
+        logger.warning("Mask contains only zeros - no segmentation found. This may indicate a problem with the model or parameters.")
 
     if not demo:
         widget.parent.align_cache = mask
@@ -303,6 +377,14 @@ def _get_parameters(widget, model: str):
             "model_path": str(Path(__file__).parent.absolute() / "models" / model),
             "diameter": 15,
             "channels": [0, 0],
+            "flow_threshold": 0.4,
+            "cellprob_threshold": 0,
+        }
+    if model == "cpsam":
+        params = {
+            "model_path": str(Path(__file__).parent.absolute() / "models" / model),
+            # "diameter": 15,
+            # "channels": [0, 0],
             "flow_threshold": 0.4,
             "cellprob_threshold": 0,
         }

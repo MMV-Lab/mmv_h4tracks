@@ -1,7 +1,7 @@
 """Module providing tests for the tracking module."""
 
 import pytest
-from unittest.mock import patch
+from unittest.mock import patch, Mock
 from pathlib import Path
 from bioio import BioImage
 import numpy as np
@@ -9,6 +9,7 @@ from scipy.ndimage import center_of_mass
 
 from mmv_h4tracks import MMVH4TRACKS
 from mmv_h4tracks._constants import LINK_TEXT, UNLINK_TEXT
+from mmv_h4tracks._reader import build_multiscale
 import mmv_h4tracks._tracking as tracking
 
 PATH = Path(__file__).parent / "data"
@@ -1115,3 +1116,169 @@ def test_update_all_centroids_manual(widget_with_seg_trk):
 # evaluate_proposed_track
 # link_tracking_on_click
 # link_stored_cells
+
+
+def create_mock_event(position):
+    """Create a mock napari event with a position attribute."""
+    event = Mock()
+    event.position = np.array(position)
+    return event
+
+
+@pytest.fixture
+def widget_with_multiscale_3d_seg_tracks(create_widget):
+    """Create widget with multiscale 3D segmentation and tracks for link/unlink tests."""
+    widget = create_widget
+    viewer = widget.viewer
+    
+    # Create 3D segmentation with single-pixel cells
+    # Shape: (t, y, x) = (5, 20, 20)
+    seg_3d = np.zeros((5, 20, 20), dtype=np.int32)
+    # Track 1: frames 0-2
+    seg_3d[0, 10, 10] = 1
+    seg_3d[1, 10, 10] = 1
+    seg_3d[2, 10, 10] = 1
+    # Track 2: frames 2-4
+    seg_3d[2, 15, 15] = 2
+    seg_3d[3, 15, 15] = 2
+    seg_3d[4, 15, 15] = 2
+    
+    # Create multiscale levels
+    seg_levels = build_multiscale(seg_3d)
+    
+    # Add multiscale segmentation layer
+    viewer.add_labels(seg_levels, name="test_seg_3d_multiscale", multiscale=True)
+    
+    # Create tracks data - two separate tracks
+    tracks = np.array([
+        [1, 0, 10, 10],  # Track 1 at frame 0
+        [1, 1, 10, 10],  # Track 1 at frame 1
+        [1, 2, 10, 10],  # Track 1 at frame 2
+        [2, 2, 15, 15],  # Track 2 at frame 2
+        [2, 3, 15, 15],  # Track 2 at frame 3
+        [2, 4, 15, 15],  # Track 2 at frame 4
+    ], dtype=np.int32)
+    
+    viewer.add_tracks(tracks, name="test_tracks_3d")
+    
+    widget.combobox_segmentation.setCurrentText("test_seg_3d_multiscale")
+    widget.combobox_tracks.setCurrentText("test_tracks_3d")
+    
+    return widget
+
+
+@pytest.fixture
+def widget_with_single_3d_seg_tracks(create_widget):
+    """Create widget with single resolution 3D segmentation and tracks for link/unlink tests."""
+    widget = create_widget
+    viewer = widget.viewer
+    
+    # Create 3D segmentation with single-pixel cells
+    # Shape: (t, y, x) = (5, 20, 20)
+    seg_3d = np.zeros((5, 20, 20), dtype=np.int32)
+    # Track 1: frames 0-2
+    seg_3d[0, 10, 10] = 1
+    seg_3d[1, 10, 10] = 1
+    seg_3d[2, 10, 10] = 1
+    # Track 2: frames 2-4
+    seg_3d[2, 15, 15] = 2
+    seg_3d[3, 15, 15] = 2
+    seg_3d[4, 15, 15] = 2
+    
+    # Add single resolution segmentation layer
+    viewer.add_labels(seg_3d, name="test_seg_3d_single")
+    
+    # Create tracks data - two separate tracks
+    tracks = np.array([
+        [1, 0, 10, 10],  # Track 1 at frame 0
+        [1, 1, 10, 10],  # Track 1 at frame 1
+        [1, 2, 10, 10],  # Track 1 at frame 2
+        [2, 2, 15, 15],  # Track 2 at frame 2
+        [2, 3, 15, 15],  # Track 2 at frame 3
+        [2, 4, 15, 15],  # Track 2 at frame 4
+    ], dtype=np.int32)
+    
+    viewer.add_tracks(tracks, name="test_tracks_3d")
+    
+    widget.combobox_segmentation.setCurrentText("test_seg_3d_single")
+    widget.combobox_tracks.setCurrentText("test_tracks_3d")
+    
+    return widget
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("fixture_name,event_position", [
+    ("widget_with_multiscale_3d_seg_tracks", (0, 2, 10, 10)),
+    ("widget_with_single_3d_seg_tracks", (2, 10, 10)),
+])
+def test_store_cell_for_link_multiscale_single_resolution(request, fixture_name, event_position):
+    """Test store_cell_for_link callback with multiscale and single resolution 3D segmentation."""
+    widget = request.getfixturevalue(fixture_name)
+    tracking_window = widget.tracking_window
+    
+    # Reset any existing callbacks
+    widget.callback_handler.remove_callback_viewer()
+    
+    # Set up the link callback - this creates the nested store_cell_for_link function
+    tracking_window.link_tracks_on_click()
+    
+    # Get the label layer
+    label_layer = widget.viewer.layers[widget.combobox_segmentation.currentText()]
+    
+    # Verify callback was added
+    assert len(label_layer.mouse_drag_callbacks) > 0
+    
+    # Get the callback function (it's the last one added)
+    callback = label_layer.mouse_drag_callbacks[-1]
+    
+    # Create mock event
+    event = create_mock_event(event_position)
+    
+    # Call the callback with the actual label layer - this should not raise IndexError
+    try:
+        callback(label_layer, event)
+    except IndexError as e:
+        pytest.fail(f"IndexError raised in store_cell_for_link callback: {e}")
+    except (ValueError, AttributeError) as e:
+        # These are expected for some test scenarios (e.g., background, no tracks)
+        # The important thing is no IndexError
+        pass
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("fixture_name,event_position", [
+    ("widget_with_multiscale_3d_seg_tracks", (0, 2, 10, 10)),
+    ("widget_with_single_3d_seg_tracks", (2, 10, 10)),
+])
+def test_store_cell_for_unlink_multiscale_single_resolution(request, fixture_name, event_position):
+    """Test store_cell_for_unlink callback with multiscale and single resolution 3D segmentation."""
+    widget = request.getfixturevalue(fixture_name)
+    tracking_window = widget.tracking_window
+    
+    # Reset any existing callbacks
+    widget.callback_handler.remove_callback_viewer()
+    
+    # Set up the unlink callback - this creates the nested store_cell_for_unlink function
+    tracking_window.unlink_tracks_on_click()
+    
+    # Get the label layer
+    label_layer = widget.viewer.layers[widget.combobox_segmentation.currentText()]
+    
+    # Verify callback was added
+    assert len(label_layer.mouse_drag_callbacks) > 0
+    
+    # Get the callback function (it's the last one added)
+    callback = label_layer.mouse_drag_callbacks[-1]
+    
+    # Create mock event
+    event = create_mock_event(event_position)
+    
+    # Call the callback with the actual label layer - this should not raise IndexError
+    try:
+        callback(label_layer, event)
+    except IndexError as e:
+        pytest.fail(f"IndexError raised in store_cell_for_unlink callback: {e}")
+    except (ValueError, AttributeError) as e:
+        # These are expected for some test scenarios (e.g., background, no tracks)
+        # The important thing is no IndexError
+        pass
