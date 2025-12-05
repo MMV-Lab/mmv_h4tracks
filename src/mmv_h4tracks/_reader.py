@@ -3,6 +3,7 @@
 from ome_zarr.io import parse_url
 import zarr
 import numpy as np
+from pathlib import Path
 from qtpy.QtWidgets import QFileDialog
 
 
@@ -204,7 +205,7 @@ def load_zarr_data(zarr_file):
     return raw_levels, segmentation, filtered_tracks, is_multiscale
 
 
-def load_ome_zarr_data(zarr_file):
+def load_ome_zarr_data(zarr_file, zarr_path=None):
     """
     Load raw image, segmentation, and metadata from an OME-Zarr file.
     
@@ -212,15 +213,18 @@ def load_ome_zarr_data(zarr_file):
     ----------
     zarr_file : zarr.Group
         The OME-Zarr file/group to load from
-        
+    zarr_path : str, optional
+        Filesystem path to the zarr file (used if store path cannot be inferred)
+    
     Returns
     -------
     tuple
-        (raw_levels, segmentation, metadata, is_multiscale)
+        (raw_levels, segmentation, metadata, is_multiscale, tracks)
         - raw_levels: list of numpy arrays (multiscale pyramid for display)
         - segmentation: numpy array
         - metadata: dict with keys 'frames', 'unit', 'implied_tracks', 'img_metadata'
         - is_multiscale: bool indicating if original data was multiscale
+        - tracks: numpy array or None if tracks.npy doesn't exist
     """
     generic_metadata = dict(zarr_file.attrs)
     try:
@@ -292,4 +296,29 @@ def load_ome_zarr_data(zarr_file):
         "img_metadata": img_metadata,
     }
     
-    return raw_levels, segmentation, metadata, is_multiscale
+    # Try to infer filesystem path from zarr store
+    if zarr_path is None:
+        try:
+            store = zarr_file.store
+            # For DirectoryStore, path is usually available
+            if hasattr(store, 'path'):
+                zarr_path = store.path
+            elif hasattr(store, 'dir_path'):
+                zarr_path = store.dir_path
+            # For some store types, we might need to check the root path
+            elif hasattr(store, 'root'):
+                zarr_path = store.root
+        except (AttributeError, TypeError):
+            pass
+    
+    # Try to load tracks from tables/tracks/tracks.npy if it exists
+    tracks = None
+    if zarr_path:
+        tracks_path = Path(zarr_path) / "tables" / "tracks" / "tracks.npy"
+        if tracks_path.exists():
+            try:
+                tracks = np.load(tracks_path)
+            except Exception as e:
+                print(f"Warning: Could not load tracks.npy: {e}")
+    
+    return raw_levels, segmentation, metadata, is_multiscale, tracks

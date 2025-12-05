@@ -505,10 +505,10 @@ class MMVH4TRACKS(QWidget):
         self.combobox_segmentation.setCurrentText("Segmentation Data")
         self.combobox_tracks.setCurrentText("Tracks")
 
-    def _load_ome_zarr(self, zarr_file):
+    def _load_ome_zarr(self, zarr_file, zarr_path=None):
         # Load data from OME-Zarr file
         try:
-            raw_levels, segmentation, metadata, self.is_multiscale = load_ome_zarr_data(zarr_file)
+            raw_levels, segmentation, metadata, self.is_multiscale, tracks = load_ome_zarr_data(zarr_file, zarr_path=zarr_path)
         except ValueError as e:
             print(f"Error loading OME-Zarr file: {e}")
             return
@@ -532,10 +532,28 @@ class MMVH4TRACKS(QWidget):
         )
         self.viewer.add_labels(segmentation[:], name="Segmentation Data")
 
-        # Check if tracks are implied
-        if metadata["implied_tracks"]:
+        # Load tracks from file if it exists, otherwise create implicit tracks if needed
+        if tracks is not None:
+            # Load tracks from tracks.npy file (without scale)
+            self.viewer.add_tracks(tracks, name="Tracks")
+            self.eval_cache[1] = copy.deepcopy(tracks)
+            self.combobox_tracks.setCurrentText("Tracks")
+        elif metadata.get("implied_tracks", False):
+            # Only create implicit tracks if no tracks.npy exists
             filtered_tracks = self.create_implicit_tracks()
-            self.viewer.add_tracks(filtered_tracks, name="Tracks")
+            
+            # Check if raw image layer has a scale attribute and pass it to add_tracks
+            scale = None
+            try:
+                if hasattr(raw_layer, 'scale') and isinstance(raw_layer.scale, np.ndarray):
+                    scale = raw_layer.scale
+            except (AttributeError, TypeError):
+                pass
+            
+            if scale is not None:
+                self.viewer.add_tracks(filtered_tracks, name="Tracks", scale=scale)
+            else:
+                self.viewer.add_tracks(filtered_tracks, name="Tracks")
             self.eval_cache[1] = copy.deepcopy(filtered_tracks)
         
         # Add metadata to layers
@@ -563,6 +581,10 @@ class MMVH4TRACKS(QWidget):
 
         for t in range(seg_data.shape[0]):
             frame = seg_data[t]
+            
+            # Convert to numpy array to handle dask arrays from OME-Zarr
+            # This is critical for lazy-loaded data
+            frame = np.asarray(frame)
 
             # extract unique labels, excluding background (0)
             labels = np.unique(frame)
@@ -612,7 +634,24 @@ class MMVH4TRACKS(QWidget):
             # user canceled the operation
             return
         filtered_tracks = self.create_implicit_tracks()
-        self.viewer.add_tracks(filtered_tracks, name="Tracks")
+        
+        # Check if raw image layer has a scale attribute and pass it to add_tracks
+        scale = None
+        try:
+            raw_name = self.combobox_image.currentText()
+            raw_layer = grab_layer(self.viewer, raw_name)
+            if raw_layer is not None and hasattr(raw_layer, 'scale'):
+                scale_attr = raw_layer.scale
+                if isinstance(scale_attr, np.ndarray):
+                    scale = scale_attr
+        except (ValueError, AttributeError):
+            # If layer doesn't exist or doesn't have scale, continue without it
+            pass
+        
+        if scale is not None:
+            self.viewer.add_tracks(filtered_tracks, name="Tracks", scale=scale)
+        else:
+            self.viewer.add_tracks(filtered_tracks, name="Tracks")
         self.eval_cache[1] = copy.deepcopy(filtered_tracks)
 
     def _load(self):
@@ -633,7 +672,8 @@ class MMVH4TRACKS(QWidget):
             return
 
         if is_ome:
-            self._load_ome_zarr(zarr_file)
+            # Pass filepath in case store path inference fails
+            self._load_ome_zarr(zarr_file, zarr_path=filepath)
         else:
             self._load_zarr(zarr_file)
         self.zarr = zarr_file
