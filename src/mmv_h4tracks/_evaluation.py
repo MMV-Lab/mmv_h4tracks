@@ -24,6 +24,7 @@ from numba import jit
 from ._constants import IOU_THRESHOLD
 from ._logger import notify
 from ._grabber import grab_layer
+from ._utils import preserve_and_filter_graph
 from mmv_h4tracks._logger import handle_exception
 
 
@@ -438,7 +439,11 @@ class EvaluationWindow(QWidget):
             row[2] = int(np.rint(centroid[0]))
             row[3] = int(np.rint(centroid[1]))
 
+        # Preserve and filter graph from existing layer
+        filtered_graph = preserve_and_filter_graph(tracks_layer, tracks)
         tracks_layer.data = tracks
+        if filtered_graph:
+            tracks_layer.graph = filtered_graph
 
     def get_segmentation_fault(self, gt_seg, eval_seg, evaluation_function):
         """Calculate the segmentation fault value.

@@ -31,12 +31,13 @@ dependencies = [
     "npe2",
     "napari-plugin-engine>=0.1.4",
     "napari",
-    "zarr",
+    "zarr>=3.0",
     "cellpose==2.1.0",
     "matplotlib",
     "bioio",
     "scipy>=1.11.0",
     "ome-zarr",
+    "napari-ome-zarr",
 ]
 [project.optional-dependencies]
 all = [
@@ -44,6 +45,7 @@ all = [
     "pytest",
     "pytest-qt",
     "pre-commit",
+    "bioio-tifffile",
 ]
 
 [project.urls]

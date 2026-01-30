@@ -300,7 +300,12 @@ class SegmentationWindow(QWidget):
             self.parent.tracking_window.cached_tracks = tracks
             self.parent.tracking_window.display_selected_tracks(filter_values)
         else:
+            # Preserve and filter graph from existing layer
+            from ._utils import preserve_and_filter_graph
+            filtered_graph = preserve_and_filter_graph(tracks_layer, tracks)
             tracks_layer.data = tracks
+            if filtered_graph:
+                tracks_layer.graph = filtered_graph
 
     def get_track_id_of_cell(self, cell):
         """
