@@ -9,6 +9,12 @@ from bioio import (
 )
 
 from mmv_h4tracks import MMVH4TRACKS
+from mmv_h4tracks._evaluation import (
+    round_half_up,
+    get_false_positives,
+    get_false_negatives,
+    get_split_cells,
+)
 
 # this tests if the analysis returns the proper values
 PATH = Path(__file__).parent / "data"
@@ -104,8 +110,6 @@ def add_layers(viewer):
 @pytest.mark.unit
 @pytest.mark.parametrize("value", *[np.linspace(0, 1, 11)])
 def test_round_half_up(value):
-    from mmv_h4tracks._evaluation import round_half_up
-
     if value < 0.5:
         assert round_half_up(value) == 0
     else:
@@ -214,9 +218,7 @@ def test_false_positives(set_widget_up, layername, expected_value):
     window = widget.evaluation_window
     gt_seg = viewer.layers[viewer.layers.index("GT")].data
     eval_seg = viewer.layers[viewer.layers.index(layername)].data
-    from mmv_h4tracks._evaluation import get_false_positives as func
-
-    fp = window.get_segmentation_fault(gt_seg, eval_seg, func)
+    fp = window.get_segmentation_fault(gt_seg, eval_seg, get_false_positives)
     assert fp == expected_value
 
 # TODO: slow call
@@ -251,9 +253,7 @@ def test_false_negatives(set_widget_up, layername, expected_value, gt):
     window = widget.evaluation_window
     gt_seg = viewer.layers[viewer.layers.index(gt)].data
     eval_seg = viewer.layers[viewer.layers.index(layername)].data
-    from mmv_h4tracks._evaluation import get_false_negatives as func
-
-    fn = window.get_segmentation_fault(gt_seg, eval_seg, func)
+    fn = window.get_segmentation_fault(gt_seg, eval_seg, get_false_negatives)
     assert fn == expected_value
 
 # TODO: slow call
@@ -280,9 +280,7 @@ def test_split_cells(set_widget_up, layername, expected_value):
     window = widget.evaluation_window
     gt_seg = viewer.layers[viewer.layers.index("GT")].data
     eval_seg = viewer.layers[viewer.layers.index(layername)].data
-    from mmv_h4tracks._evaluation import get_split_cells as func
-
-    sc = window.get_segmentation_fault(gt_seg, eval_seg, func)
+    sc = window.get_segmentation_fault(gt_seg, eval_seg, get_split_cells)
     assert sc == expected_value
 
 # TODO: slow setup

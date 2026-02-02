@@ -15,6 +15,7 @@ from scipy import ndimage, optimize, spatial
 from ._constants import APPROX_INF, MAX_MATCHING_DIST, CUSTOM_MODEL_PREFIX
 from ._grabber import grab_layer
 from ._logger import handle_exception
+from ._utils import preserve_and_filter_graph
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -513,7 +514,6 @@ def _add_tracks_to_viewer(params):
             return
     else:
         # Preserve and filter graph from existing layer
-        from ._utils import preserve_and_filter_graph
         filtered_graph = preserve_and_filter_graph(tracks_layer, tracks)
         tracks_layer.data = tracks
         if filtered_graph:

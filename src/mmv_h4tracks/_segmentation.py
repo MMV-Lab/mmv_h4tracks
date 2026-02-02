@@ -18,6 +18,7 @@ import pandas as pd
 
 from ._logger import notify, handle_exception
 from ._grabber import grab_layer
+from ._utils import preserve_and_filter_graph
 import mmv_h4tracks._processing as processing
 from .add_models import ModelWindow
 
@@ -301,7 +302,6 @@ class SegmentationWindow(QWidget):
             self.parent.tracking_window.display_selected_tracks(filter_values)
         else:
             # Preserve and filter graph from existing layer
-            from ._utils import preserve_and_filter_graph
             filtered_graph = preserve_and_filter_graph(tracks_layer, tracks)
             tracks_layer.data = tracks
             if filtered_graph:
