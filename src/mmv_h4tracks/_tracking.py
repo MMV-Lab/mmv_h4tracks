@@ -24,6 +24,7 @@ from scipy import ndimage, stats
 from ._constants import LINK_TEXT, UNLINK_TEXT, CONFIRM_TEXT, MIN_TRACK_LENGTH
 from ._logger import notify, choice_dialog, handle_exception
 from ._grabber import grab_layer
+from ._utils import preserve_and_filter_graph
 import mmv_h4tracks._processing as processing
 
 
@@ -56,6 +57,7 @@ class TrackingWindow(QWidget):
             self.setStyleSheet(napari.qt.get_stylesheet(theme_id="dark"))
 
         self.cached_tracks = None
+        self.cached_graph = None
         self.selected_cells = []
 
         ### QObjects
@@ -220,20 +222,30 @@ class TrackingWindow(QWidget):
         if label_layer is None:
             raise ValueError("No segmentation layer to track")
 
+        # Get the actual data array, handling both multiscale and dask arrays
+        if isinstance(label_layer.data, (list, tuple)):
+            # Multiscale: use first level
+            segmentation = np.asarray(label_layer.data[0])
+        else:
+            # Single resolution: convert to numpy to handle dask arrays
+            segmentation = np.asarray(label_layer.data)
+
         AMOUNT_OF_PROCESSES = self.parent.get_process_limit()
 
         track_id = 1
         tracks = np.ndarray([])
-        for start_slice in range(len(label_layer.data) - MIN_TRACK_LENGTH):
+        for start_slice in range(len(segmentation) - MIN_TRACK_LENGTH):
             threads_input = []
-            for label_id in np.unique(label_layer.data[start_slice]):
+            # Convert slice to numpy array to ensure np.unique works correctly
+            slice_data = np.asarray(segmentation[start_slice])
+            for label_id in np.unique(slice_data):
                 if label_id == 0:
                     continue
                 if track_id > 1:
                     # calculate centroid of the cell
                     centroid = ndimage.center_of_mass(
-                        label_layer.data[start_slice],
-                        labels=label_layer.data[start_slice],
+                        slice_data,
+                        labels=slice_data,
                         index=label_id,
                     )
                     centroid = [
@@ -248,7 +260,7 @@ class TrackingWindow(QWidget):
                             tracked = True
                     if tracked:
                         continue
-                threads_input.append([label_layer.data, start_slice, label_id])
+                threads_input.append([segmentation, start_slice, label_id])
 
             with Pool(AMOUNT_OF_PROCESSES) as pool:
                 track_cells = pool.starmap(func, threads_input)
@@ -502,7 +514,33 @@ class TrackingWindow(QWidget):
         tracks[tracks[:, 0] == old_id, 0] = new_id
         df = pd.DataFrame(tracks, columns=["ID", "Z", "Y", "X"])
         df.sort_values(["ID", "Z"], ascending=True, inplace=True)
-        tracks_layer.data = df.values
+        updated_tracks = df.values
+        
+        # Get the current graph and update it BEFORE filtering
+        graph = getattr(tracks_layer, 'graph', {}) or {}
+        updated_graph = {}
+        for track_id, parent_ids in graph.items():
+            track_id_int = int(track_id)
+            # Update parent references if they match old_id
+            updated_parents = [new_id if int(p) == old_id else int(p) for p in parent_ids]
+            # Update the key if it matches old_id
+            if track_id_int == old_id:
+                updated_graph[new_id] = updated_parents
+            else:
+                updated_graph[track_id_int] = updated_parents
+        
+        # Now filter the updated graph based on the new tracks data
+        # Create a temporary tracks_layer-like object with the updated graph
+        class TempTracksLayer:
+            def __init__(self, graph):
+                self.graph = graph
+        
+        temp_layer = TempTracksLayer(updated_graph)
+        filtered_graph = preserve_and_filter_graph(temp_layer, updated_tracks)
+        
+        tracks_layer.data = updated_tracks
+        if filtered_graph:
+            tracks_layer.graph = filtered_graph
 
     def link_tracks_on_click(self):
         """
@@ -539,9 +577,12 @@ class TrackingWindow(QWidget):
             selected_id = label_layer.get_value(position)
             if selected_id == 0:
                 raise ValueError("The background can not be tracked.")
+            # Convert to numpy array to handle dask arrays from OME-Zarr
+            # This is critical for lazy-loaded data
+            frame_data = np.asarray(data_array[z])
             centroid = ndimage.center_of_mass(
-                data_array[z],
-                labels=data_array[z],
+                frame_data,
+                labels=frame_data,
                 index=selected_id,
             )
             # Ensure centroid elements are converted to Python scalars
@@ -555,7 +596,7 @@ class TrackingWindow(QWidget):
                 check_data = label_layer.data
             if check_data[*cell] != selected_id:
                 # centroid outside of the cell, calculate medoid instead
-                coords = np.argwhere(data_array[z] == selected_id)
+                coords = np.argwhere(frame_data == selected_id)
                 medoid = [z, *calculate_medoid(coords)]
                 notify(f"Calculated medoid: {medoid}")
                 cell = medoid
@@ -734,9 +775,12 @@ class TrackingWindow(QWidget):
             selected_id = label_layer.get_value(position)
             if selected_id == 0:
                 raise ValueError("The background can not be tracked.")
+            # Convert to numpy array to handle dask arrays from OME-Zarr
+            # This is critical for lazy-loaded data
+            frame_data = np.asarray(data_array[z])
             centroid = ndimage.center_of_mass(
-                data_array[z],
-                labels=data_array[z],
+                frame_data,
+                labels=frame_data,
                 index=selected_id,
             )
             # Ensure centroid elements are converted to Python scalars
@@ -982,12 +1026,22 @@ class TrackingWindow(QWidget):
                 np.isin(self.cached_tracks[:, 0], tracks_to_delete),
                 0,
             )
+            # Preserve and filter graph from existing layer
+            filtered_graph = preserve_and_filter_graph(tracks_layer, self.cached_tracks)
             tracks_layer.data = self.cached_tracks
+            if filtered_graph:
+                tracks_layer.graph = filtered_graph
             self.cached_tracks = None
+            self.cached_graph = None
         else:
-            tracks_layer.data = np.delete(
+            deleted_tracks = np.delete(
                 tracks_layer.data, np.isin(tracks_layer.data[:, 0], tracks_to_delete), 0
             )
+            # Preserve and filter graph from existing layer
+            filtered_graph = preserve_and_filter_graph(tracks_layer, deleted_tracks)
+            tracks_layer.data = deleted_tracks
+            if filtered_graph:
+                tracks_layer.graph = filtered_graph
             if self.cached_tracks is not None:
                 self.cached_tracks = np.delete(
                     self.cached_tracks,
@@ -1035,10 +1089,16 @@ class TrackingWindow(QWidget):
 
             diff_view = np.setdiff1d(cached_tracks_view, tracks_layer_data_view)
 
-            tracks_layer.data = diff_view.view(tracks_layer.data.dtype).reshape(
+            diff_tracks = diff_view.view(tracks_layer.data.dtype).reshape(
                 -1, tracks_layer.data.shape[1]
             )
+            # Preserve and filter graph from existing layer
+            filtered_graph = preserve_and_filter_graph(tracks_layer, diff_tracks)
+            tracks_layer.data = diff_tracks
+            if filtered_graph:
+                tracks_layer.graph = filtered_graph
             self.cached_tracks = None
+            self.cached_graph = None
             self.lineedit_filter.clear()
 
     def process_new_tracks(self, tracks: np.ndarray):
@@ -1055,11 +1115,16 @@ class TrackingWindow(QWidget):
             return
         assert isinstance(tracks, np.ndarray), "Tracks are not numpy array."
         self.cached_tracks = None
+        self.cached_graph = None
         tracks_layer = self.get_tracks_layer()
         if tracks_layer is None:
             self.viewer.add_tracks(tracks, name="Tracks")
         else:
+            # Preserve and filter graph from existing layer
+            filtered_graph = preserve_and_filter_graph(tracks_layer, tracks)
             tracks_layer.data = tracks
+            if filtered_graph:
+                tracks_layer.graph = filtered_graph
         self.parent.eval_cache[1] = tracks
         QApplication.restoreOverrideCursor()
 
@@ -1094,13 +1159,22 @@ class TrackingWindow(QWidget):
             print(f"Removed {old_length - len(tracks)} cells")
         if len(track_results[0]) < 1:
             if len(track_results) > 1 and len(track_results[1]) > 1:
+                # Preserve and filter graph from existing layer
+                filtered_graph = preserve_and_filter_graph(tracks_layer, track_results[1])
                 tracks_layer.data = track_results[1]
+                if filtered_graph:
+                    tracks_layer.graph = filtered_graph
             else:
                 self.viewer.layers.remove(tracks_layer.name)
                 self.viewer.layers.select_next()
             self.cached_tracks = None
+            self.cached_graph = None
         else:
+            # Preserve and filter graph from existing layer
+            filtered_graph = preserve_and_filter_graph(tracks_layer, track_results[0])
             tracks_layer.data = track_results[0]
+            if filtered_graph:
+                tracks_layer.graph = filtered_graph
             if len(track_results) > 1:
                 self.cached_tracks = track_results[1]
 
@@ -1110,10 +1184,17 @@ class TrackingWindow(QWidget):
         """
         tracks_layer = self.get_tracks_layer()
         if tracks_layer is None:
-            self.viewer.add_tracks(self.cached_tracks, name="Tracks")
+            new_layer = self.viewer.add_tracks(self.cached_tracks, name="Tracks")
+            # Restore cached graph if it exists
+            if self.cached_graph:
+                new_layer.graph = self.cached_graph
         else:
             tracks_layer.data = self.cached_tracks
+            # Restore the full cached graph (it was stored when filtering for display)
+            if self.cached_graph is not None:
+                tracks_layer.graph = self.cached_graph
         self.cached_tracks = None
+        self.cached_graph = None
         self.lineedit_delete.clear()
 
     def display_selected_tracks(self, track_ids: list):
@@ -1130,6 +1211,8 @@ class TrackingWindow(QWidget):
             return
         if self.cached_tracks is None:
             self.cached_tracks = tracks_layer.data
+            # Cache the full graph when first filtering for display
+            self.cached_graph = getattr(tracks_layer, 'graph', {}) or {}
 
         # filter the tracks
         selected_tracks = self.cached_tracks[
@@ -1138,7 +1221,10 @@ class TrackingWindow(QWidget):
         if len(selected_tracks) < 1:
             notify("No tracks found for the selected track IDs.")
             return
+        # For display filtering, temporarily set graph to empty to avoid napari validation errors
+        # The full graph is stored in cached_graph and will be restored when displaying full tracks
         tracks_layer.data = selected_tracks
+        tracks_layer.graph = {}  # Empty graph for filtered display
         self.lineedit_delete.clear()
 
     def add_entries_to_tracks(self, cells: list, track_id: int):
@@ -1179,7 +1265,11 @@ class TrackingWindow(QWidget):
             df.sort_values(["ID", "Z"], ascending=True, inplace=True)
             results_tracks.append(df.values)
 
+        # Preserve and filter graph from existing layer
+        filtered_graph = preserve_and_filter_graph(tracks_layer, results_tracks[0])
         tracks_layer.data = results_tracks[0]
+        if filtered_graph:
+            tracks_layer.graph = filtered_graph
         if len(results_tracks) > 1:
             self.cached_tracks = results_tracks[1]
 
@@ -1203,7 +1293,11 @@ class TrackingWindow(QWidget):
         track_id = np.amax(tracks[:, 0]) + 1
         track = np.insert(track, 0, track_id, axis=1)
         tracks = np.r_[tracks, track]
+        # Preserve and filter graph from existing layer
+        filtered_graph = preserve_and_filter_graph(tracks_layer, tracks)
         tracks_layer.data = tracks
+        if filtered_graph:
+            tracks_layer.graph = filtered_graph
 
     def get_tracks_layer(self):
         """
@@ -1274,7 +1368,11 @@ class TrackingWindow(QWidget):
         updated_tracks = df.values
         updated_tracks = processing.split_noncontinuous_tracks(updated_tracks)
         updated_tracks = processing.remove_dot_tracks(updated_tracks)
+        # Preserve and filter graph from existing layer
+        filtered_graph = preserve_and_filter_graph(tracks_layer, updated_tracks)
         tracks_layer.data = updated_tracks
+        if filtered_graph:
+            tracks_layer.graph = filtered_graph
         print("Finished updating all centroids")
         self.parent.align_cache = label_data
 
@@ -1315,7 +1413,11 @@ class TrackingWindow(QWidget):
             self.cached_tracks = tracks
             self.display_selected_tracks(filter_values)
         else:
+            # Preserve and filter graph from existing layer
+            filtered_graph = preserve_and_filter_graph(tracks_layer, tracks)
             tracks_layer.data = tracks
+            if filtered_graph:
+                tracks_layer.graph = filtered_graph
 
 
 def func(label_data, start_slice, id):
@@ -1338,6 +1440,9 @@ def func(label_data, start_slice, id):
     """
     MIN_OVERLAP = 0.7
 
+    # Convert to numpy array to handle dask arrays
+    label_data = np.asarray(label_data)
+
     slice_id = start_slice
 
     track_cells = []
@@ -1350,7 +1455,7 @@ def func(label_data, start_slice, id):
             matches[1][maximum] <= MIN_OVERLAP * np.sum(matches[1])
             or matches[0][maximum] == 0
         ):
-            if len(track_cells) < TrackingWindow.MIN_TRACK_LENGTH:
+            if len(track_cells) < MIN_TRACK_LENGTH:
                 return
             return track_cells
 
@@ -1374,7 +1479,7 @@ def func(label_data, start_slice, id):
         id = matches[0][maximum]
         slice_id += 1
         cell = np.where(label_data[slice_id] == id)
-    if len(track_cells) < TrackingWindow.MIN_TRACK_LENGTH:
+    if len(track_cells) < MIN_TRACK_LENGTH:
         return
     return track_cells
 

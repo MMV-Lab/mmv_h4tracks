@@ -15,6 +15,7 @@ from scipy import ndimage, optimize, spatial
 from ._constants import APPROX_INF, MAX_MATCHING_DIST, CUSTOM_MODEL_PREFIX
 from ._grabber import grab_layer
 from ._logger import handle_exception
+from ._utils import preserve_and_filter_graph
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -468,14 +469,24 @@ def _get_segmentation_data(widget):
     Returns
     -------
     array
-        the segmentation data
+        the segmentation data as a numpy array
     """
     try:
-        return grab_layer(
+        label_layer = grab_layer(
             widget.viewer, widget.parent.combobox_segmentation.currentText()
-        ).data
+        )
     except ValueError as exc:
         raise ValueError("Segmentation layer not found in viewer") from exc
+    
+    # Get the actual data array, handling both multiscale and dask arrays
+    if isinstance(label_layer.data, (list, tuple)):
+        # Multiscale: use first level
+        segmentation = np.asarray(label_layer.data[0])
+    else:
+        # Single resolution: convert to numpy to handle dask arrays
+        segmentation = np.asarray(label_layer.data)
+    
+    return segmentation
 
 
 def _add_tracks_to_viewer(params):
@@ -502,7 +513,11 @@ def _add_tracks_to_viewer(params):
             handle_exception(exc)
             return
     else:
+        # Preserve and filter graph from existing layer
+        filtered_graph = preserve_and_filter_graph(tracks_layer, tracks)
         tracks_layer.data = tracks
+        if filtered_graph:
+            tracks_layer.graph = filtered_graph
     widget.parent.tracks = tracks
     widget.parent.eval_cache[1] = tracks
     widget.parent.combobox_tracks.setCurrentText(layername)
