@@ -160,6 +160,8 @@ class AssistantWindow(QWidget):
         filters.setLayout(filters_layout)
 
         segmentation_adaptation = QGroupBox("Segmentation adaptation")
+        # Ensure enough height for the title (avoid clipping descenders in "Segmentation adaptation")
+        segmentation_adaptation.setMinimumHeight(130)
         segmentation_adaptation_layout = QVBoxLayout()
         segmentation_adaptation_layout.addWidget(h_spacer)
         segmentation_adaptation_layout.addWidget(btn_align_ids)
