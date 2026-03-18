@@ -33,6 +33,7 @@ from napari.layers.tracks.tracks import Tracks
 from ._assistant import AssistantWindow
 from ._analysis import AnalysisWindow
 from ._evaluation import EvaluationWindow
+from ._logger import choice_dialog
 
 from ._reader import (
     open_dialog,
@@ -43,7 +44,7 @@ from ._reader import (
 )
 from ._segmentation import SegmentationWindow
 from ._tracking import TrackingWindow, calculate_medoid
-from ._writer import save_ome_zarr
+from ._writer import save_ome_zarr, save_zarr
 from ._grabber import grab_layer
 from ._utils import CallbackHandler
 
@@ -661,6 +662,14 @@ class MMVH4TRACKS(QWidget):
         self.callback_handler.remove_callback_viewer()
         QApplication.setOverrideCursor(Qt.WaitCursor)
         filepath = open_dialog(self)
+        if filepath.endswith(".ome.zarr"):
+            from importlib.metadata import version
+            if int(version("zarr").split(".")[0]) < 3:
+                QApplication.restoreOverrideCursor()
+                choice = choice_dialog(f"Installed zarr version is {version('zarr')}, we recommed at least version 3.0.8. Loading could irrecoverably alter the loaded file. Are you sure you want to continue?", [("Yes", QMessageBox.YesRole), ("No", QMessageBox.NoRole)])
+                if choice == QMessageBox.NoRole:
+                    return
+                QApplication.setOverrideCursor(Qt.WaitCursor)
         file_reader = napari_get_reader(filepath)
 
         try:
@@ -685,24 +694,36 @@ class MMVH4TRACKS(QWidget):
         Writes the changes made to the opened zarr file to disk.
         Fails if no zarr file was opened or not all layers exist
         """
+        if self.tracking_window.cached_tracks is not None:
+            print("Cached tracks are not None, not saving")
+            return
         # create new file if no file was opened
         # or the file is not an OME-zarr file
-        if not hasattr(self, "zarr") or not "multiscales" in self.zarr.attrs:
+        # if not hasattr(self, "zarr") or not "multiscales" in self.zarr.attrs:
+        if not hasattr(self, "zarr"):
             print("Calling save_as")
+            self.save_as()
+            return
+        if "multiscales" in self.zarr.attrs:
+            print("Currently not supporting Ome-zarr saving, saving as zarr file")
             self.save_as()
             return
         self.callback_handler.remove_callback_viewer()
         QApplication.setOverrideCursor(Qt.WaitCursor)
-        self.tracking_window.update_all_centroids()
+        # self.tracking_window.update_all_centroids()
         raw_name = self.combobox_image.currentText()
         raw_layer = grab_layer(self.viewer, raw_name)
         segmentation_name = self.combobox_segmentation.currentText()
         segmentation_layer = grab_layer(self.viewer, segmentation_name)
 
-        layers = [raw_layer, segmentation_layer]
+        # layers = [raw_layer, segmentation_layer]
+        tracks_name = self.combobox_tracks.currentText()
+        tracks_layer = grab_layer(self.viewer, tracks_name)
+        layers = [raw_layer, segmentation_layer, tracks_layer]
 
-        self.assistant_window.align_ids_on_click(saving=True)
-        save_ome_zarr(self.zarr, layers, is_multiscale=self.is_multiscale)
+        # self.assistant_window.align_ids_on_click(saving=True)
+        save_zarr(self.zarr, layers)
+        # save_ome_zarr(self.zarr, layers, is_multiscale=self.is_multiscale)
         QApplication.restoreOverrideCursor()
 
     def save_as(self):
@@ -710,32 +731,44 @@ class MMVH4TRACKS(QWidget):
         Opens a dialog for the user to choose a zarr file to save to.
         Fails if not all layers exist
         """
+        if self.tracking_window.cached_tracks is not None:
+            print("Cached tracks are not None, not saving")
+            return
         dialog = QFileDialog()
         QApplication.setOverrideCursor(Qt.WaitCursor)
         path = f"{dialog.getSaveFileName()[0]}"
         # If user tries to save a zarr file without the .ome.zarr extension, we add it
-        if path.endswith(".zarr") and not path.endswith(".ome.zarr"):
-            path = path[: -len(".zarr")] + ".ome.zarr"
-        if not path.endswith(".ome.zarr"):
-            path += ".ome.zarr"
-        if path == ".ome.zarr":
+        # if path.endswith(".zarr") and not path.endswith(".ome.zarr"):
+        #     path = path[: -len(".zarr")] + ".ome.zarr"
+        # if not path.endswith(".ome.zarr"):
+        #     path += ".ome.zarr"
+        # if path == ".ome.zarr":
+        #     QApplication.restoreOverrideCursor()
+        #     return
+        if not path.endswith(".zarr"):
+            path += ".zarr"
+        if path == ".zarr":
             QApplication.restoreOverrideCursor()
             return
 
         self.callback_handler.remove_callback_viewer()
-        self.tracking_window.update_all_centroids()
+        # self.tracking_window.update_all_centroids()
         raw_name = self.combobox_image.currentText()
         raw_layer = grab_layer(self.viewer, raw_name)
         segmentation_name = self.combobox_segmentation.currentText()
         segmentation_layer = grab_layer(self.viewer, segmentation_name)
+        tracks_name = self.combobox_tracks.currentText()
+        tracks_layer = grab_layer(self.viewer, tracks_name)
 
-        layers = [raw_layer, segmentation_layer]
+        # layers = [raw_layer, segmentation_layer]
+        layers = [raw_layer, segmentation_layer, tracks_layer]
 
-        self.assistant_window.align_ids_on_click(saving=True)
-        save_ome_zarr(
-            path,
-            layers,
-            is_multiscale=self.is_multiscale)
+        # self.assistant_window.align_ids_on_click(saving=True)
+        # save_ome_zarr(
+        #     path,
+        #     layers,
+        #     is_multiscale=self.is_multiscale)
+        save_zarr(path, layers)
         QApplication.restoreOverrideCursor()
 
     def get_process_limit(self):
