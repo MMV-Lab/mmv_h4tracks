@@ -160,6 +160,8 @@ class AssistantWindow(QWidget):
         filters.setLayout(filters_layout)
 
         segmentation_adaptation = QGroupBox("Segmentation adaptation")
+        # Ensure enough height for the title (avoid clipping descenders in "Segmentation adaptation")
+        segmentation_adaptation.setMinimumHeight(130)
         segmentation_adaptation_layout = QVBoxLayout()
         segmentation_adaptation_layout.addWidget(h_spacer)
         segmentation_adaptation_layout.addWidget(btn_align_ids)
@@ -260,16 +262,29 @@ class AssistantWindow(QWidget):
         except ValueError:
             threshold = DEFAULT_DISTANCE_THRESHOLD
 
+        # Get tracks layer graph (lineage information)
+        # graph maps track_id -> list of parent_ids
+        graph = getattr(tracks_layer, 'graph', {}) or {}
+        
+        # Build reverse lookup for children: parent_id -> list of child track_ids
+        children_dict = defaultdict(list)
+        for track_id, parent_ids in graph.items():
+            # parent_ids is a list (can have multiple parents)
+            for parent_id in parent_ids:
+                children_dict[parent_id].append(track_id)
+
         for id_ in np.unique(tracks[:, 0]):
             track = tracks[tracks[:, 0] == id_]
+            # Beginning check: exclude if track has a parent (came from division)
             if track[0, 1] > 0 and not self.close_to_edge(
                 track[0, 2], track[0, 3], shape, threshold
-            ):
-                outliers.append(id_)
+            ) and id_ not in graph:
+                outliers.append(int(id_))
+            # End check: exclude if track has children (split into multiple tracks)
             elif track[-1, 1] < frames - 1 and not self.close_to_edge(
                 track[-1, 2], track[-1, 3], shape, threshold
-            ):
-                outliers.append(id_)
+            ) and id_ not in children_dict:
+                outliers.append(int(id_))
         print(outliers)
         print(len(outliers))
         self.display_outliers(outliers)
