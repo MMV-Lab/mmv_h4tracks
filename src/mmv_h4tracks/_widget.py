@@ -33,7 +33,7 @@ from napari.layers.tracks.tracks import Tracks
 from ._assistant import AssistantWindow
 from ._analysis import AnalysisWindow
 from ._evaluation import EvaluationWindow
-from ._logger import choice_dialog
+from ._logger import choice_dialog, notify
 
 from ._reader import (
     open_dialog,
@@ -695,7 +695,7 @@ class MMVH4TRACKS(QWidget):
         Fails if no zarr file was opened or not all layers exist
         """
         if self.tracking_window.cached_tracks is not None:
-            print("Cached tracks are not None, not saving")
+            notify("Some tracks are not displayed, not saving")
             return
         # create new file if no file was opened
         # or the file is not an OME-zarr file
@@ -705,7 +705,7 @@ class MMVH4TRACKS(QWidget):
             self.save_as()
             return
         if "multiscales" in self.zarr.attrs:
-            print("Currently not supporting Ome-zarr saving, saving as zarr file")
+            notify("Currently not supporting Ome-zarr saving, saving as zarr file")
             self.save_as()
             return
         self.callback_handler.remove_callback_viewer()
@@ -732,7 +732,7 @@ class MMVH4TRACKS(QWidget):
         Fails if not all layers exist
         """
         if self.tracking_window.cached_tracks is not None:
-            print("Cached tracks are not None, not saving")
+            notify("Some tracks are not displayed, not saving")
             return
         dialog = QFileDialog()
         QApplication.setOverrideCursor(Qt.WaitCursor)
