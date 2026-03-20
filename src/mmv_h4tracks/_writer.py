@@ -2,11 +2,12 @@ import csv
 import locale
 
 import numpy as np
-from qtpy.QtWidgets import QFileDialog
-from napari.layers import Image, Labels
+from qtpy.QtWidgets import QFileDialog, QApplication
+from napari.layers import Image, Labels, Tracks
 import zarr
 from ome_zarr.io import parse_url
 from ome_zarr.writer import write_image, write_labels
+from ._logger import notify
 
 
 def save_dialog(parent, filetype="*.ome.zarr", directory=""):
@@ -36,6 +37,59 @@ def save_dialog(parent, filetype="*.ome.zarr", directory=""):
         directory,
     )
     return filepath
+
+def save_zarr(file, layers: list):
+    """
+    Save the image, segmentation and tracking data to a zarr file
+
+    Parameters
+    ----------
+    file : str
+        Path of the zarr file to write to
+    layers : list
+        List of layers to save, in the order: raw image, segmentation
+    """
+    assert len(layers) == 3, "Only raw image segmentation and tracking layers are supported"
+    assert isinstance(layers[0], Image)
+    assert isinstance(layers[1], Labels)
+    assert isinstance(layers[2], Tracks)
+
+    if isinstance(file, str):
+        # create the zarr file
+        store = parse_url(file, mode="w").store
+        root = zarr.group(store=store)
+    else:
+        # zarr file already exists, use it
+        root = file
+
+    if layers[0].multiscale:
+        raw_image = layers[0].data[0]
+    else:
+        raw_image = layers[0].data
+
+    if not "raw_data" in file:
+        root.create_dataset(
+            "raw_data",
+            shape=raw_image.shape,
+            dtype="f8",
+            data=raw_image,
+        )
+        root.create_dataset(
+            "segmentation_data",
+            shape=layers[1].data.shape,
+            dtype="i4",
+            data=layers[1].data,
+        )
+        root.create_dataset(
+            "tracking_data", shape=layers[2].data.shape, dtype="i4", data=layers[2].data
+        )
+    else:
+        root["raw_data"][:] = raw_image
+        root["segmentation_data"][:] = layers[1].data
+        root["tracking_data"].resize((layers[2].data.shape[0], layers[2].data.shape[1]))
+        root["tracking_data"][:] = layers[2].data
+    QApplication.restoreOverrideCursor()
+    notify("Zarr file has been saved.")
 
 def save_ome_zarr(
     file,
