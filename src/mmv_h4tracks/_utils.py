@@ -5,6 +5,7 @@ Utility functions for handling callbacks in napari layers.
 from __future__ import annotations
 from typing import TYPE_CHECKING
 
+import numpy as np
 from qtpy.QtWidgets import QApplication
 from napari.layers import Labels
 
@@ -12,7 +13,7 @@ if TYPE_CHECKING:
     from typing import Callable
     from qtpy.QtWidgets import QWidget
     from napari.viewer import Viewer
-    from napari.layers import Layer
+    from napari.layers import Layer, Tracks
 
 
 class CallbackHandler:
@@ -92,3 +93,55 @@ class CallbackHandler:
         self._added_callback = callback
         for layer in self.viewer.layers:
             self._add_callback(layer, callback)
+
+
+def preserve_and_filter_graph(tracks_layer, new_tracks_data: np.ndarray) -> dict:
+    """
+    Preserves the graph from an existing tracks layer and filters it to only include
+    track IDs that exist in the new tracks data.
+    
+    This prevents napari validation errors when the graph contains references to
+    track IDs that don't exist in the tracks data (e.g., after filtering).
+    
+    Parameters
+    ----------
+    tracks_layer : Tracks | None
+        The existing tracks layer (may be None if no layer exists)
+    new_tracks_data : np.ndarray
+        The new tracks data array with shape (N, 4) where first column is track_id
+        
+    Returns
+    -------
+    dict
+        Filtered graph dictionary mapping track_id -> list of parent_ids.
+        Returns empty dict if no graph exists or no valid track IDs remain.
+    """
+    # Get graph from existing layer if it exists
+    graph = {}
+    if tracks_layer is not None:
+        graph = getattr(tracks_layer, 'graph', {}) or {}
+    
+    if not graph:
+        return {}
+    
+    # Get valid track IDs from new tracks data
+    valid_track_ids = set(np.unique(new_tracks_data[:, 0]).astype(int))
+    
+    # Filter graph to only include entries where:
+    # 1. The track_id (key) exists in new tracks
+    # 2. All parent_ids (values) exist in new tracks
+    filtered_graph = {}
+    for track_id, parent_ids in graph.items():
+        track_id_int = int(track_id)
+        if track_id_int in valid_track_ids:
+            # Filter parent_ids to only those that exist in new tracks
+            filtered_parents = [
+                int(p) for p in parent_ids 
+                if int(p) in valid_track_ids
+            ]
+            # Only add entry if at least one valid parent remains (or if empty list is valid)
+            # Empty list means no parents (root track)
+            if filtered_parents or not parent_ids:
+                filtered_graph[track_id_int] = filtered_parents if filtered_parents else []
+    
+    return filtered_graph

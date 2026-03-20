@@ -255,7 +255,8 @@ class MMVH4TRACKS(QWidget):
             ("H", self.hotkey_separate),
             ("Q", self.hotkey_select_id),
             ("ctrl+T", self.create_implicit_tracks_wrapper),
-            ("ctrl+A", self.hotkey_display_all)
+            ("ctrl+A", self.hotkey_display_all),
+            ("ctrl+L", self.hotkey_load_lineage_file)
         ]
         for custom_bind in custom_binds:
             old_bind = viewer.bind_key(*custom_bind, overwrite=True)
@@ -314,6 +315,146 @@ class MMVH4TRACKS(QWidget):
         Hotkey for displaying all tracks
         """
         self.tracking_window.show_all_tracks_on_click()
+
+    def hotkey_load_lineage_file(self, _):
+        """
+        Hotkey for loading and parsing a lineage file.
+        Checks for tracks layer selection, opens a file dialog filtered to .txt files,
+        reads the lineage file, parses each line as track_id, start_t, end_t, parent_id,
+        validates track_ids exist in tracks layer, and updates the tracks layer graph attribute.
+        """
+        # Check if tracks layer is selected
+        tracks_name = self.combobox_tracks.currentText()
+        if not tracks_name:
+            print("Error: No tracks layer selected. Please select a tracks layer first.")
+            return
+        
+        # Get tracks layer
+        try:
+            tracks_layer = grab_layer(self.viewer, tracks_name)
+        except ValueError:
+            print(f"Error: Tracks layer '{tracks_name}' not found.")
+            return
+        
+        # Open file dialog filtered to .txt files
+        retval = QFileDialog().getOpenFileName(
+            self, "Select Lineage File", "", "Text files (*.txt)"
+        )
+        filepath = retval[0]
+        
+        # Return early if user canceled
+        if not filepath:
+            return
+        
+        try:
+            # Get unique track IDs from tracks layer for validation
+            tracks_data = tracks_layer.data
+            valid_track_ids = set(np.unique(tracks_data[:, 0]))
+            
+            # Initialize graph if it doesn't exist
+            if not hasattr(tracks_layer, 'graph') or tracks_layer.graph is None:
+                tracks_layer.graph = {}
+            
+            def parse_parent_id(parent_str):
+                """
+                Parse parent_id from string. Handles three formats:
+                1. Plain integer: "4" -> [4]
+                2. Single integer in brackets: "[4]" -> [4]
+                3. Multiple integers in brackets: "[4,5,6]" -> [4,5,6]
+                
+                Parameters
+                ----------
+                parent_str : str
+                    String representation of parent_id
+                    
+                Returns
+                -------
+                list[int]
+                    List of parent IDs
+                """
+                parent_str = parent_str.strip()
+                # Check if it's in brackets
+                if parent_str.startswith('[') and parent_str.endswith(']'):
+                    # Remove brackets and split by comma
+                    inner = parent_str[1:-1].strip()
+                    if not inner:
+                        return []
+                    # Split by comma and convert to int
+                    return [int(x.strip()) for x in inner.split(',') if x.strip()]
+                else:
+                    # Plain integer
+                    return [int(parent_str)]
+            
+            # Read and parse the lineage file
+            lineage_entries = []
+            skipped_count = 0
+            with open(filepath, 'r') as f:
+                for line_num, line in enumerate(f, 1):
+                    line = line.strip()
+                    if not line:  # Skip empty lines
+                        continue
+                    
+                    # Split by whitespace and take first 4 values
+                    values = line.split()
+                    if len(values) < 4:
+                        print(f"Warning: Line {line_num}: Skipping line with < 4 values: {line}")
+                        skipped_count += 1
+                        continue
+                    
+                    try:
+                        # Parse as track_id, start_t, end_t, parent_id
+                        track_id = int(values[0])
+                        start_t = int(values[1])
+                        end_t = int(values[2])
+                        
+                        # Parse parent_id (can be plain int, [int], or [int,int,...])
+                        # Handle case where parent_id might be split across multiple values
+                        # (e.g., "[4," "5," "6]" if brackets have spaces)
+                        parent_str = values[3]
+                        # If parent_id starts with '[' but doesn't end with ']', 
+                        # it might be split - collect until we find closing bracket
+                        if parent_str.startswith('[') and not parent_str.endswith(']'):
+                            idx = 4
+                            # Collect all parts until we find the closing bracket
+                            parts = [parent_str]
+                            while idx < len(values) and not values[idx].endswith(']'):
+                                parts.append(values[idx])
+                                idx += 1
+                            if idx < len(values):
+                                parts.append(values[idx])
+                            # Join without spaces to preserve bracket structure (e.g., "[4,5,6]")
+                            parent_str = ''.join(parts)
+                        
+                        parent_ids = parse_parent_id(parent_str)
+                        
+                        # Validate track_id exists in tracks layer
+                        if track_id not in valid_track_ids:
+                            print(f"Warning: Line {line_num}: Track ID {track_id} not found in tracks layer. Skipping.")
+                            skipped_count += 1
+                            continue
+                        
+                        lineage_entries.append((track_id, start_t, end_t, parent_ids))
+                    except ValueError as e:
+                        print(f"Warning: Line {line_num}: Could not parse line: {line}. Error: {e}")
+                        skipped_count += 1
+                        continue
+            
+            # Update tracks layer graph attribute
+            if lineage_entries:
+                for track_id, start_t, end_t, parent_ids in lineage_entries:
+                    # Set graph entry: track_id -> parent_ids (already a list)
+                    tracks_layer.graph[track_id] = parent_ids
+                
+                print(f"Successfully loaded {len(lineage_entries)} lineage entries into tracks layer graph.")
+                if skipped_count > 0:
+                    print(f"Skipped {skipped_count} invalid or unmatched entries.")
+            else:
+                print("No valid lineage entries found in file.")
+                
+        except FileNotFoundError:
+            print(f"Error: File not found: {filepath}")
+        except (IOError, OSError, ValueError) as e:
+            print(f"Error reading file: {e}")
 
     def update_evaluation_limits(self, event):
         """

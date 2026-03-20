@@ -36,7 +36,8 @@ dependencies = [
     "matplotlib",
     "bioio",
     "scipy>=1.11.0",
-    "ome-zarr",
+    "ome-zarr>=0.12.0",
+    "napari-ome-zarr",
 ]
 [project.optional-dependencies]
 all = [
@@ -44,6 +45,7 @@ all = [
     "pytest",
     "pytest-qt",
     "pre-commit",
+    "bioio-tifffile",
 ]
 
 [project.urls]
@@ -70,3 +72,4 @@ mmv_h4tracks = [
 
 [project.entry-points."napari.manifest"]
 mmv_h4tracks = "mmv_h4tracks:napari.yaml"
+
