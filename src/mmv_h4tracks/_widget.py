@@ -46,6 +46,11 @@ from ._segmentation import SegmentationWindow
 from ._tracking import TrackingWindow, calculate_medoid
 from ._writer import save_ome_zarr, save_zarr
 from ._grabber import grab_layer
+from ._session_trained_models import (
+    remove_entries_for_layer,
+    update_layer_name_in_store,
+    register_session_trained_model as _register_session_trained_model_store,
+)
 from ._utils import CallbackHandler
 
 
@@ -93,6 +98,9 @@ class MMVH4TRACKS(QWidget):
         self.callback_handler = CallbackHandler(self)
         # track if original raw data was multiscale
         self.is_multiscale = False
+        # session Cellpose models: display_name -> {layer_name, frames}
+        self.session_trained_models: dict[str, dict] = {}
+        self._session_trained_layer_ids_hooked: set[int] = set()
 
         ### QObjects
 
@@ -279,6 +287,7 @@ class MMVH4TRACKS(QWidget):
             layer.events.name.connect(
                 self.rename_entry_in_comboboxes
             )  # doesn't contain index
+            self._session_trained_attach_layer(layer)
         for combobox in self.layer_comboboxes:
             if combobox.count() == 0:
                 combobox.addItem("")
@@ -462,6 +471,34 @@ class MMVH4TRACKS(QWidget):
         """
         self.evaluation_window.update_limits(event)
 
+    def register_session_trained_model(
+        self,
+        display_name: str,
+        layer_name: str,
+        segmentation_layer_name: str,
+        frames: tuple[int, ...],
+    ) -> None:
+        """Record a model trained this session (for optional frame-exclusion on predict)."""
+        _register_session_trained_model_store(
+            self.session_trained_models,
+            display_name,
+            layer_name,
+            segmentation_layer_name,
+            frames,
+        )
+
+    def _session_trained_attach_layer(self, layer) -> None:
+        if id(layer) in self._session_trained_layer_ids_hooked:
+            return
+        self._session_trained_layer_ids_hooked.add(id(layer))
+        layer.events.name.connect(self._session_trained_on_layer_renamed)
+
+    def _session_trained_on_layer_renamed(self, event) -> None:
+        old = getattr(event, "old", None)
+        new = getattr(event, "new", None)
+        if old is not None and new is not None:
+            update_layer_name_in_store(self.session_trained_models, old, new)
+
     def add_entry_to_comboboxes(self, event):
         """
         Adds a new entry to the comboboxes for the layers
@@ -482,6 +519,7 @@ class MMVH4TRACKS(QWidget):
         event.value.events.name.connect(
             self.rename_entry_in_comboboxes
         )  # contains index
+        self._session_trained_attach_layer(event.value)
 
     def remove_entry_from_comboboxes(self, event):
         """
@@ -499,6 +537,8 @@ class MMVH4TRACKS(QWidget):
         combobox.removeItem(index)
         if combobox.count() == 0:
             combobox.addItem("")
+        remove_entries_for_layer(self.session_trained_models, event.value.name)
+        self._session_trained_layer_ids_hooked.discard(id(event.value))
 
     def rename_entry_in_comboboxes(self, event):
         """

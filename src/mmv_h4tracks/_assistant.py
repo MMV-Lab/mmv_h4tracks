@@ -199,8 +199,6 @@ class AssistantWindow(QWidget):
                 continue
             if result[3] / result[1] > threshold:
                 outliers.append(int(result[0]))
-        print(outliers)
-        print(len(outliers))
         self.display_outliers(outliers)
 
     def show_size_outliers_on_click(self):
@@ -231,8 +229,6 @@ class AssistantWindow(QWidget):
         for result in sizes:
             if result[4] / result[3] > threshold:
                 outliers.append(int(result[0]))
-        print(outliers)
-        print(len(outliers))
         self.display_outliers(outliers)
 
     def show_abrupt_tracks_on_click(self):
@@ -285,8 +281,6 @@ class AssistantWindow(QWidget):
                 track[-1, 2], track[-1, 3], shape, threshold
             ) and id_ not in children_dict:
                 outliers.append(int(id_))
-        print(outliers)
-        print(len(outliers))
         self.display_outliers(outliers)
 
     def close_to_edge(self, y, x, shape, threshold):
