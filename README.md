@@ -172,7 +172,9 @@ We will continue to develop the plugin and implement new features in the future.
 - Support evaluation of external segmentations
 - Improve robustness of Mac computing
 - Batch processing
-- Adapt to OME-Zarr 
+- Add support for OME-Zarr 
+- Add support for multiscale data
+- Add single-cell tracking view (*action cam*)
 
 If you have a feature request, please [file an issue].
 
