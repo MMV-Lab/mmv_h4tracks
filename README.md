@@ -56,7 +56,7 @@ The computation mode is used to set how many of the available CPU cores (40% or 
 
 ### Segmentation
 
-For segmentation, we use the state of the art instance segmentation method Cellpose. We provide a model that we trained and has proven successful for our application ([see more information](https://doi.org/10.1038/s41467-023-43765-3)).
+For segmentation, we use the state of the art instance segmentation method Cellpose. We provide a model that we trained and has proven successful for our application ([see more information](https://doi.org/10.1038/s41467-023-43765-3)). Note: Due to computational constraints, we do not employ Cellpose-SAM here.
 
 
 #### Automatic instance segmentation
@@ -64,13 +64,20 @@ For segmentation, we use the state of the art instance segmentation method Cellp
 To start automatic segmentation, a model must first be selected. Automatic segmentation can then be started via "Run Segmentation". The "Preview" option offers the possibility of segmenting the first 5 frames first in order to obtain an estimate of the expected results, as the computation - depending on the data and hardware - can be time-consuming.
 
 
-##### Custom models
+##### Add custom models
 
 The plugin supports adding custom Cellpose models. To do so, simply click on "Add custom Cellpose model", enter a name to be displayed, select the model path and pass the required parameters. Click [here](https://cellpose.readthedocs.io/en/latest/api.html#id0) for more information about the parameters.
 
 
 To train your own Cellpose model, [this](https://cellpose.readthedocs.io/en/latest/train.html) might be helpful.
-In future versions, we plan to support fine-tuning of Cellpose models within the plugin.
+
+##### Train new models
+
+The plugin also allows users to train new Cellpose models. For this, expand “Train new Cellpose model”, select the frames to use for training, provide a model name, and click “Train model.” Once training finishes successfully, a popup prompts the user to choose the path where the model should be saved.
+
+By default, training runs for 200 epochs. If the “Longer Training” option is enabled, the number of training epochs is increased to 1000.
+
+Models trained within the plugin remain available after restarting it. If the plugin is reinstalled or the model needs to be used on another computer, it can simply be re-added as a custom model.
 
 
 #### Manual curation
@@ -162,11 +169,14 @@ We will continue to develop the plugin and implement new features in the future.
 
 - Feedback (progress bar) for computationally intensive functions
 - Support of lineages
-- Support training custom Cellpose models within the plugin
+- ~~Support training custom Cellpose models within the plugin~~
 - Model optimization to further optimize segmentation computation
 - Support evaluation of external segmentations
 - Improve robustness of Mac computing
-- ...
+- Batch processing
+- Add support for OME-Zarr 
+- Add support for multiscale data
+- Add single-cell tracking view (*action cam*)
 
 If you have a feature request, please [file an issue].
 
