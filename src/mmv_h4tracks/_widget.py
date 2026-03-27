@@ -19,7 +19,7 @@ from qtpy.QtWidgets import (
     QSizePolicy,
     QProgressBar,
 )
-from qtpy.QtCore import Qt
+from qtpy.QtCore import Qt, QTimer
 from qtpy.QtGui import QImage, QPixmap
 
 from pathlib import Path
@@ -52,6 +52,8 @@ from ._session_trained_models import (
     register_session_trained_model as _register_session_trained_model_store,
 )
 from ._utils import CallbackHandler
+
+import mmv_h4tracks._processing as mmv_processing
 
 
 class MMVH4TRACKS(QWidget):
@@ -98,7 +100,7 @@ class MMVH4TRACKS(QWidget):
         self.callback_handler = CallbackHandler(self)
         # track if original raw data was multiscale
         self.is_multiscale = False
-        # session Cellpose models: display_name -> {layer_name, frames}
+        # session Cellpose models: display_name -> {training_masks_dir, layer_prefix, frames}
         self.session_trained_models: dict[str, dict] = {}
         self._session_trained_layer_ids_hooked: set[int] = set()
 
@@ -293,6 +295,11 @@ class MMVH4TRACKS(QWidget):
                 combobox.addItem("")
         self.viewer.layers.events.moving.connect(self.reorder_entry_in_comboboxes)
 
+        QTimer.singleShot(
+            0,
+            lambda: mmv_processing.scan_mmvh4tracks_training_temp_on_startup(self),
+        )
+
     def hotkey_next_free(self, _):
         """
         Hotkey for the next free label id
@@ -474,16 +481,16 @@ class MMVH4TRACKS(QWidget):
     def register_session_trained_model(
         self,
         display_name: str,
-        layer_name: str,
-        segmentation_layer_name: str,
+        training_masks_dir,
+        layer_prefix: str,
         frames: tuple[int, ...],
     ) -> None:
         """Record a model trained this session (for optional frame-exclusion on predict)."""
         _register_session_trained_model_store(
             self.session_trained_models,
             display_name,
-            layer_name,
-            segmentation_layer_name,
+            training_masks_dir,
+            layer_prefix,
             frames,
         )
 

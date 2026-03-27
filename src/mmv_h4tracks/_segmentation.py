@@ -1,8 +1,5 @@
 import numpy as np
 
-import shutil
-from pathlib import Path
-
 from qtpy.QtWidgets import (
     QWidget,
     QGroupBox,
@@ -24,14 +21,17 @@ from scipy import ndimage
 import napari
 import pandas as pd
 
+from ._constants import CUSTOM_MODEL_PREFIX
 from ._logger import notify, handle_exception
 from ._grabber import grab_layer
 from ._train import (
-    CellposeTrainingRunResult,
-    _safe_rmtree,
     export_cellpose_training_pairs,
     parse_use_frames,
+    _sanitize_model_name_fragment,
 )
+from pathlib import Path
+import shutil
+
 from ._utils import preserve_and_filter_graph
 import mmv_h4tracks._processing as processing
 from .add_models import ModelWindow
@@ -237,9 +237,16 @@ class SegmentationWindow(QWidget):
         if not model_name:
             notify("Please enter a model name.")
             return
+        if processing.is_custom_model_display_name_taken(self, model_name):
+            notify(
+                "A custom model with this name (or on-disk file) already exists. "
+                "Choose another name."
+            )
+            return
         self.parent.callback_handler.remove_callback_viewer()
         image_layer_name = self.parent.combobox_image.currentText()
         segmentation_layer_name = self.parent.combobox_segmentation.currentText()
+        layer_prefix = _sanitize_model_name_fragment(image_layer_name)
         try:
             export_result = export_cellpose_training_pairs(
                 self.viewer,
@@ -253,64 +260,67 @@ class SegmentationWindow(QWidget):
             return
 
         worker = processing.start_cellpose_training_worker(
-            export_result.export_dir, model_name, None
+            self, export_result.export_dir
         )
 
         train_frames = tuple(export_result.frame_indices)
 
-        def _on_done(run: CellposeTrainingRunResult) -> None:
-            self._on_cellpose_train_returned(
-                run, model_name, train_frames, image_layer_name, segmentation_layer_name
+        worker.returned.connect(
+            lambda r, mn=model_name, tf=train_frames, lp=layer_prefix: self._complete_cellpose_training_after_worker(
+                r, mn, tf, lp
             )
+        )
 
-        worker.returned.connect(_on_done)
-
-    def _on_cellpose_train_returned(
+    def _complete_cellpose_training_after_worker(
         self,
-        run: CellposeTrainingRunResult,
-        display_name: str,
+        result,
+        model_name: str,
         train_frames: tuple[int, ...],
-        image_layer_name: str,
-        segmentation_layer_name: str,
+        layer_prefix: str,
     ) -> None:
+        """Main thread: save ``.pth``, register custom model, prune export, session meta."""
+        from ._train import prune_cellpose_training_export_dir, _safe_rmtree
+
+        notify(
+            "Cellpose training finished. Please choose where to save the model weights "
+            "as a .pth file (this is required to register the custom model)."
+        )
+        default_path = str(Path.home() / f"{model_name}.pth")
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save trained model",
+            default_path,
+            "PyTorch weights (*.pth)",
+        )
+        if not path:
+            _safe_rmtree(result.export_dir)
+            notify("Save cancelled; training export removed and model not registered.")
+            return
+        if not path.lower().endswith(".pth"):
+            path = path + ".pth"
         try:
-            notify("Cellpose training finished.")
-            default_name = f"{display_name}.pth"
-            path, _ = QFileDialog.getSaveFileName(
-                self,
-                "Save trained Cellpose model",
-                str(Path.home() / default_name),
-                "PyTorch checkpoint (*.pth);;All files (*.*)",
+            shutil.copy2(result.source_weights_path, path)
+            params = {
+                "diameter": float(result.diam_mean),
+                "channels": [0, 0],
+            }
+            processing.persist_custom_model_entry(
+                self, model_name, result.source_weights_path, params
             )
-            if not path:
-                notify(
-                    "Training finished. No path selected — model was not saved or registered."
-                )
-                return
-            try:
-                shutil.copy2(run.weights_path, path)
-                params = {
-                    "diameter": float(run.diam_mean),
-                    "channels": [0, 0],
-                }
-                processing.persist_custom_model_entry(
-                    self, display_name, run.weights_path, params
-                )
-                hardcoded_models, custom_models = processing.read_models(self)
-                processing.display_models(self, hardcoded_models, custom_models)
-                self.parent.register_session_trained_model(
-                    display_name,
-                    image_layer_name,
-                    segmentation_layer_name,
-                    train_frames,
-                )
-                notify(
-                    f"Model saved to:\n{path}\n\nRegistered as custom model: {display_name}"
-                )
-            except Exception as exc:
-                notify(str(exc))
-        finally:
-            _safe_rmtree(run.train_save_root)
+            prune_cellpose_training_export_dir(result.export_dir)
+            hardcoded_models, custom_models = processing.read_models(self)
+            processing.display_models(self, hardcoded_models, custom_models)
+            self.parent.register_session_trained_model(
+                model_name,
+                result.export_dir,
+                layer_prefix,
+                train_frames,
+            )
+            combo_name = CUSTOM_MODEL_PREFIX + model_name
+            self.combobox_segmentation.setCurrentText(combo_name)
+            notify(f"Registered custom model: {combo_name}")
+        except Exception as exc:
+            notify(str(exc))
 
     def toggle_segmentation_button(self, text):
         """

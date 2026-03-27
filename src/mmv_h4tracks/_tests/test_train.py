@@ -1,6 +1,6 @@
 """Tests for Cellpose training export helpers."""
 
-import types
+import time
 
 import numpy as np
 import pytest
@@ -9,9 +9,13 @@ from unittest.mock import Mock
 from mmv_h4tracks._session_trained_models import overlap_training_frames_with_stack
 from mmv_h4tracks._train import (
     export_cellpose_training_pairs,
-    list_training_pair_paths,
+    find_cellpose_cli_weights,
     parse_use_frames,
-    run_cellpose_training,
+    prune_cellpose_training_export_dir,
+    classify_mmvh4tracks_training_dir,
+    parse_layer_prefix_and_frames_from_masks_dir,
+    resume_model_fragment_needs_confirm,
+    _sanitize_model_name_fragment,
     _cellpose_training_raw_cyx,
     _frame_2d,
     _get_array_from_layer,
@@ -91,7 +95,7 @@ def test_get_array_from_layer_mock():
 
 
 def test_export_cellpose_training_pairs_writes_tiffs(tmp_path, monkeypatch):
-    """Export creates paired raw/masks with matching names."""
+    """Export creates Cellpose-style ``img.tif`` + ``img_masks.tif`` in one folder."""
     raw_vol = np.random.rand(2, 16, 16).astype(np.float32)
     seg_vol = np.zeros((2, 16, 16), dtype=np.uint16)
     seg_vol[:, 4:12, 4:12] = 1
@@ -100,8 +104,6 @@ def test_export_cellpose_training_pairs_writes_tiffs(tmp_path, monkeypatch):
         layers = []
 
     viewer = V()
-    export_dir = tmp_path / "export"
-    export_dir.mkdir(parents=True, exist_ok=True)
 
     def fake_grab(v, name):
         if name == "R":
@@ -110,95 +112,142 @@ def test_export_cellpose_training_pairs_writes_tiffs(tmp_path, monkeypatch):
             return Mock(data=seg_vol)
         raise AssertionError(name)
 
-    def fake_mkdtemp(prefix=""):
-        return str(export_dir)
+    def fake_prepare(model_name: str):
+        d = tmp_path / f"mmv_h4tracks_train_{_sanitize_model_name_fragment(model_name)}"
+        _safe_rmtree(d)
+        d.mkdir(parents=True, exist_ok=True)
+        return d
 
     monkeypatch.setattr("mmv_h4tracks._train.grab_layer", fake_grab)
-    monkeypatch.setattr("mmv_h4tracks._train.tempfile.mkdtemp", fake_mkdtemp)
+    monkeypatch.setattr(
+        "mmv_h4tracks._train.prepare_cellpose_training_export_dir", fake_prepare
+    )
 
     result = export_cellpose_training_pairs(
         viewer, "R", "S", [0, 1], "my model"
     )
-    assert result.export_dir == export_dir
-    assert (result.export_dir / "raw" / "frame_00000.tif").is_file()
-    assert (result.export_dir / "masks" / "frame_00000.tif").is_file()
-    assert (result.export_dir / "raw" / "frame_00001.tif").is_file()
-    assert (result.export_dir / "masks" / "frame_00001.tif").is_file()
+    assert result.export_dir == tmp_path / (
+        "mmv_h4tracks_train_" + _sanitize_model_name_fragment("my model")
+    )
+    assert (result.export_dir / "R_frame_00000.tif").is_file()
+    assert (result.export_dir / "R_frame_00000_masks.tif").is_file()
+    assert (result.export_dir / "R_frame_00001.tif").is_file()
+    assert (result.export_dir / "R_frame_00001_masks.tif").is_file()
 
     try:
         import tifffile
     except ImportError:
         pytest.skip("tifffile not installed")
-    raw0 = tifffile.imread(result.export_dir / "raw" / "frame_00000.tif")
+    raw0 = tifffile.imread(result.export_dir / "R_frame_00000.tif")
     assert raw0.ndim == 3 and raw0.shape[0] == 2
 
 
-def test_list_training_pair_paths(tmp_path):
-    raw = tmp_path / "raw"
-    masks = tmp_path / "masks"
-    raw.mkdir()
-    masks.mkdir()
-    (raw / "frame_00001.tif").write_bytes(b"a")
-    (masks / "frame_00001.tif").write_bytes(b"b")
-    (raw / "frame_00000.tif").write_bytes(b"a")
-    (masks / "frame_00000.tif").write_bytes(b"b")
-    tf, lf = list_training_pair_paths(tmp_path)
-    assert len(tf) == 2
-    assert Path(tf[0]).name == "frame_00000.tif"
-    assert Path(lf[0]).name == "frame_00000.tif"
+def test_find_cellpose_cli_weights_picks_newest(tmp_path):
+    root = tmp_path / "exp"
+    md = root / "models"
+    md.mkdir(parents=True)
+    old = md / "cellpose_0.0"
+    new = md / "cellpose_1.1"
+    old.write_bytes(b"1")
+    time.sleep(0.02)
+    new.write_bytes(b"2")
+    picked = find_cellpose_cli_weights(root)
+    assert picked.resolve() == new.resolve()
 
 
-def test_list_training_pair_paths_missing_mask(tmp_path):
-    raw = tmp_path / "raw"
-    masks = tmp_path / "masks"
-    raw.mkdir()
-    masks.mkdir()
-    (raw / "a.tif").write_bytes(b"x")
-    with pytest.raises(ValueError, match="Missing matching mask"):
-        list_training_pair_paths(tmp_path)
+def test_find_cellpose_cli_weights_no_models_dir(tmp_path):
+    with pytest.raises(FileNotFoundError, match="models/"):
+        find_cellpose_cli_weights(tmp_path)
 
 
-def test_run_cellpose_training_mocked(tmp_path, monkeypatch):
-    """run_cellpose_training calls train_seg with min_train_masks=1 and returns weights path."""
-    raw = tmp_path / "export" / "raw"
-    masks = tmp_path / "export" / "masks"
-    raw.mkdir(parents=True)
-    masks.mkdir(parents=True)
-    (raw / "frame_00000.tif").write_bytes(b"r")
-    (masks / "frame_00000.tif").write_bytes(b"m")
+def test_find_cellpose_cli_weights_empty_models(tmp_path):
+    (tmp_path / "models").mkdir()
+    with pytest.raises(FileNotFoundError, match="No cellpose_"):
+        find_cellpose_cli_weights(tmp_path)
 
-    ctr = tmp_path / "ctr"
-    ctr.mkdir()
-    (ctr / "models").mkdir()
-    wp = ctr / "models" / "fin.pth"
-    wp.write_bytes(b"w")
 
-    def fake_mkdtemp(prefix=""):
-        return str(ctr)
+def test_prune_cellpose_training_export_dir_keeps_only_masks(tmp_path):
+    root = tmp_path / "exp"
+    root.mkdir()
+    (root / "L_frame_00000.tif").write_bytes(b"r")
+    (root / "L_frame_00000_masks.tif").write_bytes(b"m")
+    (root / "L_frame_00000_flows.tif").write_bytes(b"f")
+    (root / "L_frame_0.tif").write_bytes(b"x")
+    (root / "junk.txt").write_text("x")
+    junk_dir = root / "other"
+    junk_dir.mkdir()
+    (junk_dir / "a").write_text("b")
+    models = root / "models"
+    models.mkdir()
+    (models / "cellpose_0.0").write_bytes(b"w")
 
-    fake_net = Mock()
-    fake_net.diam_labels = Mock(mean=Mock(return_value=Mock(item=Mock(return_value=22.5))))
+    prune_cellpose_training_export_dir(root)
 
-    def fake_cellpose_model(**kwargs):
-        m = Mock()
-        m.net = fake_net
-        return m
+    assert (root / "L_frame_00000_masks.tif").is_file()
+    assert not (root / "L_frame_00000.tif").exists()
+    assert not (root / "L_frame_00000_flows.tif").exists()
+    assert not (root / "models").exists()
+    assert not (root / "junk.txt").exists()
+    assert not (root / "L_frame_0.tif").exists()
+    assert not junk_dir.exists()
 
-    captured = {}
 
-    def fake_train_seg(net, **kwargs):
-        captured["kwargs"] = kwargs
-        return (str(wp), np.array([1.0]), np.array([2.0]))
+def test_prepare_cellpose_training_export_dir_removes_existing(tmp_path, monkeypatch):
+    from mmv_h4tracks._train import prepare_cellpose_training_export_dir
 
-    monkeypatch.setattr("mmv_h4tracks._train.tempfile.mkdtemp", fake_mkdtemp)
-    monkeypatch.setattr("cellpose.models.CellposeModel", fake_cellpose_model)
-    monkeypatch.setattr("mmv_h4tracks._train.use_gpu_for_cellpose", lambda: False)
-    monkeypatch.setattr(
-        "mmv_h4tracks._train._import_cellpose_train",
-        lambda: types.SimpleNamespace(train_seg=fake_train_seg),
-    )
+    monkeypatch.setattr("tempfile.gettempdir", lambda: str(tmp_path))
+    d0 = prepare_cellpose_training_export_dir("alpha")
+    (d0 / "stale.txt").write_text("x")
+    d1 = prepare_cellpose_training_export_dir("alpha")
+    assert d0 == d1
+    assert not (d1 / "stale.txt").exists()
 
-    result = run_cellpose_training(tmp_path / "export", "my model", None)
-    assert result.weights_path.resolve() == wp.resolve()
-    assert result.diam_mean == 22.5
-    assert captured["kwargs"].get("min_train_masks") == 1
+
+def test_classify_mmvh4tracks_training_dir(tmp_path):
+    root = tmp_path / "mmv_h4tracks_train_x"
+    root.mkdir()
+    assert classify_mmvh4tracks_training_dir(root) == "empty"
+
+    (root / "L_frame_00000_masks.tif").write_bytes(b"m")
+    assert classify_mmvh4tracks_training_dir(root) == "incomplete"
+
+    (root / "L_frame_00000.tif").write_bytes(b"r")
+    assert classify_mmvh4tracks_training_dir(root) == "interrupted"
+
+    (root / "L_frame_00000_flows.tif").write_bytes(b"f")
+    assert classify_mmvh4tracks_training_dir(root) == "interrupted"
+
+    _safe_rmtree(root)
+    root.mkdir()
+    (root / "L_frame_00000_masks.tif").write_bytes(b"m")
+    assert classify_mmvh4tracks_training_dir(root) == "masks_only"
+
+
+def test_parse_layer_prefix_and_frames_from_masks_dir(tmp_path):
+    root = tmp_path / "d"
+    root.mkdir()
+    (root / "GFP_frame_00010_masks.tif").write_bytes(b"a")
+    (root / "GFP_frame_00002_masks.tif").write_bytes(b"b")
+    pfx, frames = parse_layer_prefix_and_frames_from_masks_dir(root)
+    assert pfx == "GFP"
+    assert frames == (2, 10)
+
+
+def test_resume_model_fragment_needs_confirm():
+    assert not resume_model_fragment_needs_confirm("GFP")
+    assert not resume_model_fragment_needs_confirm("abc123")
+    assert resume_model_fragment_needs_confirm("my_model")
+    assert resume_model_fragment_needs_confirm("a_b")
+
+
+def test_is_custom_model_display_name_taken_key_only():
+    from mmv_h4tracks._processing import is_custom_model_display_name_taken
+
+    class W:
+        def __init__(self):
+            self.custom_models = {}
+
+    w = W()
+    assert not is_custom_model_display_name_taken(w, "fresh")
+    w.custom_models["used"] = {}
+    assert is_custom_model_display_name_taken(w, "used")

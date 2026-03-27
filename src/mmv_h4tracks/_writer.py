@@ -89,7 +89,10 @@ def save_zarr(file, layers: list):
         root["tracking_data"].resize((layers[2].data.shape[0], layers[2].data.shape[1]))
         root["tracking_data"][:] = layers[2].data
     QApplication.restoreOverrideCursor()
-    notify("Zarr file has been saved.")
+    if isinstance(file, str):
+        notify(f"{file} has been saved.")
+    else:
+        notify("Zarr file has been saved.")
 
 def save_ome_zarr(
     file,
@@ -100,7 +103,7 @@ def save_ome_zarr(
     """
     Save the image, segmentation and tracking data to an OME-zarr file
 
-    path : str
+    file : str
         Path of the OME-zarr file to write to
     layers : list
         List of layers to save, in the order: raw image, segmentation
@@ -390,7 +393,10 @@ def save_ome_zarr(
         "c": c_size
     }
     root.attrs["Frames"] = frames
-    print("OME-zarr file has been saved.")
+    if isinstance(file, str):
+        notify(f"{file} has been saved.")
+    else:
+        notify("OME-zarr file has been saved.")
 
 def save_csv(file, data):
     """

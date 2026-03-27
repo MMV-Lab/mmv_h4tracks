@@ -1,25 +1,26 @@
 """
-Track Cellpose models trained in the current session (layer + frames) for prediction prompts.
+Track Cellpose models trained in the current session (mask export dir + frames) for prediction prompts.
 """
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
-# Values: {"layer_name": str, "segmentation_layer_name": str, "frames": tuple[int, ...]}
+# Values: training_masks_dir, layer_prefix (sanitized raw layer name at export), frames
 SessionTrainedModelsMap = dict[str, dict[str, Any]]
 
 
 def register_session_trained_model(
     store: SessionTrainedModelsMap,
     display_name: str,
-    layer_name: str,
-    segmentation_layer_name: str,
+    training_masks_dir: str | Path,
+    layer_prefix: str,
     frames: tuple[int, ...],
 ) -> None:
     store[display_name] = {
-        "layer_name": layer_name,
-        "segmentation_layer_name": segmentation_layer_name,
+        "training_masks_dir": str(Path(training_masks_dir).resolve()),
+        "layer_prefix": layer_prefix,
         "frames": tuple(frames),
     }
 
@@ -27,20 +28,20 @@ def register_session_trained_model(
 def update_layer_name_in_store(
     store: SessionTrainedModelsMap, old_name: str, new_name: str
 ) -> None:
+    from ._train import _sanitize_model_name_fragment
+
+    old_p = _sanitize_model_name_fragment(old_name)
+    new_p = _sanitize_model_name_fragment(new_name)
     for meta in store.values():
-        if meta["layer_name"] == old_name:
-            meta["layer_name"] = new_name
-        if meta.get("segmentation_layer_name") == old_name:
-            meta["segmentation_layer_name"] = new_name
+        if meta.get("layer_prefix") == old_p:
+            meta["layer_prefix"] = new_p
 
 
 def remove_entries_for_layer(store: SessionTrainedModelsMap, layer_name: str) -> None:
-    to_del = [
-        k
-        for k, v in store.items()
-        if v["layer_name"] == layer_name
-        or v.get("segmentation_layer_name") == layer_name
-    ]
+    from ._train import _sanitize_model_name_fragment
+
+    p = _sanitize_model_name_fragment(layer_name)
+    to_del = [k for k, v in store.items() if v.get("layer_prefix") == p]
     for k in to_del:
         del store[k]
 

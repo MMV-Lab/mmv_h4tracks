@@ -3,6 +3,7 @@ from multiprocessing import Pool
 import json
 import logging
 import shutil
+from datetime import datetime
 from pathlib import Path
 import time
 
@@ -10,7 +11,7 @@ import numpy as np
 from cellpose import models, core
 from napari.qt.threading import thread_worker
 from qtpy.QtCore import Qt
-from qtpy.QtWidgets import QApplication, QMessageBox
+from qtpy.QtWidgets import QApplication, QMessageBox, QInputDialog
 from scipy import ndimage, optimize, spatial
 
 from ._constants import APPROX_INF, MAX_MATCHING_DIST, CUSTOM_MODEL_PREFIX
@@ -18,6 +19,7 @@ from ._grabber import grab_layer
 from ._session_trained_models import overlap_training_frames_with_stack
 from ._logger import handle_exception, notify
 from ._utils import preserve_and_filter_graph
+from ._train import _sanitize_model_name_fragment
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -200,18 +202,30 @@ def display_models(widget, hardcoded_models, custom_models):
     widget.combobox_segmentation.addItems(custom_models)
 
 
+def custom_model_weights_basename(display_name: str) -> str:
+    """Filesystem basename (no extension) for a custom model weights file."""
+    stem = _sanitize_model_name_fragment(display_name)
+    return stem if stem else "model"
+
+
+def is_custom_model_display_name_taken(widget, display_name: str) -> bool:
+    """True if the display name or its on-disk basename is already used."""
+    if display_name in widget.custom_models:
+        return True
+    stem = custom_model_weights_basename(display_name)
+    dest = Path(__file__).parent / "models" / "custom_models" / stem
+    return dest.is_file()
+
+
 def persist_custom_model_entry(widget, display_name: str, source_weights: Path, params: dict) -> Path:
     """
-    Copy Cellpose weights into ``models/custom_models/`` and update ``custom_models.json``.
+    Copy Cellpose weights into ``models/custom_models/`` (no file extension) and update ``custom_models.json``.
     """
     package_root = Path(__file__).parent
     dest_dir = package_root / "models" / "custom_models"
     dest_dir.mkdir(parents=True, exist_ok=True)
-    suffix = Path(source_weights).suffix or ".pth"
-    safe_stem = "".join(
-        c if c.isalnum() or c in "-_" else "_" for c in display_name.strip()
-    )[:80] or "model"
-    dest_path = dest_dir / f"{safe_stem}{suffix}"
+    stem = custom_model_weights_basename(display_name)
+    dest_path = dest_dir / stem
     shutil.copy2(source_weights, dest_path)
     widget.custom_models[display_name] = {"filename": dest_path.name, "params": params}
     with open(package_root / "custom_models.json", "w") as file:
@@ -220,21 +234,24 @@ def persist_custom_model_entry(widget, display_name: str, source_weights: Path, 
 
 
 @thread_worker(connect={"errored": handle_exception})
-def _run_cellpose_training_worker(export_dir, model_name, train_seg_overrides):
-    """Background Cellpose fine-tuning from exported TIFF pairs (nuclei base model)."""
-    from ._train import _safe_rmtree, run_cellpose_training
+def _run_cellpose_training_worker(widget, export_dir):
+    """
+    Run Cellpose CLI training on ``export_dir`` only.
+
+    UI (save dialog, persist, prune) runs on the main thread when the worker finishes.
+    """
+    from ._train import train_cellpose
 
     QApplication.setOverrideCursor(Qt.WaitCursor)
     try:
-        return run_cellpose_training(Path(export_dir), model_name, train_seg_overrides)
+        return train_cellpose(Path(export_dir))
     finally:
         QApplication.restoreOverrideCursor()
-        _safe_rmtree(export_dir)
 
 
-def start_cellpose_training_worker(export_dir: Path, model_name: str, train_seg_overrides=None):
-    """Start training worker; connect to ``returned`` for ``CellposeTrainingRunResult``."""
-    return _run_cellpose_training_worker(export_dir, model_name, train_seg_overrides)
+def start_cellpose_training_worker(widget, export_dir: Path):
+    """Start train-only worker; ``returned`` emits ``CellposeCliTrainingResult``."""
+    return _run_cellpose_training_worker(widget, export_dir)
 
 
 def _load_segmentation_image_data(widget, demo: bool):
@@ -321,20 +338,75 @@ def _fill_excluded_frames_from_labels_layer(
             logger.warning("Could not copy excluded frame %s from training labels: %s", i, exc)
 
 
+def _read_tiff_path(path: Path) -> np.ndarray:
+    try:
+        import tifffile
+
+        return np.asarray(tifffile.imread(str(path)))
+    except ImportError:
+        import imageio.v2 as imageio
+
+        return np.asarray(imageio.imread(str(path)))
+
+
+def _fill_excluded_frames_from_training_masks_dir(
+    mask: np.ndarray,
+    exclude_set: frozenset,
+    masks_dir: Path,
+    layer_prefix: str,
+    image_ndim: int,
+) -> None:
+    """Fill excluded time indices from saved training mask TIFFs on disk."""
+    masks_dir = Path(masks_dir)
+    for i in exclude_set:
+        tif_path = masks_dir / f"{layer_prefix}_frame_{i:05d}_masks.tif"
+        if not tif_path.is_file():
+            logger.warning("Missing training mask %s; frame left blank.", tif_path)
+            continue
+        try:
+            sl = _read_tiff_path(tif_path)
+        except Exception as exc:
+            logger.warning("Could not read %s: %s", tif_path, exc)
+            continue
+        if image_ndim == 2:
+            if i != 0:
+                continue
+            if sl.shape != mask.shape:
+                logger.warning(
+                    "Training mask shape %s does not match output %s; frame not copied.",
+                    sl.shape,
+                    mask.shape,
+                )
+                continue
+            mask[:] = np.asarray(sl, dtype=np.int32)
+        else:
+            if i < 0 or i >= mask.shape[0]:
+                continue
+            if sl.shape != mask[i].shape:
+                logger.warning(
+                    "Training mask shape %s does not match output slice %s at t=%s; skipped.",
+                    sl.shape,
+                    mask[i].shape,
+                    i,
+                )
+                continue
+            mask[i] = np.asarray(sl, dtype=np.int32)
+
+
 def _prompt_exclude_training_frames_if_applicable(
     widget, demo: bool
-) -> tuple[frozenset, str | None] | None:
+) -> tuple[frozenset, Path | None, str | None] | None:
     """
-    If the current model was trained this session on the same image layer and overlapping
-    frames, ask whether to exclude those frames from prediction.
+    If the current model was trained this session on the same image layer (by sanitized
+    name vs mask filename prefix) and overlapping frames, ask whether to exclude those
+    frames from prediction.
 
     Returns
     -------
     None
         Predict all frames (no exclusion).
-    (frozenset[int], str | None)
-        First element: time indices to skip for Cellpose (filled from training labels instead).
-        Second: segmentation layer name to copy those frames from (None → leave zeros).
+    (frozenset[int], Path | None, str | None)
+        Excluded frame indices, training masks directory, layer prefix for mask filenames.
     """
     selected = widget.combobox_segmentation.currentText()
     if not selected.startswith(CUSTOM_MODEL_PREFIX):
@@ -344,7 +416,7 @@ def _prompt_exclude_training_frames_if_applicable(
     if not meta:
         return None
     image_name = widget.parent.combobox_image.currentText()
-    if meta["layer_name"] != image_name:
+    if _sanitize_model_name_fragment(image_name) != meta["layer_prefix"]:
         return None
     try:
         data_squeezed, _ = _load_segmentation_image_data(widget, demo)
@@ -366,9 +438,9 @@ def _prompt_exclude_training_frames_if_applicable(
     text = (
         f"Frames {frames_str} were used to train this model on this image layer.\n\n"
         "Exclude those frames from Cellpose prediction and copy their labels from the "
-        "current training segmentation layer instead?\n\n"
-        "(Yes: predict only other frames; training frames are copied from the existing "
-        "segmentation layer. No: run Cellpose on the full stack.)"
+        "saved training mask TIFFs instead?\n\n"
+        "(Yes: predict only other frames; training frames are filled from disk. "
+        "No: run Cellpose on the full stack.)"
     )
     reply = QMessageBox.question(
         widget,
@@ -379,8 +451,9 @@ def _prompt_exclude_training_frames_if_applicable(
     )
     if reply != QMessageBox.Yes:
         return None
-    seg_layer = meta.get("segmentation_layer_name")
-    return (frozenset(overlap), seg_layer)
+    masks_dir = Path(meta["training_masks_dir"])
+    layer_prefix = meta["layer_prefix"]
+    return (frozenset(overlap), masks_dir, layer_prefix)
 
 
 def run_segmentation(widget):
@@ -388,8 +461,8 @@ def run_segmentation(widget):
     Calls segmentation without demo flag set
     """
     pr = _prompt_exclude_training_frames_if_applicable(widget, False)
-    excl, copy_from = (None, None) if pr is None else pr
-    worker = _segment_image(widget, False, excl, copy_from)
+    excl, mdir, mpfx = (None, None, None) if pr is None else pr
+    worker = _segment_image(widget, False, excl, None, mdir, mpfx)
     worker.returned.connect(_add_segmentation_to_viewer)
 
 
@@ -398,8 +471,8 @@ def run_demo_segmentation(widget):
     Calls segmentation with the demo flag set
     """
     pr = _prompt_exclude_training_frames_if_applicable(widget, True)
-    excl, copy_from = (None, None) if pr is None else pr
-    worker = _segment_image(widget, True, excl, copy_from)
+    excl, mdir, mpfx = (None, None, None) if pr is None else pr
+    worker = _segment_image(widget, True, excl, None, mdir, mpfx)
     worker.returned.connect(_add_segmentation_to_viewer)
 
 
@@ -424,6 +497,8 @@ def _segment_image(
     demo=False,
     exclude_frame_indices=None,
     copy_excluded_frames_from_layer=None,
+    excluded_frames_masks_dir: Path | None = None,
+    excluded_frames_layer_prefix: str | None = None,
 ):
     """
     Run segmentation on the raw image data
@@ -436,6 +511,10 @@ def _segment_image(
         Time indices (into ``data_squeezed``) not passed to Cellpose.
     copy_excluded_frames_from_layer : str | None
         Labels layer name to copy excluded frames from; if None, excluded frames stay zero.
+    excluded_frames_masks_dir : Path | None
+        If set with ``excluded_frames_layer_prefix``, excluded frames load from mask TIFFs here.
+    excluded_frames_layer_prefix : str | None
+        Prefix in ``{prefix}_frame_XXXXX_masks.tif`` filenames.
     Returns
     -------
     widget, mask
@@ -491,7 +570,19 @@ def _segment_image(
                 for idx, layer_mask in zip(indices_to_run, parts):
                     mask[idx] = layer_mask
 
-    if exclude_set and copy_excluded_frames_from_layer:
+    if (
+        exclude_set
+        and excluded_frames_masks_dir is not None
+        and excluded_frames_layer_prefix
+    ):
+        _fill_excluded_frames_from_training_masks_dir(
+            mask,
+            exclude_set,
+            Path(excluded_frames_masks_dir),
+            excluded_frames_layer_prefix,
+            data_squeezed.ndim,
+        )
+    elif exclude_set and copy_excluded_frames_from_layer:
         _fill_excluded_frames_from_labels_layer(
             widget.viewer,
             mask,
@@ -855,6 +946,77 @@ def _process_matches(matches):
         next_id += 1
 
     return tracks.astype(int)
+
+
+def scan_mmvh4tracks_training_temp_on_startup(main_widget) -> None:
+    """
+    On plugin load: clean stale training temp dirs; offer to resume interrupted training.
+    """
+    from ._train import (
+        _safe_rmtree,
+        classify_mmvh4tracks_training_dir,
+        iter_mmvh4tracks_train_directories,
+        parse_layer_prefix_and_frames_from_masks_dir,
+        parse_model_fragment_from_train_dir_name,
+        resume_model_fragment_needs_confirm,
+    )
+
+    seg = main_widget.segmentation_window
+    dirs = list(iter_mmvh4tracks_train_directories())
+    interrupted: list[Path] = []
+    for d in dirs:
+        kind = classify_mmvh4tracks_training_dir(d)
+        if kind in ("empty", "masks_only", "incomplete"):
+            _safe_rmtree(d)
+        elif kind == "interrupted":
+            interrupted.append(d)
+
+    for d in interrupted:
+        mtime = datetime.fromtimestamp(d.stat().st_mtime)
+        day_str = mtime.strftime("%Y-%m-%d %H:%M")
+        fragment = parse_model_fragment_from_train_dir_name(d.name) or d.name
+        reply = QMessageBox.question(
+            main_widget,
+            "napari",
+            f"It seems training on data {fragment} on {day_str} was interrupted.\n\n"
+            "Would you like to try again?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            _safe_rmtree(d)
+            continue
+        model_name = fragment
+        if resume_model_fragment_needs_confirm(fragment):
+            name, ok = QInputDialog.getText(
+                main_widget,
+                "Model name",
+                "Confirm model name for resumed training:",
+                text=fragment,
+            )
+            if not ok or not name.strip():
+                _safe_rmtree(d)
+                continue
+            model_name = name.strip()
+        if is_custom_model_display_name_taken(seg, model_name):
+            notify(
+                f"A custom model named {model_name!r} already exists. "
+                "Removing interrupted export."
+            )
+            _safe_rmtree(d)
+            continue
+        parsed = parse_layer_prefix_and_frames_from_masks_dir(d)
+        if not parsed:
+            _safe_rmtree(d)
+            continue
+        layer_prefix, train_frames = parsed
+        worker = start_cellpose_training_worker(seg, d)
+        worker.returned.connect(
+            lambda r, mn=model_name, tf=train_frames, lp=layer_prefix: seg._complete_cellpose_training_after_worker(
+                r, mn, tf, lp
+            )
+        )
+        return
 
 
 def remove_frame_from_track(tracks, track_entry):
