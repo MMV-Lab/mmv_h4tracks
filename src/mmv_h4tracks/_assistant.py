@@ -307,24 +307,63 @@ class AssistantWindow(QWidget):
         except ValueError:
             print("No segmentation layer found")
             return
-        data = label_layer.data
-        frames, _, _ = data.shape
-        relabeled_data = np.zeros_like(data)
-        for frame in tqdm(range(frames), desc="Processing frames"):
-            current_frame = data[frame]
+
+        raw = label_layer.data
+        if isinstance(raw, (list, tuple)):
+            if not raw:
+                return
+            data = np.asarray(raw[0])
+            multiscale_list = list(raw)
+            write_multiscale = True
+        else:
+            data = np.asarray(raw)
+            write_multiscale = False
+
+        original_dtype = data.dtype
+        if data.ndim == 2:
+            data_work = data[np.newaxis, ...]
+            squeeze_output = True
+        elif data.ndim == 3:
+            data_work = data
+            squeeze_output = False
+        else:
+            notify(
+                f"Relabel all cells needs 2D or 3D label data; got shape {data.shape}."
+            )
+            return
+
+        n_frames = data_work.shape[0]
+        relabeled_data = np.zeros(data_work.shape, dtype=np.int32)
+        for frame in tqdm(range(n_frames), desc="Processing frames"):
+            current_frame = data_work[frame]
             unique_ids = np.unique(current_frame)
             unique_ids = unique_ids[unique_ids != 0]
-            new_frame = np.zeros_like(current_frame)
+            new_frame = np.zeros(current_frame.shape, dtype=np.int32)
             current_max_label = 0
             for uid in unique_ids:
                 mask = current_frame == uid
                 labeled_mask, _ = label(mask)
+                labeled_mask = labeled_mask.astype(np.int32, copy=False)
                 labeled_mask[labeled_mask > 0] += current_max_label
-                current_max_label = labeled_mask.max()
+                current_max_label = int(labeled_mask.max())
                 new_frame += labeled_mask
             relabeled_data[frame] = new_frame
 
-        label_layer.data = relabeled_data
+        out = relabeled_data[0] if squeeze_output else relabeled_data
+        if original_dtype.kind in "iu":
+            info = np.iinfo(original_dtype)
+            if info.min <= int(out.min()) <= int(out.max()) <= info.max:
+                out_to_store = out.astype(original_dtype, copy=False)
+            else:
+                out_to_store = out
+        else:
+            out_to_store = out
+
+        if write_multiscale:
+            multiscale_list[0] = out_to_store
+            label_layer.data = multiscale_list
+        else:
+            label_layer.data = out_to_store
 
     def align_ids_on_click(self, saving=False):
         """Align the IDs of the tracks with the segmentation

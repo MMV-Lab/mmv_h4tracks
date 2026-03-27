@@ -4,8 +4,6 @@ import json
 import logging
 import shutil
 from datetime import datetime
-import shutil
-from datetime import datetime
 from pathlib import Path
 import time
 
@@ -20,11 +18,8 @@ from ._constants import APPROX_INF, MAX_MATCHING_DIST, CUSTOM_MODEL_PREFIX
 from ._grabber import grab_layer
 from ._session_trained_models import overlap_training_frames_with_stack
 from ._logger import handle_exception, notify
-from ._session_trained_models import overlap_training_frames_with_stack
-from ._logger import handle_exception, notify
 from ._utils import preserve_and_filter_graph
-from ._train import _sanitize_model_name_fragment
-from ._train import _sanitize_model_name_fragment
+from ._train import CELLPOSE_TRAIN_N_EPOCHS_DEFAULT, _sanitize_model_name_fragment
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -244,7 +239,7 @@ def persist_custom_model_entry(widget, display_name: str, source_weights: Path, 
 
 
 @thread_worker(connect={"errored": handle_exception})
-def _run_cellpose_training_worker(widget, export_dir):
+def _run_cellpose_training_worker(widget, export_dir, n_epochs: int):
     """
     Run Cellpose CLI training on ``export_dir`` only.
 
@@ -254,14 +249,17 @@ def _run_cellpose_training_worker(widget, export_dir):
 
     QApplication.setOverrideCursor(Qt.WaitCursor)
     try:
-        return train_cellpose(Path(export_dir))
+        return train_cellpose(Path(export_dir), n_epochs=n_epochs)
     finally:
         QApplication.restoreOverrideCursor()
 
 
-def start_cellpose_training_worker(widget, export_dir: Path):
+def start_cellpose_training_worker(
+    widget, export_dir: Path, *, n_epochs: int | None = None
+):
     """Start train-only worker; ``returned`` emits ``CellposeCliTrainingResult``."""
-    return _run_cellpose_training_worker(widget, export_dir)
+    ne = CELLPOSE_TRAIN_N_EPOCHS_DEFAULT if n_epochs is None else n_epochs
+    return _run_cellpose_training_worker(widget, export_dir, ne)
 
 
 def _load_segmentation_image_data(widget, demo: bool):
@@ -473,9 +471,6 @@ def run_segmentation(widget):
     pr = _prompt_exclude_training_frames_if_applicable(widget, False)
     excl, mdir, mpfx = (None, None, None) if pr is None else pr
     worker = _segment_image(widget, False, excl, None, mdir, mpfx)
-    pr = _prompt_exclude_training_frames_if_applicable(widget, False)
-    excl, mdir, mpfx = (None, None, None) if pr is None else pr
-    worker = _segment_image(widget, False, excl, None, mdir, mpfx)
     worker.returned.connect(_add_segmentation_to_viewer)
 
 
@@ -483,9 +478,6 @@ def run_demo_segmentation(widget):
     """
     Calls segmentation with the demo flag set
     """
-    pr = _prompt_exclude_training_frames_if_applicable(widget, True)
-    excl, mdir, mpfx = (None, None, None) if pr is None else pr
-    worker = _segment_image(widget, True, excl, None, mdir, mpfx)
     pr = _prompt_exclude_training_frames_if_applicable(widget, True)
     excl, mdir, mpfx = (None, None, None) if pr is None else pr
     worker = _segment_image(widget, True, excl, None, mdir, mpfx)
@@ -505,18 +497,9 @@ def _add_segmentation_to_viewer(widget_and_mask):
     labels = widget.viewer.add_labels(mask, name="calculated segmentation")
     widget.parent.combobox_segmentation.setCurrentText(labels.name)
     notify("Segmentation finished.")
-    notify("Segmentation finished.")
 
 
 @thread_worker(connect={"errored": handle_exception})
-def _segment_image(
-    widget,
-    demo=False,
-    exclude_frame_indices=None,
-    copy_excluded_frames_from_layer=None,
-    excluded_frames_masks_dir: Path | None = None,
-    excluded_frames_layer_prefix: str | None = None,
-):
 def _segment_image(
     widget,
     demo=False,
@@ -540,14 +523,7 @@ def _segment_image(
         If set with ``excluded_frames_layer_prefix``, excluded frames load from mask TIFFs here.
     excluded_frames_layer_prefix : str | None
         Prefix in ``{prefix}_frame_XXXXX_masks.tif`` filenames.
-    exclude_frame_indices : frozenset[int] | None
-        Time indices (into ``data_squeezed``) not passed to Cellpose.
-    copy_excluded_frames_from_layer : str | None
-        Labels layer name to copy excluded frames from; if None, excluded frames stay zero.
-    excluded_frames_masks_dir : Path | None
-        If set with ``excluded_frames_layer_prefix``, excluded frames load from mask TIFFs here.
-    excluded_frames_layer_prefix : str | None
-        Prefix in ``{prefix}_frame_XXXXX_masks.tif`` filenames.
+
     Returns
     -------
     widget, mask
@@ -556,8 +532,6 @@ def _segment_image(
     logger.info("Starting segmentation")
     QApplication.setOverrideCursor(Qt.WaitCursor)
 
-    data_squeezed, removed_dims = _load_segmentation_image_data(widget, demo)
-    exclude_set = exclude_frame_indices or frozenset()
     data_squeezed, removed_dims = _load_segmentation_image_data(widget, demo)
     exclude_set = exclude_frame_indices or frozenset()
 
@@ -574,18 +548,7 @@ def _segment_image(
                 mask = np.zeros_like(data_squeezed, dtype=np.int32)
             else:
                 mask, _, _ = model.eval(data_squeezed, **parameters)
-            if 0 in exclude_set:
-                mask = np.zeros_like(data_squeezed, dtype=np.int32)
-            else:
-                mask, _, _ = model.eval(data_squeezed, **parameters)
         else:
-            n_t = data_squeezed.shape[0]
-            mask = np.zeros((n_t, *data_squeezed.shape[1:]), dtype=np.int32)
-            for i in range(n_t):
-                if i in exclude_set:
-                    continue
-                layer_mask, _, _ = model.eval(data_squeezed[i], **parameters)
-                mask[i] = layer_mask
             n_t = data_squeezed.shape[0]
             mask = np.zeros((n_t, *data_squeezed.shape[1:]), dtype=np.int32)
             for i in range(n_t):
@@ -603,43 +566,7 @@ def _segment_image(
                 mask = np.zeros_like(data_squeezed, dtype=np.int32)
             else:
                 mask = segment_slice_cpu(data_squeezed, parameters)
-            if 0 in exclude_set:
-                mask = np.zeros_like(data_squeezed, dtype=np.int32)
-            else:
-                mask = segment_slice_cpu(data_squeezed, parameters)
         else:
-            n_t = data_squeezed.shape[0]
-            mask = np.zeros((n_t, *data_squeezed.shape[1:]), dtype=np.int32)
-            indices_to_run = [i for i in range(n_t) if i not in exclude_set]
-            if indices_to_run:
-                data_with_parameters = [
-                    (data_squeezed[i], parameters) for i in indices_to_run
-                ]
-                with Pool(AMOUNT_OF_PROCESSES) as p:
-                    parts = p.starmap(segment_slice_cpu, data_with_parameters)
-                for idx, layer_mask in zip(indices_to_run, parts):
-                    mask[idx] = layer_mask
-
-    if (
-        exclude_set
-        and excluded_frames_masks_dir is not None
-        and excluded_frames_layer_prefix
-    ):
-        _fill_excluded_frames_from_training_masks_dir(
-            mask,
-            exclude_set,
-            Path(excluded_frames_masks_dir),
-            excluded_frames_layer_prefix,
-            data_squeezed.ndim,
-        )
-    elif exclude_set and copy_excluded_frames_from_layer:
-        _fill_excluded_frames_from_labels_layer(
-            widget.viewer,
-            mask,
-            exclude_set,
-            copy_excluded_frames_from_layer,
-            data_squeezed.ndim,
-        )
             n_t = data_squeezed.shape[0]
             mask = np.zeros((n_t, *data_squeezed.shape[1:]), dtype=np.int32)
             indices_to_run = [i for i in range(n_t) if i not in exclude_set]

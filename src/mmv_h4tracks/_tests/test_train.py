@@ -208,18 +208,19 @@ def test_classify_mmvh4tracks_training_dir(tmp_path):
     assert classify_mmvh4tracks_training_dir(root) == "empty"
 
     (root / "L_frame_00000_masks.tif").write_bytes(b"m")
-    assert classify_mmvh4tracks_training_dir(root) == "incomplete"
+    assert classify_mmvh4tracks_training_dir(root) == "masks_only"
+
+    root_inc = tmp_path / "mmv_h4tracks_train_inc"
+    root_inc.mkdir()
+    (root_inc / "L_frame_00000_masks.tif").write_bytes(b"m")
+    (root_inc / "stale.txt").write_text("x")
+    assert classify_mmvh4tracks_training_dir(root_inc) == "incomplete"
 
     (root / "L_frame_00000.tif").write_bytes(b"r")
     assert classify_mmvh4tracks_training_dir(root) == "interrupted"
 
     (root / "L_frame_00000_flows.tif").write_bytes(b"f")
     assert classify_mmvh4tracks_training_dir(root) == "interrupted"
-
-    _safe_rmtree(root)
-    root.mkdir()
-    (root / "L_frame_00000_masks.tif").write_bytes(b"m")
-    assert classify_mmvh4tracks_training_dir(root) == "masks_only"
 
 
 def test_parse_layer_prefix_and_frames_from_masks_dir(tmp_path):

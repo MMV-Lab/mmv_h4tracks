@@ -26,6 +26,10 @@ _CELLPOSE_CLI_WEIGHTS_RE = re.compile(r"^cellpose_\d+\.\d+(?:\.[^.]+)?$")
 
 # Deterministic temp export dirs (scanned on plugin start).
 MMV_TRAIN_DIR_PREFIX = "mmv_h4tracks_train_"
+
+# Cellpose CLI ``--n_epochs`` (plugin defaults).
+CELLPOSE_TRAIN_N_EPOCHS_DEFAULT = 200
+CELLPOSE_TRAIN_N_EPOCHS_LONG = 1000
 _MASK_STEM_FRAME_RE = re.compile(r"^(.+)_frame_(\d{5})_masks$")
 
 # --- Export layout (Cellpose CLI-style: ``image.tif`` + ``image_masks.tif``, ``--mask_filter _masks``)
@@ -419,9 +423,11 @@ def _cellpose_stderr_logger_setup(*_args, **_kwargs):
     return io_logger, None
 
 
-def train_cellpose(export_dir: Path) -> CellposeCliTrainingResult:
+def train_cellpose(export_dir: Path, *, n_epochs: int = CELLPOSE_TRAIN_N_EPOCHS_DEFAULT) -> CellposeCliTrainingResult:
     """
     Run ``python -m cellpose`` training on ``export_dir`` (must match plugin export layout).
+
+    ``n_epochs`` is passed to Cellpose as ``--n_epochs`` (default ``CELLPOSE_TRAIN_N_EPOCHS_DEFAULT``).
 
     After success, reads the newest weights under ``models/`` and a diameter hint from the checkpoint.
     """
@@ -431,7 +437,7 @@ def train_cellpose(export_dir: Path) -> CellposeCliTrainingResult:
         "cellpose",
         "--dir", str(export_dir),
         "--train",
-        "--n_epochs", "200",
+        "--n_epochs", str(n_epochs),
         "--pretrained_model", "nuclei",
         "--chan", "0",
         "--chan2", "0",
