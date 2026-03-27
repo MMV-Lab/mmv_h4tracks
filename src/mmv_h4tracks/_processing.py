@@ -11,7 +11,7 @@ import numpy as np
 from cellpose import models, core
 from napari.qt.threading import thread_worker
 from qtpy.QtCore import Qt
-from qtpy.QtWidgets import QApplication, QMessageBox, QInputDialog
+from qtpy.QtWidgets import QApplication, QMessageBox
 from scipy import ndimage, optimize, spatial
 
 from ._constants import APPROX_INF, MAX_MATCHING_DIST, CUSTOM_MODEL_PREFIX
@@ -203,31 +203,36 @@ def display_models(widget, hardcoded_models, custom_models):
 
 
 def custom_model_weights_basename(display_name: str) -> str:
-    """Filesystem basename (no extension) for a custom model weights file."""
+    """
+    Canonical custom model name: used as ``custom_models.json`` key and as the weights
+    filename (no extension) under ``models/custom_models/``.
+    """
     stem = _sanitize_model_name_fragment(display_name)
     return stem if stem else "model"
 
 
 def is_custom_model_display_name_taken(widget, display_name: str) -> bool:
-    """True if the display name or its on-disk basename is already used."""
-    if display_name in widget.custom_models:
+    """True if the canonical name is already a JSON key or weights file on disk."""
+    canonical = custom_model_weights_basename(display_name)
+    if canonical in widget.custom_models:
         return True
-    stem = custom_model_weights_basename(display_name)
-    dest = Path(__file__).parent / "models" / "custom_models" / stem
+    dest = Path(__file__).parent / "models" / "custom_models" / canonical
     return dest.is_file()
 
 
 def persist_custom_model_entry(widget, display_name: str, source_weights: Path, params: dict) -> Path:
     """
     Copy Cellpose weights into ``models/custom_models/`` (no file extension) and update ``custom_models.json``.
+
+    The JSON key and on-disk basename are always ``custom_model_weights_basename(display_name)``.
     """
     package_root = Path(__file__).parent
     dest_dir = package_root / "models" / "custom_models"
     dest_dir.mkdir(parents=True, exist_ok=True)
-    stem = custom_model_weights_basename(display_name)
-    dest_path = dest_dir / stem
+    canonical = custom_model_weights_basename(display_name)
+    dest_path = dest_dir / canonical
     shutil.copy2(source_weights, dest_path)
-    widget.custom_models[display_name] = {"filename": dest_path.name, "params": params}
+    widget.custom_models[canonical] = {"filename": canonical, "params": params}
     with open(package_root / "custom_models.json", "w") as file:
         json.dump(widget.custom_models, file)
     return dest_path
@@ -958,7 +963,6 @@ def scan_mmvh4tracks_training_temp_on_startup(main_widget) -> None:
         iter_mmvh4tracks_train_directories,
         parse_layer_prefix_and_frames_from_masks_dir,
         parse_model_fragment_from_train_dir_name,
-        resume_model_fragment_needs_confirm,
     )
 
     seg = main_widget.segmentation_window
@@ -986,18 +990,7 @@ def scan_mmvh4tracks_training_temp_on_startup(main_widget) -> None:
         if reply != QMessageBox.Yes:
             _safe_rmtree(d)
             continue
-        model_name = fragment
-        if resume_model_fragment_needs_confirm(fragment):
-            name, ok = QInputDialog.getText(
-                main_widget,
-                "Model name",
-                "Confirm model name for resumed training:",
-                text=fragment,
-            )
-            if not ok or not name.strip():
-                _safe_rmtree(d)
-                continue
-            model_name = name.strip()
+        model_name = custom_model_weights_basename(fragment)
         if is_custom_model_display_name_taken(seg, model_name):
             notify(
                 f"A custom model named {model_name!r} already exists. "
