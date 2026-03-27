@@ -15,6 +15,11 @@ from qtpy.QtWidgets import (
     QLineEdit,
     QToolButton,
     QFileDialog,
+    QFrame,
+    QLabel,
+    QLineEdit,
+    QToolButton,
+    QFileDialog,
 )
 from qtpy.QtCore import Qt, QRegularExpression
 from qtpy.QtGui import QRegularExpressionValidator
@@ -23,8 +28,17 @@ import napari
 import pandas as pd
 
 from ._constants import CUSTOM_MODEL_PREFIX
+from ._constants import CUSTOM_MODEL_PREFIX
 from ._logger import notify, handle_exception
 from ._grabber import grab_layer
+from ._train import (
+    export_cellpose_training_pairs,
+    parse_use_frames,
+    _sanitize_model_name_fragment,
+)
+from pathlib import Path
+import shutil
+
 from ._train import (
     export_cellpose_training_pairs,
     parse_use_frames,
