@@ -36,6 +36,21 @@ handler.setFormatter(
 logger.addHandler(handler)
 logger.debug("logger initialized")
 
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+logger.propagate = False
+for handler in logger.handlers:
+    logger.removeHandler(handler)
+handler = logging.StreamHandler()
+handler.setFormatter(
+    logging.Formatter(
+        fmt="%(asctime)s - %(levelname)s - %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+)
+logger.addHandler(handler)
+logger.debug("logger initialized")
+
 
 def segment_slice_cpu(layer_slice, parameters):
     """

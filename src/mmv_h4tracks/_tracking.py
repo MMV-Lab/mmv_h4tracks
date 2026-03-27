@@ -551,6 +551,9 @@ class TrackingWindow(QWidget):
             """
             Callback for the unlink function to store the selected cells
             """
+            if len(event.position) == 2:
+                raise ValueError("2D image can not be tracked.")
+
             try:
                 label_layer = grab_layer(
                     self.viewer, self.parent.combobox_segmentation.currentText()
@@ -747,6 +750,8 @@ class TrackingWindow(QWidget):
             """
             Callback for the unlink function to store the selected cells
             """
+            if len(event.position) == 2:
+                raise ValueError("2D image can not be tracked.")
             try:
                 label_layer = grab_layer(
                     self.viewer, self.parent.combobox_segmentation.currentText()
@@ -860,6 +865,8 @@ class TrackingWindow(QWidget):
             notify("All selected cells must be tracked.")
             return
 
+        print(f"Selected cells initially: {self.selected_cells}")
+
         min_z = np.min(np.asarray(self.selected_cells)[:, 0])
         max_z = np.max(np.asarray(self.selected_cells)[:, 0])
         track = [
@@ -878,6 +885,7 @@ class TrackingWindow(QWidget):
                 and cell[0] >= min_z
                 and cell[0] <= max_z
             ]
+            print(f"Missing cells: {missing_cells}")
             self.selected_cells.extend(missing_cells)
 
         self.selected_cells.sort(key=lambda x: x[0])
@@ -891,10 +899,12 @@ class TrackingWindow(QWidget):
         # remove the selected cells from the tracks
         self.remove_entries_from_tracks(self.selected_cells)
         if min_z_track < min_z and max_z_track > max_z:
+            print("Splitting track")
             # split the track
             track_id = np.amax(tracks_layer.data[:, 0]) + 1
             if self.cached_tracks is not None:
                 track_id = np.amax(self.cached_tracks[:, 0]) + 1
+            print(f"New track id: {track_id}")
             track_to_reassign = [entry for entry in track if entry[0] >= max_z]
             self.remove_entries_from_tracks(track_to_reassign)
             self.add_entries_to_tracks(track_to_reassign, track_id)
@@ -1127,6 +1137,7 @@ class TrackingWindow(QWidget):
         cells : list
             The cells to remove
         """
+        print(f"Amount of cells to remove: {len(cells)}")
         tracks_layer = self.get_tracks_layer()
         if tracks_layer is None:
             raise ValueError("Can't remove tracks from non-existing layer")
@@ -1145,6 +1156,7 @@ class TrackingWindow(QWidget):
                 mask &= ~np.all(tracks[:, 1:4] == cell, axis=1)
             tracks = tracks[mask]
             track_results.append(tracks)
+            print(f"Removed {old_length - len(tracks)} cells")
         if len(track_results[0]) < 1:
             if len(track_results) > 1 and len(track_results[1]) > 1:
                 # Preserve and filter graph from existing layer
@@ -1226,6 +1238,7 @@ class TrackingWindow(QWidget):
         track_id : int
             The track id of the cells
         """
+        print(f"Amount of cells to add: {len(cells)}")
         if len(cells) == 0:
             msg = QMessageBox()
             msg.setIcon(QMessageBox.Warning)
@@ -1403,6 +1416,92 @@ class TrackingWindow(QWidget):
             tracks_layer.data = tracks
             if filtered_graph:
                 tracks_layer.graph = filtered_graph
+
+    def update_all_centroids(self):
+        """
+        Updates all centroids to account for changed segmentation
+        """
+        label_layer = grab_layer(
+            self.viewer, self.parent.combobox_segmentation.currentText()
+        )
+        if label_layer is None:
+            return
+        tracks_layer = self.get_tracks_layer()
+        if tracks_layer is None:
+            return
+
+        label_data = np.array(label_layer.data)
+        tracks = np.array(tracks_layer.data)
+        original_label_data = np.array(self.parent.initial_layers[0])
+
+        frames_to_update = []
+
+        for z in range(len(label_data)):
+            frame_o = original_label_data[z]
+            frame = label_data[z]
+            if not np.array_equal(frame_o[frame_o > 0], frame[frame > 0]):
+                frames_to_update.append(z)
+
+        tracks_to_update = [track for track in tracks if track[1] in frames_to_update]
+        unchanged_tracks = [
+            track for track in tracks if track[1] not in frames_to_update
+        ]
+        updated_tracks = []
+        for track in tracks_to_update:
+            updated_track = update_centroid(label_data, tracks, track)
+            updated_tracks.append(updated_track)
+
+        updated_tracks = [track for track in updated_tracks if track is not None]
+        updated_tracks.extend(unchanged_tracks)
+        df = pd.DataFrame(updated_tracks, columns=["ID", "Z", "Y", "X"])
+        df.sort_values(["ID", "Z"], ascending=True, inplace=True)
+        updated_tracks = df.values
+        updated_tracks = processing.split_noncontinuous_tracks(updated_tracks)
+        updated_tracks = processing.remove_dot_tracks(updated_tracks)
+        tracks_layer.data = updated_tracks
+
+    def update_single_centroid(self, track_id: int, frame: int):
+        """
+        Updates a single centroid to account for changed segmentation
+        """
+        # starttime = time.time()
+        label_layer = grab_layer(
+            self.viewer, self.parent.combobox_segmentation.currentText()
+        )
+        if label_layer is None:
+            return
+        tracks_layer = self.get_tracks_layer()
+        if tracks_layer is None:
+            return
+        tracks = tracks_layer.data
+        track_entry = [
+            entry for entry in tracks if entry[0] == track_id and entry[1] == frame
+        ][0]
+
+        filter_values = None
+        if self.cached_tracks is not None:
+            filter_values = np.unique(self.cached_tracks[:, 0])
+            tracks = self.cached_tracks
+
+        updated_entry = update_centroid(track_entry, label_layer.data[frame], tracks)
+        if updated_entry is None:
+            tracks = processing.remove_frame_from_track(tracks, track_entry)
+        else:
+            index = np.where(np.all(tracks == track_entry, axis=1))[0]
+            tracks[index] = updated_entry
+
+        df = pd.DataFrame(tracks, columns=["ID", "Z", "Y", "X"])
+        df.sort_values(["ID", "Z"], ascending=True, inplace=True)
+        tracks = df.values
+
+        if filter_values is not None:
+            self.cached_tracks = tracks
+            self.display_selected_tracks(filter_values)
+        else:
+            tracks_layer.data = tracks
+
+        # endtime = time.time()
+        # print(f"Updating single centroid took {endtime - starttime} seconds.")
 
 
 def func(label_data, start_slice, id):
