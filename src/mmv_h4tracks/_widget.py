@@ -17,16 +17,15 @@ from qtpy.QtWidgets import (
     QComboBox,
     QTabWidget,
     QSizePolicy,
-    # QHBoxLayout,
+    QProgressBar,
 )
-from qtpy.QtCore import Qt
+from qtpy.QtCore import Qt, QTimer
 from qtpy.QtGui import QImage, QPixmap
 
 from pathlib import Path
 import numpy as np
 import copy
 import cv2
-import zarr
 from napari.layers.image.image import Image
 from napari.layers.labels.labels import Labels
 from napari.layers.tracks.tracks import Tracks
@@ -34,13 +33,27 @@ from napari.layers.tracks.tracks import Tracks
 from ._assistant import AssistantWindow
 from ._analysis import AnalysisWindow
 from ._evaluation import EvaluationWindow
+from ._logger import choice_dialog, notify
 
-# from ._logger import notify
-from ._reader import open_dialog, napari_get_reader
+from ._reader import (
+    open_dialog,
+    napari_get_reader,
+    check_multiscale_image,
+    load_zarr_data,
+    load_ome_zarr_data,
+)
 from ._segmentation import SegmentationWindow
-from ._tracking import TrackingWindow
-from ._writer import save_zarr
+from ._tracking import TrackingWindow, calculate_medoid
+from ._writer import save_ome_zarr, save_zarr
 from ._grabber import grab_layer
+from ._session_trained_models import (
+    remove_entries_for_layer,
+    update_layer_name_in_store,
+    register_session_trained_model as _register_session_trained_model_store,
+)
+from ._utils import CallbackHandler
+
+import mmv_h4tracks._processing as mmv_processing
 
 
 class MMVH4TRACKS(QWidget):
@@ -80,7 +93,16 @@ class MMVH4TRACKS(QWidget):
         super().__init__(parent=parent)
         viewer = napari.current_viewer() if viewer is None else viewer
         self.viewer = viewer
-        self.initial_layers = [None, None]
+        # cache the segmentation since it was last aligned
+        self.align_cache = None
+        # cache segmentation&tracks since creation
+        self.eval_cache = [None, None]
+        self.callback_handler = CallbackHandler(self)
+        # track if original raw data was multiscale
+        self.is_multiscale = False
+        # session Cellpose models: display_name -> {training_masks_dir, layer_prefix, frames}
+        self.session_trained_models: dict[str, dict] = {}
+        self._session_trained_layer_ids_hooked: set[int] = set()
 
         ### QObjects
 
@@ -136,6 +158,13 @@ class MMVH4TRACKS(QWidget):
             self.combobox_tracks,
         ]
 
+        # Progress bar
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setTextVisible(True)
+        self.progress_bar.setFormat("Dummy Loading %p%")
+        self.progress_bar.setMaximum(1)
+        # self.progress_bar.setValue(42)
+
         # Horizontal lines
         line = QWidget()
         line.setFixedHeight(4)
@@ -177,6 +206,24 @@ class MMVH4TRACKS(QWidget):
         computation_mode.layout().addWidget(h_spacer_1, 0, 0, 1, -1)
         computation_mode.layout().addWidget(self.rb_eco, 1, 0)
         computation_mode.layout().addWidget(rb_heavy, 1, 1)
+        computation_mode.layout().setColumnStretch(2, 1)
+
+        self.label_gpu_status = QLabel()
+        try:
+            from cellpose import core as _cellpose_core
+
+            _gpu_ok = bool(_cellpose_core.use_gpu())
+        except Exception:
+            _gpu_ok = False
+        if _gpu_ok:
+            self.label_gpu_status.setText("GPU: available")
+            self.label_gpu_status.setStyleSheet("color: #6a9e6a;")
+        else:
+            self.label_gpu_status.setText("GPU: not available")
+            self.label_gpu_status.setStyleSheet("color: #888888;")
+        self.label_gpu_status.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        computation_mode.layout().addWidget(self.label_gpu_status, 1, 2)
+
         self.file_interaction = QGroupBox()
         self.file_interaction.setLayout(QGridLayout())
         self.file_interaction.layout().addWidget(h_spacer_3, 0, 0, 1, -1)
@@ -217,6 +264,7 @@ class MMVH4TRACKS(QWidget):
         widget.layout().addWidget(line2, 9, 0, 1, -1)
         widget.layout().addWidget(h_spacer_5, 10, 0, 1, -1)
         widget.layout().addWidget(tabwidget, 11, 0, 1, -1)
+        widget.layout().addWidget(self.progress_bar, 12, 0, 1, -1)
 
         # Scrollarea allows content to be larger than the assigned space (small monitor)
         scroll_area = QScrollArea()
@@ -229,12 +277,14 @@ class MMVH4TRACKS(QWidget):
         self.setMinimumWidth(540)
         self.setMinimumHeight(900)
 
-        # hotkeys = self.viewer.keymap.keys()
         custom_binds = [
             ("W", self.hotkey_next_free),
             ("G", self.hotkey_overlap_single_tracking),
             ("H", self.hotkey_separate),
             ("Q", self.hotkey_select_id),
+            ("ctrl+T", self.create_implicit_tracks_wrapper),
+            ("ctrl+A", self.hotkey_display_all),
+            ("ctrl+L", self.hotkey_load_lineage_file)
         ]
         for custom_bind in custom_binds:
             old_bind = viewer.bind_key(*custom_bind, overwrite=True)
@@ -257,10 +307,16 @@ class MMVH4TRACKS(QWidget):
             layer.events.name.connect(
                 self.rename_entry_in_comboboxes
             )  # doesn't contain index
+            self._session_trained_attach_layer(layer)
         for combobox in self.layer_comboboxes:
             if combobox.count() == 0:
                 combobox.addItem("")
         self.viewer.layers.events.moving.connect(self.reorder_entry_in_comboboxes)
+
+        QTimer.singleShot(
+            0,
+            lambda: mmv_processing.scan_mmvh4tracks_training_temp_on_startup(self),
+        )
 
     def hotkey_next_free(self, _):
         """
@@ -288,11 +344,185 @@ class MMVH4TRACKS(QWidget):
         """
         self.segmentation_window._add_select_callback()
 
+    def hotkey_display_all(self, _):
+        """
+        Hotkey for displaying all tracks
+        """
+        self.tracking_window.show_all_tracks_on_click()
+
+    def hotkey_load_lineage_file(self, _):
+        """
+        Hotkey for loading and parsing a lineage file.
+        Checks for tracks layer selection, opens a file dialog filtered to .txt files,
+        reads the lineage file, parses each line as track_id, start_t, end_t, parent_id,
+        validates track_ids exist in tracks layer, and updates the tracks layer graph attribute.
+        """
+        # Check if tracks layer is selected
+        tracks_name = self.combobox_tracks.currentText()
+        if not tracks_name:
+            print("Error: No tracks layer selected. Please select a tracks layer first.")
+            return
+        
+        # Get tracks layer
+        try:
+            tracks_layer = grab_layer(self.viewer, tracks_name)
+        except ValueError:
+            print(f"Error: Tracks layer '{tracks_name}' not found.")
+            return
+        
+        # Open file dialog filtered to .txt files
+        retval = QFileDialog().getOpenFileName(
+            self, "Select Lineage File", "", "Text files (*.txt)"
+        )
+        filepath = retval[0]
+        
+        # Return early if user canceled
+        if not filepath:
+            return
+        
+        try:
+            # Get unique track IDs from tracks layer for validation
+            tracks_data = tracks_layer.data
+            valid_track_ids = set(np.unique(tracks_data[:, 0]))
+            
+            # Initialize graph if it doesn't exist
+            if not hasattr(tracks_layer, 'graph') or tracks_layer.graph is None:
+                tracks_layer.graph = {}
+            
+            def parse_parent_id(parent_str):
+                """
+                Parse parent_id from string. Handles three formats:
+                1. Plain integer: "4" -> [4]
+                2. Single integer in brackets: "[4]" -> [4]
+                3. Multiple integers in brackets: "[4,5,6]" -> [4,5,6]
+                
+                Parameters
+                ----------
+                parent_str : str
+                    String representation of parent_id
+                    
+                Returns
+                -------
+                list[int]
+                    List of parent IDs
+                """
+                parent_str = parent_str.strip()
+                # Check if it's in brackets
+                if parent_str.startswith('[') and parent_str.endswith(']'):
+                    # Remove brackets and split by comma
+                    inner = parent_str[1:-1].strip()
+                    if not inner:
+                        return []
+                    # Split by comma and convert to int
+                    return [int(x.strip()) for x in inner.split(',') if x.strip()]
+                else:
+                    # Plain integer
+                    return [int(parent_str)]
+            
+            # Read and parse the lineage file
+            lineage_entries = []
+            skipped_count = 0
+            with open(filepath, 'r') as f:
+                for line_num, line in enumerate(f, 1):
+                    line = line.strip()
+                    if not line:  # Skip empty lines
+                        continue
+                    
+                    # Split by whitespace and take first 4 values
+                    values = line.split()
+                    if len(values) < 4:
+                        print(f"Warning: Line {line_num}: Skipping line with < 4 values: {line}")
+                        skipped_count += 1
+                        continue
+                    
+                    try:
+                        # Parse as track_id, start_t, end_t, parent_id
+                        track_id = int(values[0])
+                        start_t = int(values[1])
+                        end_t = int(values[2])
+                        
+                        # Parse parent_id (can be plain int, [int], or [int,int,...])
+                        # Handle case where parent_id might be split across multiple values
+                        # (e.g., "[4," "5," "6]" if brackets have spaces)
+                        parent_str = values[3]
+                        # If parent_id starts with '[' but doesn't end with ']', 
+                        # it might be split - collect until we find closing bracket
+                        if parent_str.startswith('[') and not parent_str.endswith(']'):
+                            idx = 4
+                            # Collect all parts until we find the closing bracket
+                            parts = [parent_str]
+                            while idx < len(values) and not values[idx].endswith(']'):
+                                parts.append(values[idx])
+                                idx += 1
+                            if idx < len(values):
+                                parts.append(values[idx])
+                            # Join without spaces to preserve bracket structure (e.g., "[4,5,6]")
+                            parent_str = ''.join(parts)
+                        
+                        parent_ids = parse_parent_id(parent_str)
+                        
+                        # Validate track_id exists in tracks layer
+                        if track_id not in valid_track_ids:
+                            print(f"Warning: Line {line_num}: Track ID {track_id} not found in tracks layer. Skipping.")
+                            skipped_count += 1
+                            continue
+                        
+                        lineage_entries.append((track_id, start_t, end_t, parent_ids))
+                    except ValueError as e:
+                        print(f"Warning: Line {line_num}: Could not parse line: {line}. Error: {e}")
+                        skipped_count += 1
+                        continue
+            
+            # Update tracks layer graph attribute
+            if lineage_entries:
+                for track_id, start_t, end_t, parent_ids in lineage_entries:
+                    # Set graph entry: track_id -> parent_ids (already a list)
+                    tracks_layer.graph[track_id] = parent_ids
+                
+                print(f"Successfully loaded {len(lineage_entries)} lineage entries into tracks layer graph.")
+                if skipped_count > 0:
+                    print(f"Skipped {skipped_count} invalid or unmatched entries.")
+            else:
+                print("No valid lineage entries found in file.")
+                
+        except FileNotFoundError:
+            print(f"Error: File not found: {filepath}")
+        except (IOError, OSError, ValueError) as e:
+            print(f"Error reading file: {e}")
+
     def update_evaluation_limits(self, event):
         """
         Updates the limits for the evaluation window
         """
         self.evaluation_window.update_limits(event)
+
+    def register_session_trained_model(
+        self,
+        display_name: str,
+        training_masks_dir,
+        layer_prefix: str,
+        frames: tuple[int, ...],
+    ) -> None:
+        """Record a model trained this session (for optional frame-exclusion on predict)."""
+        _register_session_trained_model_store(
+            self.session_trained_models,
+            display_name,
+            training_masks_dir,
+            layer_prefix,
+            frames,
+        )
+
+    def _session_trained_attach_layer(self, layer) -> None:
+        if id(layer) in self._session_trained_layer_ids_hooked:
+            return
+        self._session_trained_layer_ids_hooked.add(id(layer))
+        layer.events.name.connect(self._session_trained_on_layer_renamed)
+
+    def _session_trained_on_layer_renamed(self, event) -> None:
+        old = getattr(event, "old", None)
+        new = getattr(event, "new", None)
+        if old is not None and new is not None:
+            update_layer_name_in_store(self.session_trained_models, old, new)
 
     def add_entry_to_comboboxes(self, event):
         """
@@ -314,6 +544,7 @@ class MMVH4TRACKS(QWidget):
         event.value.events.name.connect(
             self.rename_entry_in_comboboxes
         )  # contains index
+        self._session_trained_attach_layer(event.value)
 
     def remove_entry_from_comboboxes(self, event):
         """
@@ -331,6 +562,8 @@ class MMVH4TRACKS(QWidget):
         combobox.removeItem(index)
         if combobox.count() == 0:
             combobox.addItem("")
+        remove_entries_for_layer(self.session_trained_models, event.value.name)
+        self._session_trained_layer_ids_hooked.discard(id(event.value))
 
     def rename_entry_in_comboboxes(self, event):
         """
@@ -400,31 +633,24 @@ class MMVH4TRACKS(QWidget):
         index = combobox.findText(current_item)
         combobox.setCurrentIndex(index)
 
-    def _load(self):
+    def _clear_layers(self, layer_names):
         """
-        Opens a dialog for the user to choose a zarr file to open. Checks if any layernames are blocked
+        Prompts the user to clear layers with the given names.
+        If the user confirms, the layers are removed from the viewer.
+
+        returns
+        -------
+        bool
+            True if the layers were cleared, False if the user canceled
         """
-        QApplication.setOverrideCursor(Qt.WaitCursor)
-        filepath = open_dialog(self)
-        file_reader = napari_get_reader(filepath)
-
-        try:
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore")
-                zarr_file = file_reader(filepath)
-        except TypeError:
-            QApplication.restoreOverrideCursor()
-            return
-
-        # check all layer names
-        for layername in zarr_file.__iter__():
-            if layername in self.viewer.layers:
+        for layer_name in layer_names:
+            if layer_name in self.viewer.layers:
                 msg = QMessageBox()
                 msg.setWindowTitle("Layer already exists")
-                msg.setText("Found layer with name " + layername)
+                msg.setText("Found layer with name " + layer_name)
                 msg.setInformativeText(
                     "A layer with the name '"
-                    + layername
+                    + layer_name
                     + "' exists already."
                     + " Do you want to delete this layer to proceed?"
                 )
@@ -436,49 +662,236 @@ class MMVH4TRACKS(QWidget):
                 # Cancel
                 if ret == 4194304:
                     QApplication.restoreOverrideCursor()
-                    return
+                    return False
 
                 # YesToAll -> Remove all layers with names in the file
                 if ret == 32768:
-                    for name in zarr_file.__iter__():
+                    for name in layer_names:
                         try:
                             self.viewer.layers.remove(name)
                         except ValueError:
                             pass
-                    break
 
                 # Yes -> Remove this layer
-                self.viewer.layers.remove(layername)
+                self.viewer.layers.remove(layer_name)
+        return True
 
-        # add layers to viewer
-        self.viewer.add_image(zarr_file["raw_data"][:], name="Raw Image")
-        segmentation = zarr_file["segmentation_data"][:]
+    def _load_zarr(self, zarr_file):
+        # check all layer names
+        layernames = [
+            layer.name for layer in self.viewer.layers if isinstance(layer, (Image, Labels, Tracks))
+        ]
+        if not self._clear_layers(layernames):
+            # user canceled the operation
+            return
 
+        # Load data from zarr file
+        raw_levels, segmentation, filtered_tracks, self.is_multiscale = load_zarr_data(zarr_file)
+        
+        # Add layers to viewer
+        contrast_limits = (
+            float(raw_levels[0].min()),
+            float(raw_levels[0].max()),
+        )
+        self.viewer.add_image(
+            raw_levels,
+            name="Raw Image",
+            multiscale=True,
+            contrast_limits=contrast_limits,
+        )
         self.viewer.add_labels(segmentation, name="Segmentation Data")
-        # save tracks so we can delete one slice tracks first
-        tracks = zarr_file["tracking_data"][:]
-        # Filter track ids of tracks that just occur once
-        count_of_track_ids = np.unique(tracks[:, 0], return_counts=True)
-        filtered_track_ids = np.delete(
-            count_of_track_ids, count_of_track_ids[1] == 1, 1
-        )
-
-        # Remove tracks that only exist in one slice
-        filtered_tracks = np.delete(
-            tracks,
-            np.where(np.isin(tracks[:, 0], filtered_track_ids[0, :], invert=True)),
-            0,
-        )
         self.viewer.add_tracks(filtered_tracks, name="Tracks")
 
-        self.zarr = zarr_file
-        self.initial_layers = [
+        # Set widget state
+        self.align_cache = copy.deepcopy(segmentation)
+        self.eval_cache = [
             copy.deepcopy(segmentation),
             copy.deepcopy(filtered_tracks),
         ]
         self.combobox_image.setCurrentText("Raw Image")
         self.combobox_segmentation.setCurrentText("Segmentation Data")
         self.combobox_tracks.setCurrentText("Tracks")
+
+    def _load_ome_zarr(self, zarr_file, zarr_path=None):
+        # Load data from OME-Zarr file
+        try:
+            raw_levels, segmentation, metadata, self.is_multiscale, tracks = load_ome_zarr_data(zarr_file, zarr_path=zarr_path)
+        except ValueError as e:
+            print(f"Error loading OME-Zarr file: {e}")
+            return
+        
+        # Clear layers if they exist
+        layernames = ["Raw Image", "Segmentation Data"]
+        if not self._clear_layers(layernames):
+            # user canceled the operation
+            return
+        
+        # Add layers to viewer
+        contrast_limits = (
+            float(raw_levels[0].min()),
+            float(raw_levels[0].max()),
+        )
+        raw_layer = self.viewer.add_image(
+            raw_levels,
+            name="Raw Image",
+            multiscale=True,
+            contrast_limits=contrast_limits,
+        )
+        self.viewer.add_labels(segmentation[:], name="Segmentation Data")
+
+        # Load tracks from file if it exists, otherwise create implicit tracks if needed
+        if tracks is not None:
+            # Load tracks from tracks.npy file (without scale)
+            self.viewer.add_tracks(tracks, name="Tracks")
+            self.eval_cache[1] = copy.deepcopy(tracks)
+            self.combobox_tracks.setCurrentText("Tracks")
+        elif metadata.get("implied_tracks", False):
+            # Only create implicit tracks if no tracks.npy exists
+            filtered_tracks = self.create_implicit_tracks()
+            
+            # Check if raw image layer has a scale attribute and pass it to add_tracks
+            scale = None
+            try:
+                if hasattr(raw_layer, 'scale') and isinstance(raw_layer.scale, np.ndarray):
+                    scale = raw_layer.scale
+            except (AttributeError, TypeError):
+                pass
+            
+            if scale is not None:
+                self.viewer.add_tracks(filtered_tracks, name="Tracks", scale=scale)
+            else:
+                self.viewer.add_tracks(filtered_tracks, name="Tracks")
+            self.eval_cache[1] = copy.deepcopy(filtered_tracks)
+        
+        # Add metadata to layers
+        raw_layer.metadata["raw_metadata"] = f"frames={metadata['frames']}\nunit={metadata['unit']}"
+        
+        # Set alignment cache
+        self.align_cache = copy.deepcopy(segmentation)
+        self.eval_cache[0] = copy.deepcopy(segmentation)
+
+    def create_implicit_tracks(self):
+        """
+        Creates implicit tracks from the segmentation data.
+        
+        Returns
+        -------
+        np.ndarray
+            Array of filtered tracks with shape (n_tracks, 4) where columns are
+            [track_id, time, y, x]. Tracks that only exist in a single frame are filtered out.
+        """
+        segmentation_name = self.combobox_segmentation.currentText()
+        seg_layer = grab_layer(self.viewer, segmentation_name)
+        seg_data = seg_layer.data
+
+        tracks = []
+
+        for t in range(seg_data.shape[0]):
+            frame = seg_data[t]
+            
+            # Convert to numpy array to handle dask arrays from OME-Zarr
+            # This is critical for lazy-loaded data
+            frame = np.asarray(frame)
+
+            # extract unique labels, excluding background (0)
+            labels = np.unique(frame)
+            labels = labels[labels != 0]
+
+            coords_all = np.argwhere(frame)
+
+            for seg_id in labels:
+                coords = coords_all[frame[tuple(coords_all.T)] == seg_id]
+
+                centroid = np.round(np.mean(coords, axis=0)).astype(int)
+
+                if (
+                    0 <= centroid[0] < frame.shape[0] and
+                    0 <= centroid[1] < frame.shape[1] and
+                    frame[tuple(centroid)] == seg_id
+                ):
+                    final_coord = centroid
+                else:
+                    coords = np.argwhere(frame == seg_id)
+                    final_coord = calculate_medoid(coords)
+
+                tracks.append([seg_id, t, *final_coord])
+
+        tracks = np.array(tracks, dtype=np.int64)
+        count_of_track_ids = np.unique(tracks[:, 0], return_counts=True)
+        filtered_track_ids = np.delete(
+            count_of_track_ids, count_of_track_ids[1] == 1, 1
+        )
+        filtered_tracks = np.delete(
+            tracks,
+            np.where(np.isin(tracks[:, 0], filtered_track_ids[0, :], invert=True)),
+            0,
+        )
+        return filtered_tracks
+
+    def create_implicit_tracks_wrapper(self, _):
+        """
+        Wrapper function for creating implicit tracks and adding them to the viewer.
+        Can be called with a hotkey.
+        Ignored parameter _ is required for the hotkey binding.
+        Hotkey call passes viewer.
+        """
+        if _ is not None:
+            print("Secret unlocked!")
+        if not self._clear_layers(["Tracks"]):
+            # user canceled the operation
+            return
+        filtered_tracks = self.create_implicit_tracks()
+        
+        # Check if raw image layer has a scale attribute and pass it to add_tracks
+        scale = None
+        try:
+            raw_name = self.combobox_image.currentText()
+            raw_layer = grab_layer(self.viewer, raw_name)
+            if raw_layer is not None and hasattr(raw_layer, 'scale'):
+                scale_attr = raw_layer.scale
+                if isinstance(scale_attr, np.ndarray):
+                    scale = scale_attr
+        except (ValueError, AttributeError):
+            # If layer doesn't exist or doesn't have scale, continue without it
+            pass
+        
+        if scale is not None:
+            self.viewer.add_tracks(filtered_tracks, name="Tracks", scale=scale)
+        else:
+            self.viewer.add_tracks(filtered_tracks, name="Tracks")
+        self.eval_cache[1] = copy.deepcopy(filtered_tracks)
+
+    def _load(self):
+        """
+        Opens a dialog for the user to choose an (ome-)zarr file to open. Passes the file for loading.
+        """
+        self.callback_handler.remove_callback_viewer()
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        filepath = open_dialog(self)
+        if filepath.endswith(".ome.zarr"):
+            from importlib.metadata import version
+            if int(version("zarr").split(".")[0]) < 3:
+                QApplication.restoreOverrideCursor()
+                choice = choice_dialog(f"Installed zarr version is {version('zarr')}, we recommed at least version 3.0.8. Loading could irrecoverably alter the loaded file. Are you sure you want to continue?", [("Yes", QMessageBox.YesRole), ("No", QMessageBox.NoRole)])
+                if choice == QMessageBox.NoRole:
+                    return
+                QApplication.setOverrideCursor(Qt.WaitCursor)
+        file_reader = napari_get_reader(filepath)
+
+        try:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                zarr_file, is_ome = file_reader(filepath)
+        except TypeError:
+            QApplication.restoreOverrideCursor()
+            return
+
+        if is_ome:
+            # Pass filepath in case store path inference fails
+            self._load_ome_zarr(zarr_file, zarr_path=filepath)
+        else:
+            self._load_zarr(zarr_file)
+        self.zarr = zarr_file
         self.file_interaction.setTitle(Path(filepath).name)
         QApplication.restoreOverrideCursor()
 
@@ -487,47 +900,82 @@ class MMVH4TRACKS(QWidget):
         Writes the changes made to the opened zarr file to disk.
         Fails if no zarr file was opened or not all layers exist
         """
+        if self.tracking_window.cached_tracks is not None:
+            notify("Some tracks are not displayed, not saving")
+            return
+        # create new file if no file was opened
+        # or the file is not an OME-zarr file
+        # if not hasattr(self, "zarr") or not "multiscales" in self.zarr.attrs:
         if not hasattr(self, "zarr"):
+            print("Calling save_as")
             self.save_as()
             return
+        if "multiscales" in self.zarr.attrs:
+            notify("Currently not supporting Ome-zarr saving, saving as zarr file")
+            self.save_as()
+            return
+        self.callback_handler.remove_callback_viewer()
         QApplication.setOverrideCursor(Qt.WaitCursor)
-        self.tracking_window.update_all_centroids()
+        # self.tracking_window.update_all_centroids()
         raw_name = self.combobox_image.currentText()
         raw_layer = grab_layer(self.viewer, raw_name)
         segmentation_name = self.combobox_segmentation.currentText()
         segmentation_layer = grab_layer(self.viewer, segmentation_name)
-        track_name = self.combobox_tracks.currentText()
-        track_layer = grab_layer(self.viewer, track_name)
-        layers = [raw_layer, segmentation_layer, track_layer]
-        save_zarr(self.zarr, layers, self.tracking_window.cached_tracks)
+
+        # layers = [raw_layer, segmentation_layer]
+        tracks_name = self.combobox_tracks.currentText()
+        tracks_layer = grab_layer(self.viewer, tracks_name)
+        layers = [raw_layer, segmentation_layer, tracks_layer]
+
+        # self.assistant_window.align_ids_on_click(saving=True)
+        save_zarr(self.zarr, layers)
+        # save_ome_zarr(self.zarr, layers, is_multiscale=self.is_multiscale)
+        QApplication.restoreOverrideCursor()
 
     def save_as(self):
         """
         Opens a dialog for the user to choose a zarr file to save to.
         Fails if not all layers exist
         """
-        self.tracking_window.update_all_centroids()
-        raw_name = self.combobox_image.currentText()
-        raw_layer = grab_layer(self.viewer, raw_name)
-        raw_data = grab_layer(self.viewer, raw_name).data
-        segmentation_name = self.combobox_segmentation.currentText()
-        segmentation_layer = grab_layer(self.viewer, segmentation_name)
-        segmentation_data = grab_layer(self.viewer, segmentation_name).data
-        tracks_name = self.combobox_tracks.currentText()
-        tracks_layer = grab_layer(self.viewer, tracks_name)
-        track_data = grab_layer(self.viewer, tracks_name).data
-
+        if self.tracking_window.cached_tracks is not None:
+            notify("Some tracks are not displayed, not saving")
+            return
         dialog = QFileDialog()
         QApplication.setOverrideCursor(Qt.WaitCursor)
         path = f"{dialog.getSaveFileName()[0]}"
+        # If user tries to save a zarr file without the .ome.zarr extension, we add it
+        # if path.endswith(".zarr") and not path.endswith(".ome.zarr"):
+        #     path = path[: -len(".zarr")] + ".ome.zarr"
+        # if not path.endswith(".ome.zarr"):
+        #     path += ".ome.zarr"
+        # if path == ".ome.zarr":
+        #     QApplication.restoreOverrideCursor()
+        #     return
         if not path.endswith(".zarr"):
             path += ".zarr"
         if path == ".zarr":
+            QApplication.restoreOverrideCursor()
             return
+
+        self.callback_handler.remove_callback_viewer()
+        # self.tracking_window.update_all_centroids()
+        raw_name = self.combobox_image.currentText()
+        raw_layer = grab_layer(self.viewer, raw_name)
+        segmentation_name = self.combobox_segmentation.currentText()
+        segmentation_layer = grab_layer(self.viewer, segmentation_name)
+        tracks_name = self.combobox_tracks.currentText()
+        tracks_layer = grab_layer(self.viewer, tracks_name)
+
+        # layers = [raw_layer, segmentation_layer]
         layers = [raw_layer, segmentation_layer, tracks_layer]
 
-        zarrfile = zarr.open(path, mode="w")
-        save_zarr(zarrfile, layers, self.tracking_window.cached_tracks)
+        # self.assistant_window.align_ids_on_click(saving=True)
+        # save_ome_zarr(
+        #     path,
+        #     layers,
+        #     is_multiscale=self.is_multiscale)
+        save_zarr(path, layers)
+        QApplication.restoreOverrideCursor()
 
     def get_process_limit(self):
         """
@@ -542,3 +990,43 @@ class MMVH4TRACKS(QWidget):
             return max(1, int(multiprocessing.cpu_count() * 0.4))
         else:
             return max(1, int(multiprocessing.cpu_count() * 0.8))
+
+    def set_progress_range(self, min_: int, max_: int):
+        """
+        Sets the range of the progress bar
+
+        Parameters
+        ----------
+        min : int
+            The minimum value of the progress bar
+        max : int
+            The maximum value of the progress bar
+        """
+        self.progress_bar.setMinimum(min_)
+        self.progress_bar.setMaximum(max_)
+        self.progress_bar.setValue(min_)
+
+    def set_progress_value(self, value: int):
+        """
+        Sets the value of the progress bar
+
+        Parameters
+        ----------
+        value : int
+            The value of the progress bar
+        """
+        self.progress_bar.setValue(value)
+
+    def set_progress_text(self, text: str):
+        """
+        Sets the text of the progress bar
+
+        Parameters
+        ----------
+        text : str
+            The text of the progress bar
+        """
+        self.progress_bar.setFormat(text + " %p%")
+        self.progress_bar.setTextVisible(True)
+
+

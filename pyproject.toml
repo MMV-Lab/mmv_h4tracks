@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mmv_h4tracks"
-version = "1.2.0"
+version = "1.3.0"
 description = "Human in the loop 2d cell migration analysis"
 authors = [
     { name = "Lennart Kowitz", email = "lennart.kowitz@isas.de" },
@@ -12,7 +12,7 @@ authors = [
 ]
 readme = "README.md"
 license = { file = "LICENSE" }
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 classifiers = [
     "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Science/Research",
@@ -20,7 +20,6 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Image Processing",
     "Programming Language :: Python",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
@@ -32,11 +31,22 @@ dependencies = [
     "npe2",
     "napari-plugin-engine>=0.1.4",
     "napari",
-    "zarr",
-    "cellpose==2.1.0",
+    "zarr>=3.0.8",
+    "cellpose<4",
+    "tqdm>=4.0",
     "matplotlib",
-    "aicsimageio",
+    "bioio",
     "scipy>=1.11.0",
+    "ome-zarr>=0.12.0",
+    "napari-ome-zarr",
+]
+[project.optional-dependencies]
+all = [
+    "napari[all]",
+    "pytest",
+    "pytest-qt",
+    "pre-commit",
+    "bioio-tifffile",
 ]
 
 [project.urls]

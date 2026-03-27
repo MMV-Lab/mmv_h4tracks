@@ -10,14 +10,31 @@ from qtpy.QtWidgets import (
     QGridLayout,
     QSizePolicy,
     QApplication,
+    QFrame,
+    QLabel,
+    QLineEdit,
+    QToolButton,
+    QFileDialog,
 )
-from qtpy.QtCore import Qt
+from qtpy.QtCore import Qt, QRegularExpression
+from qtpy.QtGui import QRegularExpressionValidator
 from scipy import ndimage
 import napari
 import pandas as pd
 
+from ._constants import CUSTOM_MODEL_PREFIX
 from ._logger import notify, handle_exception
 from ._grabber import grab_layer
+from ._train import (
+    CELLPOSE_TRAIN_N_EPOCHS_LONG,
+    export_cellpose_training_pairs,
+    parse_use_frames,
+    _sanitize_model_name_fragment,
+)
+from pathlib import Path
+import shutil
+
+from ._utils import preserve_and_filter_graph
 import mmv_h4tracks._processing as processing
 from .add_models import ModelWindow
 
@@ -52,8 +69,6 @@ class SegmentationWindow(QWidget):
             self.setStyleSheet(napari.qt.get_stylesheet(theme_id="dark"))
 
         self.custom_models = processing.read_custom_model_dict()
-        # Used to cach the callback on the label layer
-        self.cached_callback = None
 
         ### QObjects
 
@@ -65,18 +80,18 @@ class SegmentationWindow(QWidget):
         )
 
         btn_free_label = QPushButton("Next free ID")
-        btn_free_label.setToolTip("Load next free segmentation label \n\n" "Hotkey: E")
+        btn_free_label.setToolTip("Load next free segmentation label \n\n" "Hotkey: W")
 
         btn_false_merge = QPushButton("Separate")
         btn_false_merge.setToolTip(
-            "Split two separate parts of the same label into two"
+            "Split two separate parts of the same label into two \n\n" "Hotkey: H"
         )
 
         btn_false_cut = QPushButton("Merge cell")
         btn_false_cut.setToolTip("Merge two separate labels into one")
 
         btn_grab_label = QPushButton("Select ID")
-        btn_grab_label.setToolTip("Load selected segmentation label")
+        btn_grab_label.setToolTip("Load selected segmentation label \n\n" "Hotkey: Q")
 
         self.btn_segment = QPushButton("Run Segmentation")
         btn_segment_tooltip = (
@@ -137,6 +152,60 @@ class SegmentationWindow(QWidget):
             self.btn_add_custom_model, 2, 0, 1, -1
         )
 
+        train_cellpose_section = QFrame()
+        train_cellpose_section.setLayout(QVBoxLayout())
+        train_cellpose_section.layout().setContentsMargins(0, 0, 0, 0)
+        btn_toggle_train_cellpose = QToolButton()
+        btn_toggle_train_cellpose.setCheckable(True)
+        btn_toggle_train_cellpose.setChecked(False)
+        btn_toggle_train_cellpose.setArrowType(Qt.RightArrow)
+        btn_toggle_train_cellpose.setText("Train new Cellpose model")
+        btn_toggle_train_cellpose.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        btn_toggle_train_cellpose.setStyleSheet(
+            "QToolButton { border: none; text-align: left; }"
+        )
+        train_cellpose_content = QWidget()
+        train_cellpose_content.setVisible(False)
+        train_cellpose_grid = QGridLayout(train_cellpose_content)
+        train_cellpose_grid.setContentsMargins(20, 0, 0, 0)
+        train_cellpose_grid.setColumnStretch(1, 1)
+        label_use_frames = QLabel("Use frames")
+        self.lineedit_use_frames = QLineEdit()
+        self.lineedit_use_frames.setValidator(
+            QRegularExpressionValidator(QRegularExpression(r"^[0-9,]*$"))
+        )
+        label_model_name = QLabel("Model name")
+        self.lineedit_model_name = QLineEdit()
+        # Match ``_sanitize_model_name_fragment``: only word chars and hyphen (no strip/replace).
+        self.lineedit_model_name.setValidator(
+            QRegularExpressionValidator(QRegularExpression(r"^[\w-]*$"))
+        )
+        self.lineedit_model_name.setMaxLength(80)
+        self.checkbox_cellpose_longer_training = QCheckBox("Longer Training")
+        self.checkbox_cellpose_longer_training.setToolTip(
+            "enabling will make training take 5x as long, but may produce better results"
+        )
+        self.checkbox_cellpose_longer_training.setChecked(False)
+        self.btn_train_cellpose_model = QPushButton("Train model")
+        self.btn_train_cellpose_model.clicked.connect(self._on_train_cellpose_clicked)
+        train_cellpose_grid.addWidget(label_use_frames, 0, 0)
+        train_cellpose_grid.addWidget(self.lineedit_use_frames, 0, 1)
+        train_cellpose_grid.addWidget(label_model_name, 1, 0)
+        train_cellpose_grid.addWidget(self.lineedit_model_name, 1, 1)
+        train_cellpose_grid.addWidget(self.checkbox_cellpose_longer_training, 2, 0, 1, 2)
+        train_cellpose_grid.addWidget(self.btn_train_cellpose_model, 3, 0, 1, 2)
+
+        def _on_train_cellpose_toggled(checked: bool) -> None:
+            train_cellpose_content.setVisible(checked)
+            btn_toggle_train_cellpose.setArrowType(
+                Qt.DownArrow if checked else Qt.RightArrow
+            )
+
+        btn_toggle_train_cellpose.toggled.connect(_on_train_cellpose_toggled)
+        train_cellpose_section.layout().addWidget(btn_toggle_train_cellpose)
+        train_cellpose_section.layout().addWidget(train_cellpose_content)
+        automatic_segmentation.layout().addWidget(train_cellpose_section, 3, 0, 1, -1)
+
         segmentation_correction = QGroupBox("Segmentation correction")
         segmentation_correction.setLayout(QGridLayout())
         segmentation_correction.layout().addWidget(h_spacer_2, 0, 0, 1, -1)
@@ -159,6 +228,7 @@ class SegmentationWindow(QWidget):
         """
         Runs the segmentation with the selected model.
         """
+        self.parent.callback_handler.remove_callback_viewer()
         if self.checkbox_preview.isChecked():
             processing.run_demo_segmentation(self)
         else:
@@ -168,8 +238,111 @@ class SegmentationWindow(QWidget):
         """
         Opens a [ModelWindow]
         """
+        self.parent.callback_handler.remove_callback_viewer()
         self.model_window = ModelWindow(self)
         self.model_window.show()
+
+    def _on_train_cellpose_clicked(self):
+        frames = parse_use_frames(self.lineedit_use_frames.text())
+        if frames is None:
+            notify(
+                "Enter one or more frame indices as integers separated by commas."
+            )
+            return
+        raw_model_name = self.lineedit_model_name.text().strip()
+        if not raw_model_name:
+            notify("Please enter a model name.")
+            return
+        model_name = processing.custom_model_weights_basename(raw_model_name)
+        if processing.is_custom_model_display_name_taken(self, raw_model_name):
+            notify(
+                "A custom model with this name already exists. "
+                "Choose another name."
+            )
+            return
+        self.parent.callback_handler.remove_callback_viewer()
+        image_layer_name = self.parent.combobox_image.currentText()
+        segmentation_layer_name = self.parent.combobox_segmentation.currentText()
+        layer_prefix = _sanitize_model_name_fragment(image_layer_name)
+        try:
+            export_result = export_cellpose_training_pairs(
+                self.viewer,
+                image_layer_name,
+                segmentation_layer_name,
+                frames,
+                model_name,
+            )
+        except ValueError as exc:
+            notify(str(exc))
+            return
+
+        train_epochs = (
+            CELLPOSE_TRAIN_N_EPOCHS_LONG
+            if self.checkbox_cellpose_longer_training.isChecked()
+            else None
+        )
+        worker = processing.start_cellpose_training_worker(
+            self, export_result.export_dir, n_epochs=train_epochs
+        )
+
+        train_frames = tuple(export_result.frame_indices)
+
+        worker.returned.connect(
+            lambda r, mn=model_name, tf=train_frames, lp=layer_prefix: self._complete_cellpose_training_after_worker(
+                r, mn, tf, lp
+            )
+        )
+
+    def _complete_cellpose_training_after_worker(
+        self,
+        result,
+        model_name: str,
+        train_frames: tuple[int, ...],
+        layer_prefix: str,
+    ) -> None:
+        """Main thread: save ``.pth``, register custom model, prune export, session meta."""
+        from ._train import prune_cellpose_training_export_dir, _safe_rmtree
+
+        notify(
+            "Cellpose training finished. Please choose where to save the model weights "
+            "as a .pth file (this is required to register the custom model)."
+        )
+        default_path = str(Path.home() / f"{model_name}.pth")
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save trained model",
+            default_path,
+            "PyTorch weights (*.pth)",
+        )
+        if not path:
+            _safe_rmtree(result.export_dir)
+            notify("Save cancelled; training export removed and model not registered.")
+            return
+        if not path.lower().endswith(".pth"):
+            path = path + ".pth"
+        try:
+            shutil.copy2(result.source_weights_path, path)
+            params = {
+                "diameter": float(result.diam_mean),
+                "channels": [0, 0],
+            }
+            processing.persist_custom_model_entry(
+                self, model_name, result.source_weights_path, params
+            )
+            prune_cellpose_training_export_dir(result.export_dir)
+            hardcoded_models, custom_models = processing.read_models(self)
+            processing.display_models(self, hardcoded_models, custom_models)
+            self.parent.register_session_trained_model(
+                model_name,
+                result.export_dir,
+                layer_prefix,
+                train_frames,
+            )
+            combo_name = CUSTOM_MODEL_PREFIX + model_name
+            self.combobox_segmentation.setCurrentText(combo_name)
+            notify(f"Registered custom model: {combo_name}")
+        except Exception as exc:
+            notify(str(exc))
 
     def toggle_segmentation_button(self, text):
         """
@@ -206,9 +379,9 @@ class SegmentationWindow(QWidget):
             event : Event
                 the event that triggered the callback"""
             self._remove_label(event)
-            self._update_callbacks()
+            self.parent.callback_handler.remove_callback_viewer()
 
-        self._update_callbacks(_remove_label)
+        self.parent.callback_handler.add_callback_viewer(_remove_label)
         QApplication.setOverrideCursor(Qt.CrossCursor)
 
     def _remove_label(self, event):
@@ -220,7 +393,16 @@ class SegmentationWindow(QWidget):
         event : Event
             the event that triggered the callback
         """
-        self.remove_cell_from_tracks(event.position)
+        label_layer = grab_layer(
+            self.viewer, self.parent.combobox_segmentation.currentText()
+        )
+        if label_layer is None:
+            return
+        
+        # Extract position based on segmentation layer dimensionality
+        ndim = label_layer.data.ndim
+        position = [int(round(p)) for p in event.position[-ndim:]]
+        self.remove_cell_from_tracks(position)
 
         # replace label with 0 to make it background
         self._replace_label(event, 0)
@@ -246,10 +428,10 @@ class SegmentationWindow(QWidget):
             return
 
         position = [int(round(p)) for p in position]
-        # x = int(round(position[2]))
-        # y = int(round(position[1]))
-        # z = int(position[0])
-        # selected_id = label_layer.data[z, y, x]
+        # Use position matching the segmentation layer dimensionality
+        ndim = label_layer.data.ndim
+        if len(position) > ndim:
+            position = position[-ndim:]
         selected_id = label_layer.data[tuple(position)]
         if selected_id == 0:
             print("no cell")
@@ -260,14 +442,8 @@ class SegmentationWindow(QWidget):
         else:
             data = label_layer.data[position[0]]
             cell.append(position[0])
-        centroid = ndimage.center_of_mass(
-            data, labels=data, index=selected_id
-        )
-        # centroid = ndimage.center_of_mass(
-        #     label_layer.data[z], labels=label_layer.data[z], index=selected_id
-        # )
+        centroid = ndimage.center_of_mass(data, labels=data, index=selected_id)
         cell.extend([int(np.rint(centroid[0])), int(np.rint(centroid[1]))])
-        # cell = [z, int(np.rint(centroid[0])), int(np.rint(centroid[1]))]
 
         try:
             track_id, displayed = self.get_track_id_of_cell(cell)
@@ -280,7 +456,6 @@ class SegmentationWindow(QWidget):
             print("no tracks")
             return
         tracks_layer = grab_layer(self.viewer, tracks_name)
-        displayed_tracks = tracks_layer.data
 
         tracks = tracks_layer.data
         filter_values = None
@@ -298,7 +473,11 @@ class SegmentationWindow(QWidget):
             self.parent.tracking_window.cached_tracks = tracks
             self.parent.tracking_window.display_selected_tracks(filter_values)
         else:
+            # Preserve and filter graph from existing layer
+            filtered_graph = preserve_and_filter_graph(tracks_layer, tracks)
             tracks_layer.data = tracks
+            if filtered_graph:
+                tracks_layer.graph = filtered_graph
 
     def get_track_id_of_cell(self, cell):
         """
@@ -336,9 +515,7 @@ class SegmentationWindow(QWidget):
         Adds the callback to select the label at the given position
         """
         try:
-            _ = grab_layer(
-                self.viewer, self.parent.combobox_segmentation.currentText()
-            )
+            _ = grab_layer(self.viewer, self.parent.combobox_segmentation.currentText())
         except ValueError as exc:
             handle_exception(exc)
             return
@@ -356,9 +533,9 @@ class SegmentationWindow(QWidget):
             """
             id = self._read_label_id(event)
             self._set_label_id(id)
-            self._update_callbacks()
+            self.parent.callback_handler.remove_callback_viewer()
 
-        self._update_callbacks(_select_label)
+        self.parent.callback_handler.add_callback_viewer(_select_label)
         QApplication.setOverrideCursor(Qt.CrossCursor)
 
     def _set_label_id(self, id=0):
@@ -370,6 +547,9 @@ class SegmentationWindow(QWidget):
         id : int
             the ID to set as the currently selected one in the napari viewer
         """
+        if id == 0:
+            self.parent.callback_handler.remove_callback_viewer()
+            QApplication.restoreOverrideCursor()
         label_layer = grab_layer(
             self.viewer, self.parent.combobox_segmentation.currentText()
         )
@@ -426,16 +606,16 @@ class SegmentationWindow(QWidget):
                 the event that triggered the callback
             """
             self._replace_label(event)
-            self._update_callbacks()
+            self.parent.callback_handler.remove_callback_viewer()
 
-        self._update_callbacks(_replace_label)
+        self.parent.callback_handler.add_callback_viewer(_replace_label)
         QApplication.setOverrideCursor(Qt.CrossCursor)
-        """for layer in self.viewer.layers:
-
-            @layer.mouse_drag_callbacks.append
-            def _replace_label(layer, event):
-                self._replace_label(event)
-                self._update_callbacks()"""
+        # Previous napari callback style (replaced by callback_handler):
+        # for layer in self.viewer.layers:
+        #     @layer.mouse_drag_callbacks.append
+        #     def _replace_label(layer, event):
+        #         self._replace_label(event)
+        #         self._update_callbacks()
 
     def _add_merge_callback(self):
         """
@@ -472,12 +652,12 @@ class SegmentationWindow(QWidget):
                     the event that triggered the callback
                 """
                 self._replace_label(event, id)
-                self._update_callbacks()
+                self.parent.callback_handler.remove_callback_viewer()
 
-            self._update_callbacks(_assimilate_label)
+            self.parent.callback_handler.add_callback_viewer(_assimilate_label)
             QApplication.setOverrideCursor(Qt.CrossCursor)
 
-        self._update_callbacks(_pick_merge_label)
+        self.parent.callback_handler.add_callback_viewer(_pick_merge_label)
         QApplication.setOverrideCursor(Qt.CrossCursor)
 
     def _replace_label(self, event, id=-1):
@@ -498,21 +678,15 @@ class SegmentationWindow(QWidget):
             notify("Please make sure the label layer exists!")
             return
 
-        position = [int(round(p)) for p in event.position]
-        # x = int(round(event.position[2]))
-        # y = int(round(event.position[1]))
-        # z = int(round(event.position[0]))
+        # Extract position based on segmentation layer dimensionality
+        ndim = label_layer.data.ndim
+        position = [int(round(p)) for p in event.position[-ndim:]]
 
         if id == -1:
             id = self._get_free_label_id(label_layer)
 
         # Replace the ID with the new id
-        # old_id = label_layer.data[z, y, x]
-        """if old_id == 0:
-            notify("Can't change ID of background, please make sure to select a cell!")
-            return"""
         label_layer.fill(tuple(position), id)
-        # label_layer.fill((z, y, x), id)
 
         # set the label layer as currently selected layer
         self.viewer.layers.select_all()
@@ -539,43 +713,8 @@ class SegmentationWindow(QWidget):
             notify("Please make sure the label layer exists!")
             return
 
-        position = [int(round(p)) for p in event.position]
-        # x = int(round(event.position[2]))
-        # y = int(round(event.position[1]))
-        # z = int(round(event.position[0]))
+        # Extract position based on segmentation layer dimensionality
+        ndim = label_layer.data.ndim
+        position = [int(round(p)) for p in event.position[-ndim:]]
 
         return label_layer.data[tuple(position)]
-        # return label_layer.data[z, y, x]
-
-    def _update_callbacks(self, callback=None):
-        """
-        Updates the callbacks of all layers
-
-        Parameters
-        ----------
-        callback : function
-            the callback to add to the layers
-        """
-        if not len(self.viewer.layers):
-            return
-        label_layer = grab_layer(
-            self.viewer, self.parent.combobox_segmentation.currentText()
-        )
-        if callback:
-            current_callback = (
-                label_layer.mouse_drag_callbacks[0]
-                if label_layer.mouse_drag_callbacks
-                else None
-            )
-            if current_callback and current_callback.__qualname__ in ["draw", "pick"]:
-                self.cached_callback = current_callback
-            for layer in self.viewer.layers:
-                layer.mouse_drag_callbacks = [callback]
-        else:
-            for layer in self.viewer.layers:
-                if layer == label_layer and self.cached_callback:
-                    layer.mouse_drag_callbacks = [self.cached_callback]
-                else:
-                    layer.mouse_drag_callbacks = []
-            self.cached_callback = None
-        QApplication.restoreOverrideCursor()

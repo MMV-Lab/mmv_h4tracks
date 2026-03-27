@@ -93,3 +93,10 @@ Thumbs.db
 
 # Backup files
 *.bak
+
+# test model
+cpsam
+
+# User-added Cellpose weights under package models (keep empty dir via .gitkeep)
+src/mmv_h4tracks/models/custom_models/*
+!src/mmv_h4tracks/models/custom_models/.gitkeep

@@ -1,17 +1,26 @@
 """Module providing tests for the analysis widget"""
+
 from pathlib import Path
-import time
 
 import numpy as np
 import pytest
-from aicsimageio import (
-    AICSImage,
+from bioio import (
+    BioImage,
 )
 
 from mmv_h4tracks import MMVH4TRACKS
+from mmv_h4tracks._evaluation import (
+    round_half_up,
+    get_false_positives,
+    get_false_negatives,
+    get_split_cells,
+)
 
 # this tests if the analysis returns the proper values
 PATH = Path(__file__).parent / "data"
+IMAGE_EXTENSIONS = {".tif", ".tiff"}
+TRACK_EXTENSIONS = {".npy"}
+
 
 @pytest.fixture
 def create_widget(make_napari_viewer):
@@ -36,12 +45,16 @@ def set_widget_up(create_widget):
     SEGMENTATION_GT = "GT"
     my_widget = create_widget
     viewer = my_widget.viewer
-    for file in list(Path(PATH / "segmentation").iterdir()):
+    for file in Path(PATH / "segmentation").iterdir():
+        if not file.is_file() or file.suffix.lower() not in IMAGE_EXTENSIONS:
+            continue
         print(file.stem)
-        segmentation = AICSImage(file).get_image_data("ZYX")
+        segmentation = BioImage(file).get_image_data("ZYX")
         name = file.stem
         viewer.add_labels(segmentation, name=name)
-    for file in list(Path(PATH / "tracks").iterdir()):
+    for file in Path(PATH / "tracks").iterdir():
+        if not file.is_file() or file.suffix.lower() not in TRACK_EXTENSIONS:
+            continue
         print(file.stem)
         tracks = np.load(file)
         name = file.stem
@@ -96,9 +109,7 @@ def add_layers(viewer):
 # test if rounding works correctly
 @pytest.mark.unit
 @pytest.mark.parametrize("value", *[np.linspace(0, 1, 11)])
-def test_round_half_up(set_widget_up, value):
-    from mmv_h4tracks._evaluation import round_half_up
-
+def test_round_half_up(value):
     if value < 0.5:
         assert round_half_up(value) == 0
     else:
@@ -181,7 +192,7 @@ def test_segmentation_evaluation(get_widget, score, area, frames):
             elif score == "ap50":
                 assert window._calculate_ap50(gt, seg) == 0.75
 
-
+# TODO: slow setup & call
 @pytest.mark.eval
 @pytest.mark.eval_tracking
 @pytest.mark.unit
@@ -207,12 +218,10 @@ def test_false_positives(set_widget_up, layername, expected_value):
     window = widget.evaluation_window
     gt_seg = viewer.layers[viewer.layers.index("GT")].data
     eval_seg = viewer.layers[viewer.layers.index(layername)].data
-    from mmv_h4tracks._evaluation import get_false_positives as func
-
-    fp = window.get_segmentation_fault(gt_seg, eval_seg, func)
+    fp = window.get_segmentation_fault(gt_seg, eval_seg, get_false_positives)
     assert fp == expected_value
 
-
+# TODO: slow call
 @pytest.mark.eval
 @pytest.mark.eval_tracking
 @pytest.mark.unit
@@ -244,12 +253,10 @@ def test_false_negatives(set_widget_up, layername, expected_value, gt):
     window = widget.evaluation_window
     gt_seg = viewer.layers[viewer.layers.index(gt)].data
     eval_seg = viewer.layers[viewer.layers.index(layername)].data
-    from mmv_h4tracks._evaluation import get_false_negatives as func
-
-    fn = window.get_segmentation_fault(gt_seg, eval_seg, func)
+    fn = window.get_segmentation_fault(gt_seg, eval_seg, get_false_negatives)
     assert fn == expected_value
 
-
+# TODO: slow call
 @pytest.mark.eval
 @pytest.mark.eval_tracking
 @pytest.mark.unit
@@ -273,12 +280,10 @@ def test_split_cells(set_widget_up, layername, expected_value):
     window = widget.evaluation_window
     gt_seg = viewer.layers[viewer.layers.index("GT")].data
     eval_seg = viewer.layers[viewer.layers.index(layername)].data
-    from mmv_h4tracks._evaluation import get_split_cells as func
-
-    sc = window.get_segmentation_fault(gt_seg, eval_seg, func)
+    sc = window.get_segmentation_fault(gt_seg, eval_seg, get_split_cells)
     assert sc == expected_value
 
-
+# TODO: slow setup
 @pytest.mark.eval
 @pytest.mark.eval_tracking
 @pytest.mark.unit
@@ -319,6 +324,46 @@ def test_added_edges(set_widget_up, layername, expected_value):
     _, ae = window.get_track_fault(gt_seg, gt_tracks, eval_seg, eval_tracks)
     assert ae == expected_value
 
+@pytest.mark.new
+@pytest.mark.eval
+@pytest.mark.eval_tracking
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "layername, expected_value",
+    [
+        ("added_edge", 0),
+        ("deleted_edge", 4),
+        ("centroid_outside", 2),
+        ("falsely_cut_tracks", 0),
+        ("switch", 4),
+    ],
+)
+def test_added_edges_changed_seg(set_widget_up, layername, expected_value):
+    """
+    Test if added edges are calculated correctly when segmentation is changed
+
+    Parameters
+    ----------
+    set_widget_up : MMVTracking
+        Instance of the main widget
+    layername : str
+        Name of the label layer to evaluate
+    expected_vale : float
+        Expected fault value for added edges
+    """
+    widget = set_widget_up
+    viewer = widget.viewer
+    window = widget.evaluation_window
+    gt_seg = viewer.layers[viewer.layers.index("GT")].data
+    eval_seg = viewer.layers[viewer.layers.index("seg_changed")].data
+    gt_tracks = viewer.layers[viewer.layers.index("GT_tracks")].data
+    eval_tracks_layer = viewer.layers[viewer.layers.index(layername)]
+    widget.combobox_tracks.setCurrentIndex(widget.combobox_tracks.findText(layername))
+    bounds = (0, gt_seg.shape[0])
+    window.adjust_centroids(eval_seg, eval_tracks_layer, bounds)
+    eval_tracks = eval_tracks_layer.data
+    _, ae = window.get_track_fault(gt_seg, gt_tracks, eval_seg, eval_tracks)
+    assert ae == expected_value
 
 @pytest.mark.eval
 @pytest.mark.eval_tracking
@@ -360,6 +405,47 @@ def test_deleted_edges(set_widget_up, layername, expected_value):
     de, _ = window.get_track_fault(gt_seg, gt_tracks, eval_seg, eval_tracks)
     assert de == expected_value
 
+@pytest.mark.new
+@pytest.mark.eval
+@pytest.mark.eval_tracking
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "layername, expected_value",
+    [
+        ("deleted_edge", 0),
+        ("added_edge", 5),
+        ("centroid_outside", 2),
+        ("falsely_cut_tracks", 0),
+        ("switch", 4),
+    ],
+)
+def test_deleted_edges(set_widget_up, layername, expected_value):
+    """
+    Test if deleted edges are calculated correctly
+
+    Parameters
+    ----------
+    set_widget_up : MMVTracking
+        Instance of the main widget
+    layername : str
+        Name of the label layer to evaluate
+    expected_vale : int
+        Expected fault value for deleted edges
+    """
+    widget = set_widget_up
+    viewer = widget.viewer
+    window = widget.evaluation_window
+    gt_seg = viewer.layers[viewer.layers.index("GT")].data
+    eval_seg = viewer.layers[viewer.layers.index("seg_changed")].data
+    gt_tracks = viewer.layers[viewer.layers.index("GT_tracks")].data
+    eval_tracks_layer = viewer.layers[viewer.layers.index(layername)]
+    widget.combobox_tracks.setCurrentIndex(widget.combobox_tracks.findText(layername))
+    bounds = (0, gt_seg.shape[0])
+    window.adjust_centroids(gt_seg, eval_tracks_layer, bounds)
+    eval_tracks = eval_tracks_layer.data
+    de, _ = window.get_track_fault(gt_seg, gt_tracks, eval_seg, eval_tracks)
+    assert de == expected_value
+
 
 @pytest.mark.eval
 @pytest.mark.eval_tracking
@@ -368,7 +454,9 @@ def test_deleted_edges(set_widget_up, layername, expected_value):
     "layername_seg, layername_tracks, expected_value",
     [("false positive", "added_edge", 7)],
 )
-@pytest.mark.xfail(reason="This tests for a result without waiting for the thread to finish")
+@pytest.mark.xfail(
+    reason="This tests for a result without waiting for the thread to finish"
+)
 def test_fault_value(set_widget_up, layername_seg, layername_tracks, expected_value):
     """
     Test if fault value for tracking evaluation is calculated correctly
@@ -389,7 +477,7 @@ def test_fault_value(set_widget_up, layername_seg, layername_tracks, expected_va
     window = widget.evaluation_window
     eval_seg = viewer.layers[viewer.layers.index(layername_seg)].data
     eval_tracks = viewer.layers[viewer.layers.index(layername_tracks)].data
-    widget.initial_layers = [eval_seg, eval_tracks]
+    widget.eval_cache = [eval_seg, eval_tracks]
     widget.combobox_segmentation.setCurrentIndex(
         widget.combobox_segmentation.findText("GT")
     )

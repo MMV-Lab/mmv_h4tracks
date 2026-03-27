@@ -2,6 +2,7 @@ from multiprocessing import Pool
 from threading import Event
 
 import napari
+from tqdm import tqdm
 import numpy as np
 import pandas as pd
 from napari.qt.threading import thread_worker
@@ -20,13 +21,11 @@ from qtpy.QtWidgets import (
 )
 from scipy import ndimage, stats
 
+from ._constants import LINK_TEXT, UNLINK_TEXT, CONFIRM_TEXT, MIN_TRACK_LENGTH
 from ._logger import notify, choice_dialog, handle_exception
 from ._grabber import grab_layer
+from ._utils import preserve_and_filter_graph
 import mmv_h4tracks._processing as processing
-
-LINK_TEXT = "Link tracks"
-UNLINK_TEXT = "Unlink tracks"
-CONFIRM_TEXT = "Confirm"
 
 
 class TrackingWindow(QWidget):
@@ -39,8 +38,6 @@ class TrackingWindow(QWidget):
     Methods
     -------
     """
-
-    MIN_TRACK_LENGTH = 5
 
     def __init__(self, parent):
         """
@@ -59,11 +56,9 @@ class TrackingWindow(QWidget):
         except TypeError:
             self.setStyleSheet(napari.qt.get_stylesheet(theme_id="dark"))
 
-        self.cached_callback = []
         self.cached_tracks = None
+        self.cached_graph = None
         self.selected_cells = []
-        # initial layers saved in self.parent.initial_layers
-        # segmentation -> 0, tracks -> 1
 
         ### QObjects
 
@@ -94,7 +89,7 @@ class TrackingWindow(QWidget):
             "Overlap-based tracking (single cell)"
         )  # TODO: clicking an already tracked cell breaks the onclicks/cursor
         btn_auto_track.setToolTip(
-            "Click on a cell to track based on overlap \n\n" "Hotkey: S"
+            "Click on a cell to track based on overlap \n\n" "Hotkey: G"
         )
 
         self.btn_remove_correspondence = QPushButton(UNLINK_TEXT)
@@ -105,9 +100,6 @@ class TrackingWindow(QWidget):
 
         btn_delete_displayed_tracks = QPushButton("Delete all displayed tracks")
         btn_filter_tracks = QPushButton("Filter")
-        # btn_filter_tracks.setToolTip(
-        #     "In order to display all tracks, clear the filter field and click here"
-        # )
         btn_show_all_tracks = QPushButton("Show all tracks")
         btn_delete_selected_tracks = QPushButton("Delete")
 
@@ -192,6 +184,7 @@ class TrackingWindow(QWidget):
         """
         Runs the coordinate based tracking
         """
+        self.parent.callback_handler.remove_callback_viewer()
 
         def on_yielded(value):
             """
@@ -215,13 +208,13 @@ class TrackingWindow(QWidget):
         """
         Runs the overlap based tracking
         """
+        self.parent.callback_handler.remove_callback_viewer()
         worker = self.worker_overlap_tracking()
         worker.returned.connect(self.process_new_tracks)
 
     @thread_worker(connect={"errored": handle_exception})
     def worker_overlap_tracking(self):
         QApplication.setOverrideCursor(Qt.WaitCursor)
-        self.restore_callbacks()
         self.reset_button_labels()
         label_layer = grab_layer(
             self.viewer, self.parent.combobox_segmentation.currentText()
@@ -229,19 +222,30 @@ class TrackingWindow(QWidget):
         if label_layer is None:
             raise ValueError("No segmentation layer to track")
 
+        # Get the actual data array, handling both multiscale and dask arrays
+        if isinstance(label_layer.data, (list, tuple)):
+            # Multiscale: use first level
+            segmentation = np.asarray(label_layer.data[0])
+        else:
+            # Single resolution: convert to numpy to handle dask arrays
+            segmentation = np.asarray(label_layer.data)
+
         AMOUNT_OF_PROCESSES = self.parent.get_process_limit()
 
         track_id = 1
-        for start_slice in range(len(label_layer.data) - self.MIN_TRACK_LENGTH):
+        tracks = np.ndarray([])
+        for start_slice in range(len(segmentation) - MIN_TRACK_LENGTH):
             threads_input = []
-            for label_id in np.unique(label_layer.data[start_slice]):
+            # Convert slice to numpy array to ensure np.unique works correctly
+            slice_data = np.asarray(segmentation[start_slice])
+            for label_id in np.unique(slice_data):
                 if label_id == 0:
                     continue
                 if track_id > 1:
                     # calculate centroid of the cell
                     centroid = ndimage.center_of_mass(
-                        label_layer.data[start_slice],
-                        labels=label_layer.data[start_slice],
+                        slice_data,
+                        labels=slice_data,
                         index=label_id,
                     )
                     centroid = [
@@ -256,7 +260,7 @@ class TrackingWindow(QWidget):
                             tracked = True
                     if tracked:
                         continue
-                threads_input.append([label_layer.data, start_slice, label_id])
+                threads_input.append([segmentation, start_slice, label_id])
 
             with Pool(AMOUNT_OF_PROCESSES) as pool:
                 track_cells = pool.starmap(func, threads_input)
@@ -265,13 +269,13 @@ class TrackingWindow(QWidget):
                 if entry is None:
                     continue
                 for line in entry:
-                    try:
+                    if len(tracks.shape) > 0:
                         tracks = np.r_[tracks, [[track_id] + line]]
-                    except UnboundLocalError:
+                    else:
                         tracks = np.array([[track_id] + line])
                 track_id += 1
 
-        if not "tracks" in locals():
+        if len(tracks.shape) == 0:
             return None
 
         tracks = np.array(tracks)
@@ -280,7 +284,22 @@ class TrackingWindow(QWidget):
         QApplication.restoreOverrideCursor()
         return df.values
 
-    def single_overlap_tracking_on_click(self):
+    def _add_auto_track_callback(self):
+        """
+        Adds a callback to the viewer to track cells on click
+        """
+        try:
+            _ = grab_layer(self.viewer, self.parent.combobox_segmentation.currentText())
+        except ValueError as exc:
+            handle_exception(exc)
+            return
+
+        self.parent.callback_handler.add_callback_viewer(
+            self.single_overlap_tracking_on_click
+        )
+        QApplication.setOverrideCursor(Qt.CrossCursor)
+
+    def single_overlap_tracking_on_click(self, *_):
         if self.cached_tracks is not None:
             notify("New tracks can only be added if all tracks are displayed.")
             return
@@ -289,8 +308,7 @@ class TrackingWindow(QWidget):
             """
             Callback for the overlap based tracking
             """
-            if len(event.position) == 2:
-                raise ValueError("2D image can not be tracked.")
+            self.parent.callback_handler.remove_callback_viewer()
 
             try:
                 label_layer = grab_layer(
@@ -300,16 +318,23 @@ class TrackingWindow(QWidget):
                 handle_exception(exc)
                 return
 
-            selected_cell = label_layer.get_value(event.position)
+            # Extract position based on segmentation layer dimensionality
+            ndim = label_layer.data.ndim
+            if ndim == 2:
+                raise ValueError("2D image can not be tracked.")
+            position = tuple(int(round(p)) for p in event.position[-ndim:])
+
+            selected_cell = label_layer.get_value(position)
             if selected_cell == 0:
-                raise ValueError("The background can not be tracked.")
+                notify("The background can not be tracked.")
+                return
 
             worker = self.worker_single_overlap_tracking(
-                label_layer.data, int(event.position[0]), selected_cell
+                label_layer.data, int(position[0]), selected_cell
             )
             worker.returned.connect(self.evaluate_proposed_track)
 
-        self.set_callback(overlap_tracking_callback)
+        self.parent.callback_handler.add_callback_viewer(overlap_tracking_callback)
         QApplication.setOverrideCursor(Qt.CrossCursor)
 
     @thread_worker(connect={"errored": handle_exception})
@@ -333,11 +358,10 @@ class TrackingWindow(QWidget):
         track: np.ndarray
             The proposed track
         """
-        self.restore_callbacks()
         start_slice = slice_id
         track = []
         MIN_OVERLAP = 0.7
-        if segmentation.shape[0] - slice_id < self.MIN_TRACK_LENGTH:
+        if segmentation.shape[0] - slice_id < MIN_TRACK_LENGTH:
             # Cell is too close to the end to have a track long enough
             return track
         cell_indices = np.where(segmentation[slice_id] == selected_cell)
@@ -386,9 +410,10 @@ class TrackingWindow(QWidget):
         proposed_track : list
             The proposed track
         """
-        if len(proposed_track) < self.MIN_TRACK_LENGTH:
+        if len(proposed_track) < MIN_TRACK_LENGTH:
             QApplication.restoreOverrideCursor()
-            raise ValueError("Could not find a track of sufficient length.")
+            notify("Could not find a track of sufficient length.")
+            return
         # Check if any of the cells are already tracked
         tracks_layer = self.get_tracks_layer()
         if tracks_layer is None:
@@ -406,7 +431,9 @@ class TrackingWindow(QWidget):
             existing_entry = [
                 track for track in tracks_layer.data if np.all(track[1:4] == entry)
             ]
-            if len(existing_entry) > 1 and track_id is None:
+            # If there are multiple existing entries, select the smallest track_id
+            # to ensure consistency and avoid conflicts.
+            if len(existing_entry) > 1 and (track_id is None or track_id > existing_entry[0][0]):
                 track_id = existing_entry[0][0]
             diverging_entries = [
                 track
@@ -424,7 +451,7 @@ class TrackingWindow(QWidget):
             if not existing_entry:
                 entries_to_add.append(entry)
             else:
-                if track_id is None:
+                if track_id is None or track_id > existing_entry[0][0]:
                     track_id = existing_entry[0][0]
                     existing_track = np.array(
                         [track for track in tracks_layer.data if track[0] == track_id]
@@ -436,7 +463,7 @@ class TrackingWindow(QWidget):
 
                 elif (
                     existing_entry[0][0] != track_id
-                    and not existing_entry[0][0] in ids_to_change
+                    and existing_entry[0][0] not in ids_to_change
                 ):
                     existing_track = np.array(
                         [
@@ -458,7 +485,7 @@ class TrackingWindow(QWidget):
             self.assign_new_track_id(tracks_layer, old_id, track_id)
 
         if entries_to_add:
-            if len(entries_to_add) < self.MIN_TRACK_LENGTH and track_id == np.amax(
+            if len(entries_to_add) < MIN_TRACK_LENGTH and track_id == np.amax(
                 tracks_layer.data[:, 0] + 1
             ):
                 QApplication.restoreOverrideCursor()
@@ -487,7 +514,33 @@ class TrackingWindow(QWidget):
         tracks[tracks[:, 0] == old_id, 0] = new_id
         df = pd.DataFrame(tracks, columns=["ID", "Z", "Y", "X"])
         df.sort_values(["ID", "Z"], ascending=True, inplace=True)
-        tracks_layer.data = df.values
+        updated_tracks = df.values
+        
+        # Get the current graph and update it BEFORE filtering
+        graph = getattr(tracks_layer, 'graph', {}) or {}
+        updated_graph = {}
+        for track_id, parent_ids in graph.items():
+            track_id_int = int(track_id)
+            # Update parent references if they match old_id
+            updated_parents = [new_id if int(p) == old_id else int(p) for p in parent_ids]
+            # Update the key if it matches old_id
+            if track_id_int == old_id:
+                updated_graph[new_id] = updated_parents
+            else:
+                updated_graph[track_id_int] = updated_parents
+        
+        # Now filter the updated graph based on the new tracks data
+        # Create a temporary tracks_layer-like object with the updated graph
+        class TempTracksLayer:
+            def __init__(self, graph):
+                self.graph = graph
+        
+        temp_layer = TempTracksLayer(updated_graph)
+        filtered_graph = preserve_and_filter_graph(temp_layer, updated_tracks)
+        
+        tracks_layer.data = updated_tracks
+        if filtered_graph:
+            tracks_layer.graph = filtered_graph
 
     def link_tracks_on_click(self):
         """
@@ -505,25 +558,53 @@ class TrackingWindow(QWidget):
                 label_layer = grab_layer(
                     self.viewer, self.parent.combobox_segmentation.currentText()
                 )
+
+                # Extract position based on segmentation layer dimensionality
+                # For multiscale layers, data is a list/tuple, so get ndim from first level
+                if isinstance(label_layer.data, (list, tuple)):
+                    ndim = label_layer.data[0].ndim
+                    # Get the actual data array (first level for multiscale)
+                    data_array = label_layer.data[0]
+                else:
+                    ndim = label_layer.data.ndim
+                    data_array = label_layer.data
+                if ndim == 2:
+                    raise ValueError("2D image can not be tracked.")
+                position = tuple(int(round(p)) for p in event.position[-ndim:])
+                z = int(position[0])
+                selected_id = label_layer.get_value(position)
+                if selected_id == 0:
+                    raise ValueError("The background can not be tracked.")
+                # Convert to numpy array to handle dask arrays from OME-Zarr
+                # This is critical for lazy-loaded data
+                frame_data = np.asarray(data_array[z])
+                centroid = ndimage.center_of_mass(
+                    frame_data,
+                    labels=frame_data,
+                    index=selected_id,
+                )
+                # Ensure centroid elements are converted to Python scalars
+                # Convert to numpy array first to handle both tuple and array returns
+                centroid = [int(np.rint(c.item())) for c in np.asarray(centroid)]
+                cell = [z, centroid[0], centroid[1]]
+                # For multiscale, need to check against first level
+                if isinstance(label_layer.data, (list, tuple)):
+                    check_data = label_layer.data[0]
+                else:
+                    check_data = label_layer.data
+                if check_data[*cell] != selected_id:
+                    # centroid outside of the cell, calculate medoid instead
+                    coords = np.argwhere(frame_data == selected_id)
+                    medoid = [z, *calculate_medoid(coords)]
+                    notify(f"Calculated medoid: {medoid}")
+                    cell = medoid
+                if cell not in self.selected_cells:
+                    self.selected_cells.append(cell)
+                    self.selected_cells.sort()
             except ValueError as exc:
                 handle_exception(exc)
-                self.reset_button_labels
-                self.restore_callbacks()
-                QApplication.restoreOverrideCursor()
+                self.parent.callback_handler.remove_callback_viewer()
                 return
-            z = int(event.position[0])
-            selected_id = label_layer.get_value(event.position)
-            if selected_id == 0:
-                raise ValueError("The background can not be tracked.")
-            centroid = ndimage.center_of_mass(
-                label_layer.data[z],
-                labels=label_layer.data[z],
-                index=selected_id,
-            )
-            cell = [z, int(np.rint(centroid[0])), int(np.rint(centroid[1]))]
-            if not cell in self.selected_cells:
-                self.selected_cells.append(cell)
-                self.selected_cells.sort()
 
         # check if button text is confirm or link
         if self.btn_insert_correspondence.text() == LINK_TEXT:
@@ -542,12 +623,13 @@ class TrackingWindow(QWidget):
             self.reset_button_labels()
             self.selected_cells = []
             self.btn_insert_correspondence.setText(CONFIRM_TEXT)
-            self.set_callback(store_cell_for_link)
+            self.parent.callback_handler.add_callback_viewer(
+                store_cell_for_link, keep_tracking=True
+            )
             QApplication.setOverrideCursor(Qt.CrossCursor)
         else:
             self.reset_button_labels()
-            self.restore_callbacks()
-            QApplication.restoreOverrideCursor()
+            self.parent.callback_handler.remove_callback_viewer(keep_tracking=True)
             if self.cached_tracks is not None:
                 msg = QMessageBox()
                 msg.setWindowTitle("napari")
@@ -570,15 +652,42 @@ class TrackingWindow(QWidget):
         if len(self.selected_cells) < 2:
             notify("Please select more than one cell to connect!")
             return
+        
+        tracks_layer = self.get_tracks_layer()
+        # check which tracks have been clicked
+        track_id_matches = []
+        for cell in self.selected_cells:
+            if tracks_layer is None:
+                break
+            for track_line in tracks_layer.data:
+                if np.all(track_line[1:4] == cell):
+                    track_id_matches.append(int(track_line[0]))
+
+        track_id_matches = sorted(list(set(track_id_matches)))
+        selected_cells_array = np.array(self.selected_cells)
+
+        # auto select all cells from those tracks
+        if len(track_id_matches) > 0:
+            for track_id in track_id_matches:
+                track = tracks_layer.data[tracks_layer.data[:, 0] == track_id]
+                for track_line in track:
+                    # avoid adding duplicates
+                    if not np.any(np.all(track_line[1:4] == selected_cells_array, axis=1)):
+                        self.selected_cells.append(track_line[1:4].astype(int).tolist())
+
+        self.selected_cells = sorted(self.selected_cells, key=lambda x: x[0])
+        selected_cells_array = np.array(self.selected_cells)
+
         # assure no two selected cells are from the same slice
-        if len(np.asarray(self.selected_cells)[:, 0]) != len(
-            set(np.asarray(self.selected_cells)[:, 0])
+        if len(selected_cells_array) > 0 and len(selected_cells_array[:, 0]) != len(
+            set(selected_cells_array[:, 0])
         ):
-            most_common_value = stats.mode(np.array(self.selected_cells)[:, 0])[0]
+            most_common_value = stats.mode(selected_cells_array[:, 0])[0]
             notify(
                 f"Looks like you selected multiple cells in slice {most_common_value}. You can only connect cells from different slices."
             )
             return
+        
         # assure there is no gap in z between the selected cells
         if (
             np.max(np.asarray(self.selected_cells)[:, 0])
@@ -598,97 +707,39 @@ class TrackingWindow(QWidget):
             )
             return
 
-        tracks_layer = self.get_tracks_layer()
-
-        track_id_matches = []
-        for cell in self.selected_cells:
-            if tracks_layer is None:
-                break
-            for track_line in tracks_layer.data:
-                if np.all(track_line[1:4] == cell):
-                    track_id_matches.append(track_line[0])
-
-        track_id_matches = list(set(track_id_matches))
-
-        contained_tracks = []
-        cell_tuples = [tuple(cell) for cell in self.selected_cells]
-        for track_id in track_id_matches:
-            track = tracks_layer.data[tracks_layer.data[:, 0] == track_id]
-            track_tuples = [tuple(track_line[1:4]) for track_line in track]
-            # check if all of track's cells are in the selected cells
-            if all(track_tuple in cell_tuples for track_tuple in track_tuples):
-                contained_tracks.append(track_id)
-                self.remove_entries_from_tracks([track_entry for track_entry in track])
-
-        if len(track_id_matches) - len(contained_tracks) == 0:
-            self.add_track_to_tracks(np.array(self.selected_cells))
-            if tracks_layer is None:
-                tracks_layer = self.get_tracks_layer()
-        elif len(track_id_matches) - len(contained_tracks) == 1:
-            touched_track_id = [
-                track_id
-                for track_id in track_id_matches
-                if track_id not in contained_tracks
-            ][0]
-            track = tracks_layer.data[tracks_layer.data[:, 0] == touched_track_id]
-            entries_to_add = []
-            for cell in self.selected_cells:
-                tracked = False
-                for track_line in track:
-                    if cell[0] == track_line[1]:
-                        if not np.all(cell == track_line[1:4]):
-                            notify(
-                                f"You selected a cell in frame {cell[0]}, but track {touched_track_id} already contains a cell in this frame."
-                            )
-                            return
-                        else:
-                            tracked = True
-                if not tracked:
-                    # only add the cell if it is not already in the track
-                    entries_to_add.append(cell)
-            self.add_entries_to_tracks(entries_to_add, touched_track_id)
-        else:
-            # multiple tracks contain cells from the selected cells & are not contained
-            # check if more than one track has same z
-            z_values = [
-                track_line[1]
-                for track_line in tracks_layer.data
-                if track_line[0] in track_id_matches
-                and not track_line[0] in contained_tracks
-            ]
-            if len(z_values) != len(set(z_values)):
-                # Not sure if there is a simple way to find the offending tracks
-                notify(
-                    "Connecting tracks that contain cells in the same slice is not possible."
-                )
-                return
-            entries_not_to_add = []
-            for touched_track_id in [
-                track_id
-                for track_id in track_id_matches
-                if track_id not in contained_tracks
-            ]:
-                track = tracks_layer.data[tracks_layer.data[:, 0] == touched_track_id]
-                for cell in self.selected_cells:
-                    for track_line in track:
-                        if cell[0] == track_line[1]:
-                            if not np.all(cell == track_line[1:4]):
-                                notify(
-                                    f"You selected a cell in frame {cell[0]}, but track {touched_track_id} already contains a cell in this frame."
-                                )
-                                return
-                            # cell should not be added since it would be duplicate
-                            entries_not_to_add.append(cell)
-            entries_to_add = [
-                list(cell)
-                for cell in set(tuple(entry) for entry in self.selected_cells)
-                - set(tuple(entry) for entry in entries_not_to_add)
-            ]
-            if len(entries_to_add) > 0:
-                self.add_entries_to_tracks(entries_to_add, track_id_matches[0])
-
+        # reassign track ids if multiple tracks were clicked
+        # Assumption: `track_id_matches` is sorted, and the first element (track_id_matches[0])
+        # is used as the target ID. Ensure `track_id_matches` is sorted before this point.
         for track_id in track_id_matches[1:]:
             self.assign_new_track_id(tracks_layer, track_id, track_id_matches[0])
+
+        entries_to_add = []
+        # check which clicked cells are not already in the tracks
+        for cell in self.selected_cells:
+            if tracks_layer is None:
+                entries_to_add = self.selected_cells
+                break
+            tracked = False
+            for track_line in tracks_layer.data:
+                if np.all(track_line[1:4] == cell):
+                    tracked = True
+                    break
+            if not tracked:
+                entries_to_add.append(cell)
+                
+        # determine the track id to use
+        # either use lowest id of clicked tracks or lowest missing id
+
+        if tracks_layer is not None:
+            track_ids = set(track_line[0] for track_line in tracks_layer.data)
+        else:
+            track_ids = set()
+        lowest_missing_id = 1
+        while lowest_missing_id in track_ids:
+            lowest_missing_id += 1
+        track_id = track_id_matches[0] if len(track_id_matches) > 0 else lowest_missing_id
+        if len(entries_to_add) > 0:
+            self.add_entries_to_tracks(entries_to_add, track_id)
 
     def unlink_tracks_on_click(self):
         """
@@ -705,37 +756,55 @@ class TrackingWindow(QWidget):
                 label_layer = grab_layer(
                     self.viewer, self.parent.combobox_segmentation.currentText()
                 )
+
+                # Extract position based on segmentation layer dimensionality
+                # For multiscale layers, data is a list/tuple, so get ndim from first level
+                if isinstance(label_layer.data, (list, tuple)):
+                    ndim = label_layer.data[0].ndim
+                    # Get the actual data array (first level for multiscale)
+                    data_array = label_layer.data[0]
+                else:
+                    ndim = label_layer.data.ndim
+                    data_array = label_layer.data
+                if ndim == 2:
+                    raise ValueError("2D image can not be tracked.")
+                position = tuple(int(round(p)) for p in event.position[-ndim:])
+                z = position[0]
+                selected_id = label_layer.get_value(position)
+                if selected_id == 0:
+                    raise ValueError("The background can not be tracked.")
+                # Convert to numpy array to handle dask arrays from OME-Zarr
+                # This is critical for lazy-loaded data
+                frame_data = np.asarray(data_array[z])
+                centroid = ndimage.center_of_mass(
+                    frame_data,
+                    labels=frame_data,
+                    index=selected_id,
+                )
+                # Ensure centroid elements are converted to Python scalars
+                # Convert to numpy array first to handle both tuple and array returns
+                centroid = [int(np.rint(c.item())) for c in np.asarray(centroid)]
+                cell = [z, centroid[0], centroid[1]]
+                if cell not in self.selected_cells:
+                    self.selected_cells.append(cell)
+                    self.selected_cells.sort(key=lambda x: x[0])
             except ValueError as exc:
                 handle_exception(exc)
-                self.reset_button_labels
-                self.restore_callbacks()
-                QApplication.restoreOverrideCursor()
+                self.parent.callback_handler.remove_callback_viewer()
                 return
-            z = int(event.position[0])
-            selected_id = label_layer.get_value(event.position)
-            if selected_id == 0:
-                raise ValueError("The background can not be tracked.")
-            centroid = ndimage.center_of_mass(
-                label_layer.data[z],
-                labels=label_layer.data[z],
-                index=selected_id,
-            )
-            cell = [z, int(np.rint(centroid[0])), int(np.rint(centroid[1]))]
-            if not cell in self.selected_cells:
-                self.selected_cells.append(cell)
-                self.selected_cells.sort(key=lambda x: x[0])
 
         # check if button text is confirm or unlink
         if self.btn_remove_correspondence.text() == UNLINK_TEXT:
             self.reset_button_labels()
             self.selected_cells = []
             self.btn_remove_correspondence.setText(CONFIRM_TEXT)
-            self.set_callback(store_cell_for_unlink)
+            self.parent.callback_handler.add_callback_viewer(
+                store_cell_for_unlink, keep_tracking=True
+            )
             QApplication.setOverrideCursor(Qt.CrossCursor)
         else:
             self.reset_button_labels()
-            self.restore_callbacks()
-            QApplication.restoreOverrideCursor()
+            self.parent.callback_handler.remove_callback_viewer(keep_tracking=True)
             self.unlink_stored_cells()
 
     def unlink_stored_cells(self):
@@ -821,13 +890,11 @@ class TrackingWindow(QWidget):
 
         self.selected_cells.sort(key=lambda x: x[0])
 
-        print(f"Selected cells with missing cells added: {self.selected_cells}")
         # if only part of the track is removed the outermost entries must remain
         if min_z_track < min_z:
             self.selected_cells.pop(0)
         if max_z_track > max_z:
             self.selected_cells.pop(-1)
-        print(f"Cells being removed: {self.selected_cells}")
 
         # remove the selected cells from the tracks
         self.remove_entries_from_tracks(self.selected_cells)
@@ -846,6 +913,7 @@ class TrackingWindow(QWidget):
         """
         Filters the tracks layer to only display the selected tracks
         """
+        self.parent.callback_handler.remove_callback_viewer()
         input_text = self.lineedit_filter.text()
         if input_text == "":
             if self.cached_tracks is not None:
@@ -853,7 +921,9 @@ class TrackingWindow(QWidget):
             return
         try:
             tracks_to_display = [
-                int(track_id) for track_id in input_text.split(",") if track_id != ""
+                int(track_id)
+                for track_id in input_text.split(",")
+                if track_id.strip() != ""
             ]
         except ValueError:
             notify("Please use a comma separated list of integers (whole numbers).")
@@ -879,6 +949,7 @@ class TrackingWindow(QWidget):
         """
         Displays all tracks
         """
+        self.parent.callback_handler.remove_callback_viewer()
         self.lineedit_filter.setText("")
         if self.cached_tracks is not None:
             self.display_cached_tracks()
@@ -887,6 +958,7 @@ class TrackingWindow(QWidget):
         """
         Deletes the tracks specified in the lineedit_delete text field
         """
+        self.parent.callback_handler.remove_callback_viewer()
         input_text = self.lineedit_delete.text()
         if input_text == "":
             return
@@ -954,12 +1026,22 @@ class TrackingWindow(QWidget):
                 np.isin(self.cached_tracks[:, 0], tracks_to_delete),
                 0,
             )
+            # Preserve and filter graph from existing layer
+            filtered_graph = preserve_and_filter_graph(tracks_layer, self.cached_tracks)
             tracks_layer.data = self.cached_tracks
+            if filtered_graph:
+                tracks_layer.graph = filtered_graph
             self.cached_tracks = None
+            self.cached_graph = None
         else:
-            tracks_layer.data = np.delete(
+            deleted_tracks = np.delete(
                 tracks_layer.data, np.isin(tracks_layer.data[:, 0], tracks_to_delete), 0
             )
+            # Preserve and filter graph from existing layer
+            filtered_graph = preserve_and_filter_graph(tracks_layer, deleted_tracks)
+            tracks_layer.data = deleted_tracks
+            if filtered_graph:
+                tracks_layer.graph = filtered_graph
             if self.cached_tracks is not None:
                 self.cached_tracks = np.delete(
                     self.cached_tracks,
@@ -977,6 +1059,7 @@ class TrackingWindow(QWidget):
         """
         Deletes all displayed tracks
         """
+        self.parent.callback_handler.remove_callback_viewer()
         tracks_layer = self.get_tracks_layer()
         if tracks_layer is None:
             notify("Please select a valid tracks layer.")
@@ -1006,10 +1089,16 @@ class TrackingWindow(QWidget):
 
             diff_view = np.setdiff1d(cached_tracks_view, tracks_layer_data_view)
 
-            tracks_layer.data = diff_view.view(tracks_layer.data.dtype).reshape(
+            diff_tracks = diff_view.view(tracks_layer.data.dtype).reshape(
                 -1, tracks_layer.data.shape[1]
             )
+            # Preserve and filter graph from existing layer
+            filtered_graph = preserve_and_filter_graph(tracks_layer, diff_tracks)
+            tracks_layer.data = diff_tracks
+            if filtered_graph:
+                tracks_layer.graph = filtered_graph
             self.cached_tracks = None
+            self.cached_graph = None
             self.lineedit_filter.clear()
 
     def process_new_tracks(self, tracks: np.ndarray):
@@ -1024,14 +1113,19 @@ class TrackingWindow(QWidget):
         if tracks is None:
             QApplication.restoreOverrideCursor()
             return
-        assert type(tracks) == np.ndarray, "Tracks are not numpy array."
+        assert isinstance(tracks, np.ndarray), "Tracks are not numpy array."
         self.cached_tracks = None
+        self.cached_graph = None
         tracks_layer = self.get_tracks_layer()
         if tracks_layer is None:
             self.viewer.add_tracks(tracks, name="Tracks")
         else:
+            # Preserve and filter graph from existing layer
+            filtered_graph = preserve_and_filter_graph(tracks_layer, tracks)
             tracks_layer.data = tracks
-        self.parent.initial_layers[1] = tracks
+            if filtered_graph:
+                tracks_layer.graph = filtered_graph
+        self.parent.eval_cache[1] = tracks
         QApplication.restoreOverrideCursor()
 
     def remove_entries_from_tracks(self, cells: list):
@@ -1065,13 +1159,22 @@ class TrackingWindow(QWidget):
             print(f"Removed {old_length - len(tracks)} cells")
         if len(track_results[0]) < 1:
             if len(track_results) > 1 and len(track_results[1]) > 1:
+                # Preserve and filter graph from existing layer
+                filtered_graph = preserve_and_filter_graph(tracks_layer, track_results[1])
                 tracks_layer.data = track_results[1]
+                if filtered_graph:
+                    tracks_layer.graph = filtered_graph
             else:
                 self.viewer.layers.remove(tracks_layer.name)
                 self.viewer.layers.select_next()
             self.cached_tracks = None
+            self.cached_graph = None
         else:
+            # Preserve and filter graph from existing layer
+            filtered_graph = preserve_and_filter_graph(tracks_layer, track_results[0])
             tracks_layer.data = track_results[0]
+            if filtered_graph:
+                tracks_layer.graph = filtered_graph
             if len(track_results) > 1:
                 self.cached_tracks = track_results[1]
 
@@ -1081,10 +1184,17 @@ class TrackingWindow(QWidget):
         """
         tracks_layer = self.get_tracks_layer()
         if tracks_layer is None:
-            self.viewer.add_tracks(self.cached_tracks, name="Tracks")
+            new_layer = self.viewer.add_tracks(self.cached_tracks, name="Tracks")
+            # Restore cached graph if it exists
+            if self.cached_graph:
+                new_layer.graph = self.cached_graph
         else:
             tracks_layer.data = self.cached_tracks
+            # Restore the full cached graph (it was stored when filtering for display)
+            if self.cached_graph is not None:
+                tracks_layer.graph = self.cached_graph
         self.cached_tracks = None
+        self.cached_graph = None
         self.lineedit_delete.clear()
 
     def display_selected_tracks(self, track_ids: list):
@@ -1101,6 +1211,8 @@ class TrackingWindow(QWidget):
             return
         if self.cached_tracks is None:
             self.cached_tracks = tracks_layer.data
+            # Cache the full graph when first filtering for display
+            self.cached_graph = getattr(tracks_layer, 'graph', {}) or {}
 
         # filter the tracks
         selected_tracks = self.cached_tracks[
@@ -1109,7 +1221,10 @@ class TrackingWindow(QWidget):
         if len(selected_tracks) < 1:
             notify("No tracks found for the selected track IDs.")
             return
+        # For display filtering, temporarily set graph to empty to avoid napari validation errors
+        # The full graph is stored in cached_graph and will be restored when displaying full tracks
         tracks_layer.data = selected_tracks
+        tracks_layer.graph = {}  # Empty graph for filtered display
         self.lineedit_delete.clear()
 
     def add_entries_to_tracks(self, cells: list, track_id: int):
@@ -1132,14 +1247,13 @@ class TrackingWindow(QWidget):
             msg.setStandardButtons(QMessageBox.Ok)
             msg.exec_()
             return
-        # if self.cached_tracks is not None:
-        #     raise ValueError("Can't add to tracks if there are cached tracks")
+
         # assume that a track is being reassigned if cache exists
         tracks_layer = self.get_tracks_layer()
         if tracks_layer is None:
-            tracks_layer = self.viewer.add_tracks(cells, name="Tracks")
+            new_tracks = [np.insert(cell, 0, track_id) for cell in cells]
+            tracks_layer = self.viewer.add_tracks(new_tracks, name="Tracks")
             return
-            # raise ValueError("Can't add to tracks if there are no tracks")
         tracks_objects = [tracks_layer.data]
         results_tracks = []
         if self.cached_tracks is not None:
@@ -1151,7 +1265,11 @@ class TrackingWindow(QWidget):
             df.sort_values(["ID", "Z"], ascending=True, inplace=True)
             results_tracks.append(df.values)
 
+        # Preserve and filter graph from existing layer
+        filtered_graph = preserve_and_filter_graph(tracks_layer, results_tracks[0])
         tracks_layer.data = results_tracks[0]
+        if filtered_graph:
+            tracks_layer.graph = filtered_graph
         if len(results_tracks) > 1:
             self.cached_tracks = results_tracks[1]
 
@@ -1175,7 +1293,11 @@ class TrackingWindow(QWidget):
         track_id = np.amax(tracks[:, 0]) + 1
         track = np.insert(track, 0, track_id, axis=1)
         tracks = np.r_[tracks, track]
+        # Preserve and filter graph from existing layer
+        filtered_graph = preserve_and_filter_graph(tracks_layer, tracks)
         tracks_layer.data = tracks
+        if filtered_graph:
+            tracks_layer.graph = filtered_graph
 
     def get_tracks_layer(self):
         """
@@ -1192,37 +1314,108 @@ class TrackingWindow(QWidget):
         except ValueError:
             return None
 
-    def restore_callbacks(self):
-        if len(self.viewer.layers) == 0:
-            return
-        label_layer = grab_layer(
-            self.viewer, self.parent.combobox_segmentation.currentText()
-        )
-        if label_layer is None:
-            return
-        for layer in self.viewer.layers:
-            layer.mouse_drag_callbacks = []
-        label_layer.mouse_drag_callbacks = self.cached_callback
-        self.cached_callback = []
-
-    def set_callback(self, callback):
-        if len(self.viewer.layers) == 0:
-            return
-        label_layer = grab_layer(
-            self.viewer, self.parent.combobox_segmentation.currentText()
-        )
-        if label_layer is None:
-            return
-        self.cached_callback = label_layer.mouse_drag_callbacks
-        for layer in self.viewer.layers:
-            layer.mouse_drag_callbacks = [callback]
-
     def reset_button_labels(self):
         """
         Resets the button labels
         """
         self.btn_insert_correspondence.setText(LINK_TEXT)
         self.btn_remove_correspondence.setText(UNLINK_TEXT)
+
+    def update_all_centroids(self):
+        """
+        Updates all centroids to account for changed segmentation
+        """
+        self.parent.callback_handler.remove_callback_viewer()
+        label_layer = grab_layer(
+            self.viewer, self.parent.combobox_segmentation.currentText()
+        )
+        if label_layer is None:
+            return
+        tracks_layer = self.get_tracks_layer()
+        if tracks_layer is None:
+            return
+
+        label_data = np.array(label_layer.data)
+        tracks = np.array(tracks_layer.data)
+        original_label_data = np.array(self.parent.align_cache)
+
+        frames_to_update = []
+
+        try:
+            for z in tqdm(range(len(label_data))):
+                frame_o = original_label_data[z]
+                frame = label_data[z]
+                if not np.array_equal(frame_o[frame_o > 0], frame[frame > 0]):
+                    frames_to_update.append(z)
+        except IndexError:
+            # If no original label data is available, update all frames
+            frames_to_update = list(range(len(label_data)))
+
+        tracks_to_update = [track for track in tracks if track[1] in frames_to_update]
+        unchanged_tracks = [
+            track for track in tracks if track[1] not in frames_to_update
+        ]
+        updated_tracks = []
+        for track in tracks_to_update:
+            updated_track = update_centroid(label_data, tracks, track)
+            updated_tracks.append(updated_track)
+
+        updated_tracks = [track for track in updated_tracks if track is not None]
+        updated_tracks.extend(unchanged_tracks)
+        df = pd.DataFrame(updated_tracks, columns=["ID", "Z", "Y", "X"])
+        df.sort_values(["ID", "Z"], ascending=True, inplace=True)
+        updated_tracks = df.values
+        updated_tracks = processing.split_noncontinuous_tracks(updated_tracks)
+        updated_tracks = processing.remove_dot_tracks(updated_tracks)
+        # Preserve and filter graph from existing layer
+        filtered_graph = preserve_and_filter_graph(tracks_layer, updated_tracks)
+        tracks_layer.data = updated_tracks
+        if filtered_graph:
+            tracks_layer.graph = filtered_graph
+        self.parent.align_cache = label_data
+
+    def update_single_centroid(self, track_id: int, frame: int):
+        """
+        Updates a single centroid to account for changed segmentation
+        """
+        label_layer = grab_layer(
+            self.viewer, self.parent.combobox_segmentation.currentText()
+        )
+        if label_layer is None:
+            return
+        tracks_layer = self.get_tracks_layer()
+        if tracks_layer is None:
+            return
+        tracks = tracks_layer.data
+        track_entry = [
+            entry for entry in tracks if entry[0] == track_id and entry[1] == frame
+        ][0]
+
+        filter_values = None
+        if self.cached_tracks is not None:
+            filter_values = np.unique(self.cached_tracks[:, 0])
+            tracks = self.cached_tracks
+
+        updated_entry = update_centroid(track_entry, label_layer.data[frame], tracks)
+        if updated_entry is None:
+            tracks = processing.remove_frame_from_track(tracks, track_entry)
+        else:
+            index = np.where(np.all(tracks == track_entry, axis=1))[0]
+            tracks[index] = updated_entry
+
+        df = pd.DataFrame(tracks, columns=["ID", "Z", "Y", "X"])
+        df.sort_values(["ID", "Z"], ascending=True, inplace=True)
+        tracks = df.values
+
+        if filter_values is not None:
+            self.cached_tracks = tracks
+            self.display_selected_tracks(filter_values)
+        else:
+            # Preserve and filter graph from existing layer
+            filtered_graph = preserve_and_filter_graph(tracks_layer, tracks)
+            tracks_layer.data = tracks
+            if filtered_graph:
+                tracks_layer.graph = filtered_graph
 
     def update_all_centroids(self):
         """
@@ -1331,6 +1524,9 @@ def func(label_data, start_slice, id):
     """
     MIN_OVERLAP = 0.7
 
+    # Convert to numpy array to handle dask arrays
+    label_data = np.asarray(label_data)
+
     slice_id = start_slice
 
     track_cells = []
@@ -1343,7 +1539,7 @@ def func(label_data, start_slice, id):
             matches[1][maximum] <= MIN_OVERLAP * np.sum(matches[1])
             or matches[0][maximum] == 0
         ):
-            if len(track_cells) < TrackingWindow.MIN_TRACK_LENGTH:
+            if len(track_cells) < MIN_TRACK_LENGTH:
                 return
             return track_cells
 
@@ -1367,7 +1563,7 @@ def func(label_data, start_slice, id):
         id = matches[0][maximum]
         slice_id += 1
         cell = np.where(label_data[slice_id] == id)
-    if len(track_cells) < TrackingWindow.MIN_TRACK_LENGTH:
+    if len(track_cells) < MIN_TRACK_LENGTH:
         return
     return track_cells
 
@@ -1418,7 +1614,44 @@ def update_centroid(labels: np.ndarray, tracks: np.ndarray, track_entry: np.ndar
             continue
         if distance < closest_candidate[1]:
             closest_candidate = [centroid, distance]
+    
+    # if no exact match, check if it is a medoid
+    medoids = [
+        calculate_medoid(np.argwhere(frame_data == label))
+        for label in unique_labels
+        if label != 0
+    ]
+    if any(np.array_equal((old_y, old_x), medoid) for medoid in medoids):
+        # if the old centroid is a medoid, return it
+        return np.array([track_id, z, old_y, old_x])
+
+    # assume cell has been modified, use closest candidate
     if closest_candidate[0] is not None:
         y, x = closest_candidate[0]
         return np.array([track_id, z, y, x])
     return None
+
+
+def calculate_medoid(coords: np.ndarray) -> np.ndarray:
+    """
+    Calculates the medoid of a set of points in a given frame.
+
+    A medoid is the point in a set of points that minimizes the sum of distances
+    to all other points in the set. It is a robust measure of central tendency,
+    often used in clustering and data analysis.
+
+    This function computes the pairwise Manhattan distances between all points
+    in the input array and identifies the point with the smallest total distance
+    to all others as the medoid.
+
+    Parameters:
+        coords (np.ndarray): A 2D NumPy array of shape (n, 2), where each row
+            represents the (y, x) coordinates of a point.
+
+    Returns:
+        np.ndarray: A 1D NumPy array of shape (2,) representing the (y, x)
+        coordinates of the medoid.
+    """
+    dists = np.sum(np.abs(coords[:, None] - coords[None, :]), axis=-1)
+    medoid_idx = np.argmin(np.sum(dists, axis=1))
+    return coords[medoid_idx]

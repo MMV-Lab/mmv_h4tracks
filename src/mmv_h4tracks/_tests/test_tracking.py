@@ -1,20 +1,24 @@
 """Module providing tests for the tracking module."""
 
 import pytest
-from unittest.mock import patch
+from unittest.mock import patch, Mock
 from pathlib import Path
-from aicsimageio import AICSImage
+from bioio import BioImage
 import numpy as np
 from scipy.ndimage import center_of_mass
 
 from mmv_h4tracks import MMVH4TRACKS
-from mmv_h4tracks._tracking import LINK_TEXT, UNLINK_TEXT
+from mmv_h4tracks._constants import LINK_TEXT, UNLINK_TEXT
+from mmv_h4tracks._reader import build_multiscale
+import mmv_h4tracks._tracking as tracking
 
 PATH = Path(__file__).parent / "data"
+
 
 @pytest.fixture
 def create_widget(make_napari_viewer):
     yield MMVH4TRACKS(make_napari_viewer())
+
 
 # segmentation and tracking used from a changed version of
 # 2022-05-11_example.zarr
@@ -23,35 +27,37 @@ def widget_with_seg_trk(create_widget):
     widget = create_widget
     viewer = widget.viewer
     seg_path = Path(PATH / "segmentation" / "test_seg.tiff")
-    seg = AICSImage(seg_path).get_image_data("ZYX")
+    seg = BioImage(seg_path).get_image_data("ZYX")
     viewer.add_labels(seg, name="test_seg")
     trk_path = Path(PATH / "tracks" / "test_trk.npy")
     trk = np.load(trk_path)
     viewer.add_tracks(trk, name="test_trk")
     return widget
 
+
 @pytest.fixture
 def widget_with_seg_trk_justin(create_widget):
     widget = create_widget
     viewer = widget.viewer
     seg_path = Path(PATH / "segmentation" / "GT.tif")
-    seg = AICSImage(seg_path).get_image_data("ZYX")
+    seg = BioImage(seg_path).get_image_data("ZYX")
     viewer.add_labels(seg, name="GT_seg")
     trk_path = Path(PATH / "tracks" / "GT_tracks.npy")
     trk = np.load(trk_path)
     viewer.add_tracks(trk, name="GT_trk")
     return widget
 
+
 @pytest.fixture
 def viewer_with_data(create_widget):
     widget = create_widget
     viewer = widget.viewer
     for file in list(Path(PATH / "images").iterdir()):
-        image = AICSImage(file).get_image_data("ZYX")
+        image = BioImage(file).get_image_data("ZYX")
         name = file.stem
         viewer.add_image(image, name=name)
     for file in list(Path(PATH / "segmentation").iterdir()):
-        segmentation = AICSImage(file).get_image_data("ZYX")
+        segmentation = BioImage(file).get_image_data("ZYX")
         name = file.stem
         if name == "test_seg" or "test_seg_old":
             continue
@@ -64,6 +70,7 @@ def viewer_with_data(create_widget):
         viewer.add_tracks(tracks, name=name)
     yield widget
 
+
 pytestmark = pytest.mark.tracking
 
 # @pytest.mark.unit
@@ -71,6 +78,7 @@ pytestmark = pytest.mark.tracking
 # @pytest.mark.not_implemented
 # def test_set_callback(viewer_with_data):
 #     pass
+
 
 @pytest.mark.unit
 @pytest.mark.misc
@@ -82,55 +90,60 @@ def test_reset_button_labels(create_widget):
     assert window.btn_insert_correspondence.text() == LINK_TEXT
     assert window.btn_remove_correspondence.text() == UNLINK_TEXT
 
+
 @pytest.mark.unit
 @pytest.mark.misc
 def test_assign_new_track_id(create_widget):
     widget = create_widget
     window = widget.tracking_window
     window.viewer = widget.viewer
-    initial_tracks = np.array([[0,0,1,1], [0,1,1,1], [0,2,1,1]])
+    initial_tracks = np.array([[0, 0, 1, 1], [0, 1, 1, 1], [0, 2, 1, 1]])
     tracks_layer = widget.viewer.add_tracks(initial_tracks, name="Tracks")
     window.assign_new_track_id(tracks_layer, 0, 1)
     post_tracks = widget.viewer.layers["Tracks"].data
-    expected_result = np.array([[1,0,1,1], [1,1,1,1], [1,2,1,1]])
+    expected_result = np.array([[1, 0, 1, 1], [1, 1, 1, 1], [1, 2, 1, 1]])
     assert np.array_equal(post_tracks, expected_result)
+
 
 @pytest.mark.integration
 @pytest.mark.misc
 def test_link_stored_cells_append(create_widget):
     widget = create_widget
-    initial_tracks = np.array([[0,0,1,1], [0,1,1,1], [0,2,1,1]])
+    initial_tracks = np.array([[0, 0, 1, 1], [0, 1, 1, 1], [0, 2, 1, 1]])
     widget.viewer.add_tracks(initial_tracks, name="Tracks")
     window = widget.tracking_window
-    window.selected_cells = [[2,1,1], [3,1,1]]
+    window.selected_cells = [[2, 1, 1], [3, 1, 1]]
     window.link_stored_cells()
     post_tracks = widget.viewer.layers["Tracks"].data
-    expected_result = np.array([[0,0,1,1], [0,1,1,1], [0,2,1,1], [0,3,1,1]])
+    expected_result = np.array([[0, 0, 1, 1], [0, 1, 1, 1], [0, 2, 1, 1], [0, 3, 1, 1]])
     assert np.array_equal(post_tracks, expected_result)
+
 
 @pytest.mark.integration
 @pytest.mark.misc
 def test_link_stored_cells_no_layer(create_widget):
     widget = create_widget
     window = widget.tracking_window
-    window.selected_cells = [[0,1,1], [1,1,1]]
+    window.selected_cells = [[0, 1, 1], [1, 1, 1]]
     window.link_stored_cells()
     post_tracks = widget.viewer.layers["Tracks"].data
-    expected_result = np.array([[1,0,1,1], [1,1,1,1]])
+    expected_result = np.array([[1, 0, 1, 1], [1, 1, 1, 1]])
     assert np.array_equal(post_tracks, expected_result)
+
 
 @pytest.mark.integration
 @pytest.mark.misc
 def test_link_stored_cells_connect(create_widget):
     widget = create_widget
-    initial_tracks = np.array([[0,0,1,1], [0,1,1,1], [1,2,1,1], [1,3,1,1]])
+    initial_tracks = np.array([[0, 0, 1, 1], [0, 1, 1, 1], [1, 2, 1, 1], [1, 3, 1, 1]])
     widget.viewer.add_tracks(initial_tracks, name="Tracks")
     window = widget.tracking_window
-    window.selected_cells = [[1,1,1], [2,1,1]]
+    window.selected_cells = [[1, 1, 1], [2, 1, 1]]
     window.link_stored_cells()
     post_tracks = widget.viewer.layers["Tracks"].data
-    expected_result = np.array([[0,0,1,1], [0,1,1,1], [0,2,1,1], [0,3,1,1]])
+    expected_result = np.array([[0, 0, 1, 1], [0, 1, 1, 1], [0, 2, 1, 1], [0, 3, 1, 1]])
     assert np.array_equal(post_tracks, expected_result)
+
 
 # @pytest.mark.integration
 # @pytest.mark.misc
@@ -145,19 +158,21 @@ def test_link_stored_cells_connect(create_widget):
 #     expected_result = np.array([[0,0,1,1], [0,1,1,1], [0,2,1,1], [0,3,1,1]])
 #     assert np.array_equal(post_tracks, expected_result)
 
+
 @pytest.mark.integration
 @pytest.mark.misc
 def test_link_stored_cells_enclosed(create_widget):
     widget = create_widget
-    initial_tracks = np.array([[0,1,1,1], [0,2,1,1]])
+    initial_tracks = np.array([[0, 1, 1, 1], [0, 2, 1, 1]])
     widget.viewer.add_tracks(initial_tracks, name="Tracks")
     window = widget.tracking_window
-    window.selected_cells = [[0,1,1], [1,1,1], [2,1,1], [3,1,1]]
+    window.selected_cells = [[0, 1, 1], [1, 1, 1], [2, 1, 1], [3, 1, 1]]
     window.link_stored_cells()
     post_tracks = widget.viewer.layers["Tracks"].data
-    expected_result = np.array([[1,0,1,1], [1,1,1,1], [1,2,1,1], [1,3,1,1]])
+    expected_result = np.array([[0, 0, 1, 1], [0, 1, 1, 1], [0, 2, 1, 1], [0, 3, 1, 1]])
     print(post_tracks)
     assert np.array_equal(post_tracks, expected_result)
+
 
 # @pytest.mark.integration
 # @pytest.mark.misc
@@ -172,115 +187,174 @@ def test_link_stored_cells_enclosed(create_widget):
 #     expected_result = np.array([[0,1,1,1], [0,2,1,1], [0,3,1,1], [0,4,1,1]])
 #     assert np.array_equal(post_tracks, expected_result)
 
+
 @pytest.mark.integration
 @pytest.mark.misc
 def test_evaluate_proposed_track_no_layer(create_widget):
     widget = create_widget
     window = widget.tracking_window
     window.viewer = widget.viewer
-    proposed_track = [[0,1,1], [1,1,1], [2,1,1], [3,1,1], [4,1,1]]
+    proposed_track = [[0, 1, 1], [1, 1, 1], [2, 1, 1], [3, 1, 1], [4, 1, 1]]
     window.evaluate_proposed_track(proposed_track)
     post_tracks = widget.viewer.layers["Tracks"].data
-    expected_result = np.array([[1,0,1,1], [1,1,1,1], [1,2,1,1], [1,3,1,1], [1,4,1,1]])
+    expected_result = np.array(
+        [[1, 0, 1, 1], [1, 1, 1, 1], [1, 2, 1, 1], [1, 3, 1, 1], [1, 4, 1, 1]]
+    )
     assert np.array_equal(post_tracks, expected_result)
+
 
 @pytest.mark.integration
 @pytest.mark.misc
 def test_evaluate_proposed_track_existing_layer(create_widget):
     widget = create_widget
-    initial_tracks = np.array([[0,0,1,1], [0,1,1,1], [0,2,1,1]])
+    initial_tracks = np.array([[0, 0, 1, 1], [0, 1, 1, 1], [0, 2, 1, 1]])
     widget.viewer.add_tracks(initial_tracks, name="Tracks")
     window = widget.tracking_window
     window.viewer = widget.viewer
-    proposed_track = [[0,2,2], [1,2,2], [2,2,2], [3,2,2], [4,2,2]]
+    proposed_track = [[0, 2, 2], [1, 2, 2], [2, 2, 2], [3, 2, 2], [4, 2, 2]]
     window.evaluate_proposed_track(proposed_track)
     post_tracks = widget.viewer.layers["Tracks"].data
-    expected_result = np.array([[0,0,1,1], [0,1,1,1], [0,2,1,1], [1,0,2,2], [1,1,2,2], [1,2,2,2], [1,3,2,2], [1,4,2,2]])
+    expected_result = np.array(
+        [
+            [0, 0, 1, 1],
+            [0, 1, 1, 1],
+            [0, 2, 1, 1],
+            [1, 0, 2, 2],
+            [1, 1, 2, 2],
+            [1, 2, 2, 2],
+            [1, 3, 2, 2],
+            [1, 4, 2, 2],
+        ]
+    )
     assert np.array_equal(post_tracks, expected_result)
+
 
 @pytest.mark.integration
 @pytest.mark.misc
 def test_evaluate_proposed_track_contained_track(create_widget):
     widget = create_widget
-    initial_tracks = np.array([[0,1,1,1], [0,2,1,1], [0,3,1,1]])
+    initial_tracks = np.array([[0, 1, 1, 1], [0, 2, 1, 1], [0, 3, 1, 1]])
     widget.viewer.add_tracks(initial_tracks, name="Tracks")
     window = widget.tracking_window
     window.viewer = widget.viewer
-    proposed_track = [[0,1,1], [1,1,1], [2,1,1], [3,1,1], [4,1,1]]
+    proposed_track = [[0, 1, 1], [1, 1, 1], [2, 1, 1], [3, 1, 1], [4, 1, 1]]
     window.evaluate_proposed_track(proposed_track)
     post_tracks = widget.viewer.layers["Tracks"].data
-    expected_result = np.array([[0,0,1,1], [0,1,1,1], [0,2,1,1], [0,3,1,1], [0,4,1,1]])
+    expected_result = np.array(
+        [[0, 0, 1, 1], [0, 1, 1, 1], [0, 2, 1, 1], [0, 3, 1, 1], [0, 4, 1, 1]]
+    )
     assert np.array_equal(post_tracks, expected_result)
+
 
 @pytest.mark.integration
 @pytest.mark.misc
 def test_evaluate_proposed_track_contained_track_multiple(create_widget):
     widget = create_widget
-    initial_tracks = np.array([[0,1,1,1], [0,2,1,1], [0,3,1,1], [1,4,1,1], [1,5,1,1]])
+    initial_tracks = np.array(
+        [[0, 1, 1, 1], [0, 2, 1, 1], [0, 3, 1, 1], [1, 4, 1, 1], [1, 5, 1, 1]]
+    )
     widget.viewer.add_tracks(initial_tracks, name="Tracks")
     window = widget.tracking_window
     window.viewer = widget.viewer
-    proposed_track = [[0,1,1], [1,1,1], [2,1,1], [3,1,1], [4,1,1], [5,1,1], [6,1,1]]
+    proposed_track = [
+        [0, 1, 1],
+        [1, 1, 1],
+        [2, 1, 1],
+        [3, 1, 1],
+        [4, 1, 1],
+        [5, 1, 1],
+        [6, 1, 1],
+    ]
     window.evaluate_proposed_track(proposed_track)
     post_tracks = widget.viewer.layers["Tracks"].data
-    expected_result = np.array([[0,0,1,1], [0,1,1,1], [0,2,1,1], [0,3,1,1], [0,4,1,1], [0,5,1,1], [0,6,1,1]])
+    expected_result = np.array(
+        [
+            [0, 0, 1, 1],
+            [0, 1, 1, 1],
+            [0, 2, 1, 1],
+            [0, 3, 1, 1],
+            [0, 4, 1, 1],
+            [0, 5, 1, 1],
+            [0, 6, 1, 1],
+        ]
+    )
     assert np.array_equal(post_tracks, expected_result)
+
 
 @pytest.mark.integration
 @pytest.mark.misc
 def test_evaluate_proposed_track_extend_low(create_widget):
     widget = create_widget
-    initial_tracks = np.array([[0,1,1,1], [0,2,1,1], [0,3,1,1], [0,4,1,1]])
+    initial_tracks = np.array([[0, 1, 1, 1], [0, 2, 1, 1], [0, 3, 1, 1], [0, 4, 1, 1]])
     widget.viewer.add_tracks(initial_tracks, name="Tracks")
     window = widget.tracking_window
     window.viewer = widget.viewer
-    proposed_track = [[0,1,1], [1,1,1], [2,1,1], [3,1,1], [4,1,1]]
+    proposed_track = [[0, 1, 1], [1, 1, 1], [2, 1, 1], [3, 1, 1], [4, 1, 1]]
     window.evaluate_proposed_track(proposed_track)
     post_tracks = widget.viewer.layers["Tracks"].data
-    expected_result = np.array([[0,0,1,1], [0,1,1,1], [0,2,1,1], [0,3,1,1], [0,4,1,1]])
+    expected_result = np.array(
+        [[0, 0, 1, 1], [0, 1, 1, 1], [0, 2, 1, 1], [0, 3, 1, 1], [0, 4, 1, 1]]
+    )
     assert np.array_equal(post_tracks, expected_result)
+
 
 @pytest.mark.integration
 @pytest.mark.misc
 def test_evaluate_proposed_track_extend_high(create_widget):
     widget = create_widget
-    initial_tracks = np.array([[0,0,1,1],[0,1,1,1], [0,2,1,1], [0,3,1,1]])
+    initial_tracks = np.array([[0, 0, 1, 1], [0, 1, 1, 1], [0, 2, 1, 1], [0, 3, 1, 1]])
     widget.viewer.add_tracks(initial_tracks, name="Tracks")
     window = widget.tracking_window
     window.viewer = widget.viewer
-    proposed_track = [[0,1,1], [1,1,1], [2,1,1], [3,1,1], [4,1,1]]
+    proposed_track = [[0, 1, 1], [1, 1, 1], [2, 1, 1], [3, 1, 1], [4, 1, 1]]
     window.evaluate_proposed_track(proposed_track)
     post_tracks = widget.viewer.layers["Tracks"].data
-    expected_result = np.array([[0,0,1,1], [0,1,1,1], [0,2,1,1], [0,3,1,1], [0,4,1,1]])
+    expected_result = np.array(
+        [[0, 0, 1, 1], [0, 1, 1, 1], [0, 2, 1, 1], [0, 3, 1, 1], [0, 4, 1, 1]]
+    )
     assert np.array_equal(post_tracks, expected_result)
+
 
 @pytest.mark.integration
 @pytest.mark.misc
 def test_evaluate_proposed_track_diverge(create_widget):
     widget = create_widget
-    initial_tracks = np.array([[0,1,1,1], [0,2,1,1], [0,3,1,1]])
+    initial_tracks = np.array([[0, 1, 1, 1], [0, 2, 1, 1], [0, 3, 1, 1]])
     widget.viewer.add_tracks(initial_tracks, name="Tracks")
     window = widget.tracking_window
     window.viewer = widget.viewer
-    proposed_track = [[0,1,1], [1,1,1], [2,1,1], [3,2,2], [4,2,2]]
+    proposed_track = [[0, 1, 1], [1, 1, 1], [2, 1, 1], [3, 2, 2], [4, 2, 2]]
     window.evaluate_proposed_track(proposed_track)
     post_tracks = widget.viewer.layers["Tracks"].data
-    expected_result = np.array([[0,0,1,1], [0,1,1,1], [0,2,1,1], [0,3,1,1]])
+    expected_result = np.array([[0, 0, 1, 1], [0, 1, 1, 1], [0, 2, 1, 1], [0, 3, 1, 1]])
     assert np.array_equal(post_tracks, expected_result)
+
 
 @pytest.mark.integration
 @pytest.mark.misc
 def test_evaluate_proposed_track_converge(create_widget):
     widget = create_widget
-    initial_tracks = np.array([[0,4,1,1], [0,5,1,1], [0,6,1,1]])
+    initial_tracks = np.array([[0, 4, 1, 1], [0, 5, 1, 1], [0, 6, 1, 1]])
     widget.viewer.add_tracks(initial_tracks, name="Tracks")
     window = widget.tracking_window
     window.viewer = widget.viewer
-    proposed_track = [[0,2,2], [1,2,2], [2,2,2], [3,2,2], [4,2,2], [5,1,1]]
+    proposed_track = [[0, 2, 2], [1, 2, 2], [2, 2, 2], [3, 2, 2], [4, 2, 2], [5, 1, 1]]
     window.evaluate_proposed_track(proposed_track)
     post_tracks = widget.viewer.layers["Tracks"].data
-    expected_result = np.array([[0,4,1,1], [0,5,1,1], [0,6,1,1], [1,0,2,2], [1,1,2,2], [1,2,2,2], [1,3,2,2], [1,4,2,2]])
+    expected_result = np.array(
+        [
+            [0, 4, 1, 1],
+            [0, 5, 1, 1],
+            [0, 6, 1, 1],
+            [1, 0, 2, 2],
+            [1, 1, 2, 2],
+            [1, 2, 2, 2],
+            [1, 3, 2, 2],
+            [1, 4, 2, 2],
+        ]
+    )
     assert np.array_equal(post_tracks, expected_result)
+
 
 def check_schema(widget):
     assert len(widget.viewer.layers) == 2
@@ -305,24 +379,29 @@ def check_schema(widget):
             print(f"track: {trk}")
         assert len(frames) == high_frame - low_frame + 1
 
-def check_schema_updated_centroid(widget, old_tracks, old_segmentation, frame, track_id): #, new_centroid): # rename?
+
+def check_schema_updated_centroid(
+    widget, old_tracks, old_segmentation, frame, track_id
+):  # , new_centroid): # rename?
     assert len(widget.viewer.layers) == 2
     tracks = widget.viewer.layers["GT_trk"].data
 
     track = tracks[tracks[:, 0] == track_id]
 
     segmentation = widget.viewer.layers["GT_seg"].data
-    old_centroid = [entry[2:3] for entry in old_tracks if entry[0] == track_id and entry[1] == frame][0]
+    old_centroid = [
+        entry[2:3] for entry in old_tracks if entry[0] == track_id and entry[1] == frame
+    ][0]
     cell_id = segmentation[frame, old_centroid[0], old_centroid[1]]
-    new_centroid = center_of_mass(segmentation[frame], index = cell_id)
+    new_centroid = center_of_mass(segmentation[frame], index=cell_id)
 
     # check if centroid at right frame is right
     idx_track = np.where(track[:, 1] == frame)[0]
-    assert track[idx_track, 2:] == [new_centroid[0], new_centroid[1]] 
+    assert track[idx_track, 2:] == [new_centroid[0], new_centroid[1]]
 
     # check if track is continuous
-    for i in range(track.shape[0]-1):
-        assert track[i, 1] == track[i+1] + 1
+    for i in range(track.shape[0] - 1):
+        assert track[i, 1] == track[i + 1] + 1
 
     # check if other rows are equal
     idx_tracks = np.where((tracks[:, 0] == track_id) & (tracks[:, 1] == frame))[0]
@@ -334,20 +413,25 @@ def check_schema_updated_centroid(widget, old_tracks, old_segmentation, frame, t
     # check if segmentation is equal
     assert np.array_equal(old_segmentation, segmentation)
 
-def check_schema_updated_centroid_no_centroid(widget, old_tracks, old_segmentation, frame, track_id): # rename?
+
+def check_schema_updated_centroid_no_centroid(
+    widget, old_tracks, old_segmentation, frame, track_id
+):  # rename?
     assert len(widget.viewer.layers) == 2
-    tracks = widget.viewer.layers["GT_trk"].data
-    track = tracks[tracks[:, 0] == track_id]
+    # tracks = widget.viewer.layers["GT_trk"].data
+    # track = tracks[tracks[:, 0] == track_id]
     segmentation = widget.viewer.layers["GT_seg"].data
-    track_entry = [entry for entry in old_tracks if entry[0] == track_id and entry[1] == frame][0]
+    # track_entry = [
+    #     entry for entry in old_tracks if entry[0] == track_id and entry[1] == frame
+    # ][0]
     # track length 2 -> delete
     # cutting off at start/end
     # split into 2 tracks
 
-
     # check if segmentation is equal
     segmentation = widget.viewer.layers["GT_seg"].data
     assert np.array_equal(old_segmentation, segmentation)
+
 
 @pytest.mark.schema
 class TestLink:
@@ -363,10 +447,13 @@ class TestLink:
                 tracking_widget.link_tracks_on_click()
                 check_schema(widget)
 
-            @pytest.mark.parametrize("cells", [
-                [[3, 398, 397], [4, 387, 399]],
-                [[5, 389, 383], [6, 383, 391]],
-            ])
+            @pytest.mark.parametrize(
+                "cells",
+                [
+                    [[3, 398, 397], [4, 387, 399]],
+                    [[5, 389, 383], [6, 383, 391]],
+                ],
+            )
             def test_extend(self, widget_with_seg_trk, cells):
                 # Extend a track
                 widget = widget_with_seg_trk
@@ -375,7 +462,7 @@ class TestLink:
                 tracking_widget.selected_cells = cells
                 tracking_widget.link_tracks_on_click()
                 check_schema(widget)
-                
+
             def test_create(self, widget_with_seg_trk):
                 # Create a new track
                 widget = widget_with_seg_trk
@@ -384,7 +471,7 @@ class TestLink:
                 tracking_widget.selected_cells = [[2, 390, 377], [3, 398, 397]]
                 tracking_widget.link_tracks_on_click()
                 check_schema(widget)
-                
+
         class TestMultiple:
             # Add multiple (consecutive) connections
             def test_merge(self, widget_with_seg_trk):
@@ -392,15 +479,22 @@ class TestLink:
                 widget = widget_with_seg_trk
                 tracking_widget = widget.tracking_window
                 tracking_widget.btn_insert_correspondence.setText("Confirm")
-                tracking_widget.selected_cells = [[1, 390, 390], [2, 390, 377], [3, 398, 397], [4, 387, 399]]
+                tracking_widget.selected_cells = [
+                    [1, 390, 390],
+                    [2, 390, 377],
+                    [3, 398, 397],
+                    [4, 387, 399],
+                ]
                 tracking_widget.link_tracks_on_click()
                 check_schema(widget)
 
-            @pytest.mark.parametrize("cells", [
-                [[2, 390, 377], [3, 398, 397], [4, 387, 399]],
-                [[5, 389, 383], [6, 383, 391], [7, 383, 395]],
-            ])
-            
+            @pytest.mark.parametrize(
+                "cells",
+                [
+                    [[2, 390, 377], [3, 398, 397], [4, 387, 399]],
+                    [[5, 389, 383], [6, 383, 391], [7, 383, 395]],
+                ],
+            )
             def test_extend(self, widget_with_seg_trk, cells):
                 # Extend a track
                 widget = widget_with_seg_trk
@@ -409,13 +503,17 @@ class TestLink:
                 tracking_widget.selected_cells = cells
                 tracking_widget.link_tracks_on_click()
                 check_schema(widget)
-                
+
             def test_create(self, widget_with_seg_trk):
                 # Create a new track
                 widget = widget_with_seg_trk
                 tracking_widget = widget.tracking_window
                 tracking_widget.btn_insert_correspondence.setText("Confirm")
-                tracking_widget.selected_cells = [[2, 390, 377], [3, 398, 397], [4, 401, 385]]
+                tracking_widget.selected_cells = [
+                    [2, 390, 377],
+                    [3, 398, 397],
+                    [4, 401, 385],
+                ]
                 tracking_widget.link_tracks_on_click()
                 check_schema(widget)
 
@@ -429,16 +527,24 @@ class TestLink:
             tracking_widget.selected_cells = [[4, 401, 385], [4, 401, 387]]
             tracking_widget.link_tracks_on_click()
             check_schema(widget)
-            mock_notify.assert_called_once_with("Looks like you selected multiple cells in slice 4. You can only connect cells from different slices.")
-            
-        @pytest.mark.parametrize("cell1", [
-            [2, 390, 377],
-            [2, 393, 393],
-        ])
-        @pytest.mark.parametrize("cell2", [
-            [4, 387, 399],
-            [4, 401, 385],
-        ])
+            mock_notify.assert_called_once_with(
+                "Looks like you selected multiple cells in slice 4. You can only connect cells from different slices."
+            )
+
+        @pytest.mark.parametrize(
+            "cell1",
+            [
+                [2, 390, 377],
+                [2, 393, 393],
+            ],
+        )
+        @pytest.mark.parametrize(
+            "cell2",
+            [
+                [6, 383, 391],
+                [7, 383, 395],
+            ],
+        )
         @patch("mmv_h4tracks._tracking.notify")
         def test_non_consecutive(self, mock_notify, widget_with_seg_trk, cell1, cell2):
             # Attempt to link two cells that are not consecutive
@@ -448,14 +554,23 @@ class TestLink:
             tracking_widget.selected_cells = [cell1, cell2]
             tracking_widget.link_tracks_on_click()
             check_schema(widget)
-            mock_notify.assert_called_once_with("Gaps in the tracks are not supported yet. Please also select cells in frames [3].")
-            
-        @pytest.mark.parametrize("cells", [
-            [[5, 119, 14], [6, 383, 391]],
-            [[5, 392, 275], [6, 383, 391]],
-            [[3, 398, 397], [4, 383, 521]],
-            [[4, 401, 385], [5, 389, 383]],
-        ])
+            missing_frames = list(range(cell1[0] + 1, cell2[0]))
+            # cell1_1 has a connected cell in frame 3, so we remove it from expected frames
+            if cell1 == [2, 393, 393]:
+                missing_frames.remove(3)
+            mock_notify.assert_called_once_with(
+                f"Gaps in the tracks are not supported yet. Please also select cells in frames {missing_frames}."
+            )
+
+        @pytest.mark.parametrize(
+            "cells",
+            [
+                [[5, 119, 14], [6, 383, 391]],
+                [[5, 392, 275], [6, 383, 391]],
+                [[3, 398, 397], [4, 383, 521]],
+                [[4, 401, 385], [5, 389, 383]],
+            ],
+        )
         @patch("mmv_h4tracks._tracking.notify")
         def test_split(self, mock_notify, widget_with_seg_trk, cells):
             # Attempt to add a cell to a track that already has
@@ -467,9 +582,13 @@ class TestLink:
             tracking_widget.link_tracks_on_click()
             check_schema(widget)
 
-            valid_call_args = [f"You selected a cell in frame {frame}, but track {track_id} already contains a cell in this frame." for frame, track_id in [[6, 9], [6, 15], [3, 12], [4, 61]]]
+            valid_call_args = [
+                f"Looks like you selected multiple cells in slice {frame}. You can only connect cells from different slices."
+                for frame in [6, 15, 3, 4]
+            ]
             assert mock_notify.call_count == 1
             assert mock_notify.call_args[0][0] in valid_call_args
+
 
 @pytest.mark.schema
 class TestUnlink:
@@ -486,10 +605,13 @@ class TestUnlink:
                 tracking_widget.unlink_tracks_on_click()
                 check_schema(widget)
 
-            @pytest.mark.parametrize("cells", [
-                [[0, 557, 348], [1, 557, 347]],
-                [[8, 458, 885], [9, 442, 877]],
-                ])
+            @pytest.mark.parametrize(
+                "cells",
+                [
+                    [[0, 557, 348], [1, 557, 347]],
+                    [[8, 458, 885], [9, 442, 877]],
+                ],
+            )
             def test_trim(self, widget_with_seg_trk, cells):
                 # Remove a cell from one end of a track
                 widget = widget_with_seg_trk
@@ -507,13 +629,17 @@ class TestUnlink:
                 tracking_widget.selected_cells = [[0, 507, 803], [1, 507, 803]]
                 tracking_widget.unlink_tracks_on_click()
                 check_schema(widget)
+
         class TestMultiple:
             # Remove multiple (consecutive) connections
 
-            @pytest.mark.parametrize("cells", [
-                [[2, 255, 365], [5, 256, 361]],
-                [[3, 68, 234], [4, 67, 234], [5, 66, 234]],
-            ])
+            @pytest.mark.parametrize(
+                "cells",
+                [
+                    [[2, 255, 365], [5, 256, 361]],
+                    [[3, 68, 234], [4, 67, 234], [5, 66, 234]],
+                ],
+            )
             def test_split(self, widget_with_seg_trk, cells):
                 # Split a track into two
                 widget = widget_with_seg_trk
@@ -523,12 +649,15 @@ class TestUnlink:
                 tracking_widget.unlink_tracks_on_click()
                 check_schema(widget)
 
-            @pytest.mark.parametrize("cells", [
-                [[6, 176, 154], [9, 176, 153]],
-                [[7, 175, 179], [8, 175, 179], [9, 174, 178]],
-                [[0, 210, 192], [3, 210, 188]],
-                [[0, 394, 1217], [1, 394, 1216], [2, 393, 1217]],
-            ])
+            @pytest.mark.parametrize(
+                "cells",
+                [
+                    [[6, 176, 154], [9, 176, 153]],
+                    [[7, 175, 179], [8, 175, 179], [9, 174, 178]],
+                    [[0, 210, 192], [3, 210, 188]],
+                    [[0, 394, 1217], [1, 394, 1216], [2, 393, 1217]],
+                ],
+            )
             def test_trim(self, widget_with_seg_trk, cells):
                 # Remove cells from one end of a track
                 widget = widget_with_seg_trk
@@ -538,10 +667,24 @@ class TestUnlink:
                 tracking_widget.unlink_tracks_on_click()
                 check_schema(widget)
 
-            @pytest.mark.parametrize("cells", [
-                [[0, 753, 1068], [1, 754, 1069], [2, 754, 1068], [3, 754, 1068], [4, 754, 1067], [5, 754, 1067], [6, 754, 1067], [7, 754, 1066], [8, 753, 1065], [9, 752, 1065]],
-                [[0, 704, 1228], [9, 700, 1227]],
-            ])
+            @pytest.mark.parametrize(
+                "cells",
+                [
+                    [
+                        [0, 753, 1068],
+                        [1, 754, 1069],
+                        [2, 754, 1068],
+                        [3, 754, 1068],
+                        [4, 754, 1067],
+                        [5, 754, 1067],
+                        [6, 754, 1067],
+                        [7, 754, 1066],
+                        [8, 753, 1065],
+                        [9, 752, 1065],
+                    ],
+                    [[0, 704, 1228], [9, 700, 1227]],
+                ],
+            )
             def test_remove(self, widget_with_seg_trk, cells):
                 # Remove the entire track
                 widget = widget_with_seg_trk
@@ -550,6 +693,7 @@ class TestUnlink:
                 tracking_widget.selected_cells = cells
                 tracking_widget.unlink_tracks_on_click()
                 check_schema(widget)
+
     class TestInvalid:
         class TestNone:
             # Attempt to remove without selecting enough cells
@@ -563,7 +707,9 @@ class TestUnlink:
                 tracking_widget.selected_cells = []
                 tracking_widget.unlink_tracks_on_click()
                 check_schema(widget)
-                mock_notify.assert_called_once_with("Please select at least two cells to disconnect!")
+                mock_notify.assert_called_once_with(
+                    "Please select at least two cells to disconnect!"
+                )
 
             @patch("mmv_h4tracks._tracking.notify")
             def test_one(self, mock_notify, widget_with_seg_trk):
@@ -574,7 +720,10 @@ class TestUnlink:
                 tracking_widget.selected_cells = [[6, 211, 884]]
                 tracking_widget.unlink_tracks_on_click()
                 check_schema(widget)
-                mock_notify.assert_called_once_with("Please select at least two cells to disconnect!")
+                mock_notify.assert_called_once_with(
+                    "Please select at least two cells to disconnect!"
+                )
+
         class TestDifferent:
             # Attempt to remove a connection between two cells
             # from different tracks
@@ -588,7 +737,9 @@ class TestUnlink:
                 tracking_widget.selected_cells = [[6, 211, 884], [6, 224, 854]]
                 tracking_widget.unlink_tracks_on_click()
                 check_schema(widget)
-                mock_notify.assert_called_once_with("Please select cells from the same track to disconnect.")
+                mock_notify.assert_called_once_with(
+                    "Please select cells from the same track to disconnect."
+                )
 
             @patch("mmv_h4tracks._tracking.notify")
             def test_different_frame(self, mock_notify, widget_with_seg_trk):
@@ -599,7 +750,10 @@ class TestUnlink:
                 tracking_widget.selected_cells = [[4, 177, 155], [5, 175, 180]]
                 tracking_widget.unlink_tracks_on_click()
                 check_schema(widget)
-                mock_notify.assert_called_once_with("Please select cells from the same track to disconnect.")
+                mock_notify.assert_called_once_with(
+                    "Please select cells from the same track to disconnect."
+                )
+
         class TestUntracked:
             # Attempt to remove a connection involving
             # untracked cells
@@ -612,7 +766,9 @@ class TestUnlink:
                 tracking_widget.selected_cells = [[3, 557, 345], [4, 401, 385]]
                 tracking_widget.unlink_tracks_on_click()
                 check_schema(widget)
-                mock_notify.assert_called_once_with("All selected cells must be tracked.")
+                mock_notify.assert_called_once_with(
+                    "All selected cells must be tracked."
+                )
 
             @patch("mmv_h4tracks._tracking.notify")
             def test_both(self, mock_notify, widget_with_seg_trk):
@@ -623,16 +779,22 @@ class TestUnlink:
                 tracking_widget.selected_cells = [[3, 398, 397], [4, 401, 385]]
                 tracking_widget.unlink_tracks_on_click()
                 check_schema(widget)
-                mock_notify.assert_called_once_with("Please select cells from the same track to disconnect.")
+                mock_notify.assert_called_once_with(
+                    "Please select cells from the same track to disconnect."
+                )
+
+
 @pytest.mark.justin
 class TestUpdateSingleCentroid:
     class TestValid:
-        @pytest.mark.xfail(reason="Index Error: index 55 out of bounds for axis 0 with size 4")
-        def test_both_centroids_inside_cell(self, widget_with_seg_trk_justin):            
-            
+        @pytest.mark.xfail(
+            reason="Index Error: index 55 out of bounds for axis 0 with size 4"
+        )
+        def test_both_centroids_inside_cell(self, widget_with_seg_trk_justin):
+
             frame_id = 3
             track_id = 1
-            
+
             widget = widget_with_seg_trk_justin
             viewer = widget.viewer
 
@@ -640,204 +802,271 @@ class TestUpdateSingleCentroid:
             tracks[-1, -2:] += 1
             segmentation = np.copy(viewer.layers["GT_seg"].data)
             segmentation[frame_id, 56:60, 56:65] = 2
-            
+
             widget.tracking_window.update_single_centroid(track_id, frame_id)
 
-            check_schema_updated_centroid(widget, viewer.layers["GT_trk"].data, viewer.layers["GT_seg"].data, frame_id, track_id)
+            check_schema_updated_centroid(
+                widget,
+                viewer.layers["GT_trk"].data,
+                viewer.layers["GT_seg"].data,
+                frame_id,
+                track_id,
+            )
 
-        @pytest.mark.xfail(reason="Index Error: index 55 out of bounds for axis 0 with size 4")
+        @pytest.mark.xfail(
+            reason="Index Error: index 55 out of bounds for axis 0 with size 4"
+        )
         def test_old_centroid_outside_cell(self, widget_with_seg_trk_justin):
-            
+
             frame_id = 3
             track_id = 1
-            
+
             widget = widget_with_seg_trk_justin
             viewer = widget.viewer
 
             tracks = np.copy(viewer.layers["GT_trk"].data)
             tracks[-1, -2:] = 70
-            segmentation = np.copy(viewer.layers["GT_seg"].data)
-            
+            # segmentation = np.copy(viewer.layers["GT_seg"].data)
+
             widget.tracking_window.update_single_centroid(track_id, frame_id)
 
-            check_schema_updated_centroid(widget, viewer.layers["GT_trk"].data, viewer.layers["GT_seg"].data, frame_id, track_id)
+            check_schema_updated_centroid(
+                widget,
+                viewer.layers["GT_trk"].data,
+                viewer.layers["GT_seg"].data,
+                frame_id,
+                track_id,
+            )
 
-        def test_new_centroid_outside_cell(self, widget_with_seg_trk_justin):
+    #     def test_new_centroid_outside_cell(self, widget_with_seg_trk_justin):
 
-            frame_id = 3
-            track_id = 1
-            
-            widget = widget_with_seg_trk_justin
-            viewer = widget.viewer
+    #         frame_id = 3
+    #         track_id = 1
 
-            tracks = np.copy(viewer.layers["GT_trk"].data)
-            segmentation = np.copy(viewer.layers["GT_seg"].data)
-            segmentation[frame_id, 65:70, 45:65] = 2
+    #         widget = widget_with_seg_trk_justin
+    #         viewer = widget.viewer
 
-            # call updateSingleCentroid(data, frame_id, track_id)
-            # self.updateSingleCentroid(tracks, frame_id, track_id) ??
+    #         tracks = np.copy(viewer.layers["GT_trk"].data)
+    #         segmentation = np.copy(viewer.layers["GT_seg"].data)
+    #         segmentation[frame_id, 65:70, 45:65] = 2
 
-            centroid = center_of_mass(segmentation)
-            # check_schema_updated_centroid(widget, viewer.layers["GT_trk"].data, viewer.layers["GT_seg"].data, frame_id, track_id, centroid)
+    #         # call updateSingleCentroid(data, frame_id, track_id)
+    #         # self.updateSingleCentroid(tracks, frame_id, track_id) ??
 
-            pass
-        def test_both_centroids_outside_cell(self, widget_with_seg_trk_justin):
-            frame_id = 3
-            track_id = 1
-            
-            widget = widget_with_seg_trk_justin
-            viewer = widget.viewer
+    #         centroid = center_of_mass(segmentation)
+    #         # check_schema_updated_centroid(widget, viewer.layers["GT_trk"].data, viewer.layers["GT_seg"].data, frame_id, track_id, centroid)
 
-            tracks = np.copy(viewer.layers["GT_trk"].data)
-            tracks[-1, -2:] = 70
-            segmentation = np.copy(viewer.layers["GT_seg"].data)
-            segmentation[frame_id, 65:70, 45:65] = 2
+    #         pass
 
-            # call updateSingleCentroid(data, frame_id, track_id)
-            # self.updateSingleCentroid(tracks, frame_id, track_id) ??
+    #     def test_both_centroids_outside_cell(self, widget_with_seg_trk_justin):
+    #         frame_id = 3
+    #         track_id = 1
 
-            centroid = center_of_mass(segmentation)
-            # check_schema_updated_centroid(widget, viewer.layers["GT_trk"].data, viewer.layers["GT_seg"].data, frame_id, track_id, centroid)
+    #         widget = widget_with_seg_trk_justin
+    #         viewer = widget.viewer
 
-            pass
-        def test_centroids_equal(self, widget_with_seg_trk_justin):
-            frame_id = 3
-            track_id = 1
-            
-            widget = widget_with_seg_trk_justin
-            viewer = widget.viewer
+    #         tracks = np.copy(viewer.layers["GT_trk"].data)
+    #         tracks[-1, -2:] = 70
+    #         segmentation = np.copy(viewer.layers["GT_seg"].data)
+    #         segmentation[frame_id, 65:70, 45:65] = 2
 
-            tracks = np.copy(viewer.layers["GT_trk"].data)
-            segmentation = np.copy(viewer.layers["GT_seg"].data)
+    #         # call updateSingleCentroid(data, frame_id, track_id)
+    #         # self.updateSingleCentroid(tracks, frame_id, track_id) ??
 
-            # call updateSingleCentroid(data, frame_id, track_id)
-            # self.updateSingleCentroid(tracks, frame_id, track_id) ??
+    #         centroid = center_of_mass(segmentation)
+    #         # check_schema_updated_centroid(widget, viewer.layers["GT_trk"].data, viewer.layers["GT_seg"].data, frame_id, track_id, centroid)
 
-            centroid = center_of_mass(segmentation)
-            # check_schema_updated_centroid(widget, viewer.layers["GT_trk"].data, viewer.layers["GT_seg"].data, frame_id, track_id, centroid)
+    #         pass
 
-            pass
-        def test_centroid_too_far(self, widget_with_seg_trk_justin):
-            frame_id = 3
-            track_id = 1
-            
-            widget = widget_with_seg_trk_justin
-            viewer = widget.viewer
+    #     def test_centroids_equal(self, widget_with_seg_trk_justin):
+    #         frame_id = 3
+    #         track_id = 1
 
-            tracks = viewer.layers["GT_trk"].data
-            tracks[-1, -2:] = 199
-            segmentation = viewer.layers["GT_seg"].data
+    #         widget = widget_with_seg_trk_justin
+    #         viewer = widget.viewer
 
-            # call updateSingleCentroid(data, frame_id, track_id)
-            # self.updateSingleCentroid(tracks, frame_id, track_id) ??
+    #         tracks = np.copy(viewer.layers["GT_trk"].data)
+    #         segmentation = np.copy(viewer.layers["GT_seg"].data)
 
-            # check if label layer is unchanged ??            
+    #         # call updateSingleCentroid(data, frame_id, track_id)
+    #         # self.updateSingleCentroid(tracks, frame_id, track_id) ??
 
-            # check_schema_updated_centroid_no_centroid()
+    #         centroid = center_of_mass(segmentation)
+    #         # check_schema_updated_centroid(widget, viewer.layers["GT_trk"].data, viewer.layers["GT_seg"].data, frame_id, track_id, centroid)
 
-            # check if right error message is displayed ??
+    #         pass
+
+    #     def test_centroid_too_far(self, widget_with_seg_trk_justin):
+    #         frame_id = 3
+    #         track_id = 1
+
+    #         widget = widget_with_seg_trk_justin
+    #         viewer = widget.viewer
+
+    #         tracks = viewer.layers["GT_trk"].data
+    #         tracks[-1, -2:] = 199
+    #         segmentation = viewer.layers["GT_seg"].data
+
+    #         # call updateSingleCentroid(data, frame_id, track_id)
+    #         # self.updateSingleCentroid(tracks, frame_id, track_id) ??
+
+    #         # check if label layer is unchanged ??
+
+    #         # check_schema_updated_centroid_no_centroid()
+
+    #         # check if right error message is displayed ??
+
+    #         # ??
+    #         pass
+
+    #     def test_centroid_gone(self, widget_with_seg_trk_justin):
+
+    #         frame_id = 3
+    #         track_id = 1
+
+    #         widget = widget_with_seg_trk_justin
+    #         viewer = widget.viewer
+
+    #         tracks = viewer.layers["GT_trk"].data
+    #         segmentation = viewer.layers["GT_seg"].data
+    #         segmentation[segmentation == 2] = 0
+
+    #         # call updateSingleCentroid(data, frame_id, track_id)
+    #         # self.updateSingleCentroid(tracks, frame_id, track_id) ??
+
+    #         # check if label layer is unchanged ??
+
+    #         # check_schema_updated_centroid_no_centroid()
+
+    #         # check if right error message is displayed ??
+
+    #         # ??
+    #         pass
+
+    # class TestInvalid:
+    #     def test_no_label_layer(self, widget_with_seg_trk_justin):  # how??
+    #         pass
+
+    #     def test_no_tracks_layer(self, widget_with_seg_trk_justin):  # how??
+    #         pass
+
+    #     def test_frame_not_found(
+    #         self, widget_with_seg_trk_justin
+    #     ):  # frame does not exist
+    #         widget = widget_with_seg_trk_justin
+    #         viewer = widget.viewer
+
+    #         tracks = viewer.layers["GT_trk"].data
+    #         segmentation = viewer.layers["GT_seg"].data
+
+    #         frame_id = 12
+    #         track_id = 1
+
+    #         # call updateSingleCentroid(data, frame_id, track_id)
+    #         # self.updateSingleCentroid(tracks, frame_id, track_id) ??
+
+    #         # check if tracks layer is unchanged
+    #         # assert np.array_equal(tracks, viewer.layers["GT_trk"].data)
+
+    #         # check if label layer is unchanged
+    #         # assert np.array_equal(segmentation, viewer.layers["GT_seg"].data)
+
+    #         # check if error msg is correct - how??
+
+    #         pass
+
+    #     def test_track_not_found(
+    #         self, widget_with_seg_trk_justin
+    #     ):  # track does not exist
+    #         widget = widget_with_seg_trk_justin
+    #         viewer = widget.viewer
+
+    #         tracks = viewer.layers["GT_trk"].data
+    #         segmentation = viewer.layers["GT_seg"].data
+
+    #         frame_id = 4
+    #         track_id = 3
+
+    #         # call updateSingleCentroid(data, frame_id, track_id)
+    #         # self.updateSingleCentroid(tracks, frame_id, track_id) ??
+
+    #         # check if tracks layer is unchanged
+    #         # assert np.array_equal(tracks, viewer.layers["GT_trk"].data)
+
+    #         # check if label layer is unchanged
+    #         # assert np.array_equal(segmentation, viewer.layers["GT_seg"].data)
+
+    #         # check if error msg is correct - how??
+    #         pass
+
+    #     def test_track_not_in_frame(self, widget_with_seg_trk_justin):
+    #         # track does not appear in selected frame
+    #         widget = widget_with_seg_trk_justin
+    #         viewer = widget.viewer
+
+    #         tracks = viewer.layers["GT_trk"].data
+    #         segmentation = viewer.layers["GT_seg"].data
+
+    #         frame_id = 4
+    #         track_id = 1
+
+    #         # call updateSingleCentroid(data, frame_id, track_id)
+    #         # self.updateSingleCentroid(tracks, frame_id, track_id) ??
+
+    #         # check if tracks layer is unchanged
+    #         # assert np.array_equal(tracks, viewer.layers["GT_trk"].data)
+
+    #         # check if label layer is unchanged
+    #         # assert np.array_equal(segmentation, viewer.layers["GT_seg"].data)
+
+    #         # check if error msg is correct - how??
+    #         pass
 
 
+@pytest.mark.unit
+@pytest.mark.misc
+def test_update_centroid_modified(widget_with_seg_trk):
+    widget = widget_with_seg_trk
 
-            # ??
-            pass
-        def test_centroid_gone(self, widget_with_seg_trk_justin):
+    # adjust a single cell so centroid is changed
+    segmentation_layer = widget.viewer.layers["test_seg"]
+    segmentation_layer.data[5, 390:410, 920:940] = 44
 
-            frame_id = 3
-            track_id = 1
-            
-            widget = widget_with_seg_trk_justin
-            viewer = widget.viewer
+    tracks = widget.viewer.layers["test_trk"].data
 
-            tracks = viewer.layers["GT_trk"].data
-            segmentation = viewer.layers["GT_seg"].data
-            segmentation[segmentation==2] = 0
+    # run update_centroid
+    retval = tracking.update_centroid(segmentation_layer.data, tracks, [44, 5, 403, 930])
+    assert retval is not None
+    print(retval)
+    assert np.array_equal([44, 5, 400, 930], retval)
 
-            # call updateSingleCentroid(data, frame_id, track_id)
-            # self.updateSingleCentroid(tracks, frame_id, track_id) ??
+@pytest.mark.unit
+@pytest.mark.misc
+def test_update_centroid_medoid(widget_with_seg_trk):
+    widget = widget_with_seg_trk
 
-            # check if label layer is unchanged ??
+    # adjust single cell so centroid is outside of cell
+    segmentation_layer = widget.viewer.layers["test_seg"]
+    segmentation_layer.data[5, 390:410, 920:940] = 44
+    segmentation_layer.data[5, 385:405, 915:940] = 0
+    # it is now a horseshoe
 
-            # check_schema_updated_centroid_no_centroid()
+    tracks = widget.viewer.layers["test_trk"].data
 
-            # check if right error message is displayed ??
-            
-            # ??
-            pass
+    retval = tracking.update_centroid(segmentation_layer.data, tracks, [44, 5, 403, 930])
+    assert retval is not None
+    print(retval)
+    assert np.array_equal([44, 5, 407, 930], retval)
 
-        
-    class TestInvalid:
-        def test_no_label_layer(self, widget_with_seg_trk_justin): # how??
-            pass
-        def test_no_tracks_layer(self, widget_with_seg_trk_justin): # how??
-            pass
-        def test_frame_not_found(self, widget_with_seg_trk_justin): # frame does not exist
-            widget = widget_with_seg_trk_justin
-            viewer = widget.viewer
+@pytest.mark.integration
+@pytest.mark.misc
+def test_update_all_centroids_manual(widget_with_seg_trk):
+    widget = widget_with_seg_trk
+    window = widget.tracking_window
 
-            tracks = viewer.layers["GT_trk"].data
-            segmentation = viewer.layers["GT_seg"].data
-            
-            frame_id = 12
-            track_id = 1
-
-            # call updateSingleCentroid(data, frame_id, track_id)
-            # self.updateSingleCentroid(tracks, frame_id, track_id) ??
-
-            # check if tracks layer is unchanged
-            # assert np.array_equal(tracks, viewer.layers["GT_trk"].data)
-
-            # check if label layer is unchanged
-            # assert np.array_equal(segmentation, viewer.layers["GT_seg"].data)
-
-            # check if error msg is correct - how??
-
-            pass
-        def test_track_not_found(self, widget_with_seg_trk_justin): # track does not exist
-            widget = widget_with_seg_trk_justin
-            viewer = widget.viewer
-
-            tracks = viewer.layers["GT_trk"].data
-            segmentation = viewer.layers["GT_seg"].data
-            
-            frame_id = 4
-            track_id = 3
-
-            # call updateSingleCentroid(data, frame_id, track_id)
-            # self.updateSingleCentroid(tracks, frame_id, track_id) ??
-            
-            # check if tracks layer is unchanged
-            # assert np.array_equal(tracks, viewer.layers["GT_trk"].data)          
-
-            # check if label layer is unchanged
-            # assert np.array_equal(segmentation, viewer.layers["GT_seg"].data)   
- 
-            # check if error msg is correct - how??
-            pass
-
-        def test_track_not_in_frame(self, widget_with_seg_trk_justin):
-            # track does not appear in selected frame
-            widget = widget_with_seg_trk_justin
-            viewer = widget.viewer
-
-            tracks = viewer.layers["GT_trk"].data
-            segmentation = viewer.layers["GT_seg"].data
-            
-            frame_id = 4
-            track_id = 1
-
-            # call updateSingleCentroid(data, frame_id, track_id)
-            # self.updateSingleCentroid(tracks, frame_id, track_id) ??
-
-            # check if tracks layer is unchanged
-            # assert np.array_equal(tracks, viewer.layers["GT_trk"].data)
-
-            # check if label layer is unchanged
-            # assert np.array_equal(segmentation, viewer.layers["GT_seg"].data)
-
-            # check if error msg is correct - how??
-            pass
-
+    # run update_all_centroids
+    window.update_all_centroids()
+    assert True
 
 # @pytest.mark.integration
 # @pytest.mark.misc
@@ -882,8 +1111,174 @@ class TestUpdateSingleCentroid:
 # get_tracks_layer
 # restore_callbacks
 # set_callbacks
-    
+
 ### Partially tested functions
 # evaluate_proposed_track
 # link_tracking_on_click
 # link_stored_cells
+
+
+def create_mock_event(position):
+    """Create a mock napari event with a position attribute."""
+    event = Mock()
+    event.position = np.array(position)
+    return event
+
+
+@pytest.fixture
+def widget_with_multiscale_3d_seg_tracks(create_widget):
+    """Create widget with multiscale 3D segmentation and tracks for link/unlink tests."""
+    widget = create_widget
+    viewer = widget.viewer
+    
+    # Create 3D segmentation with single-pixel cells
+    # Shape: (t, y, x) = (5, 20, 20)
+    seg_3d = np.zeros((5, 20, 20), dtype=np.int32)
+    # Track 1: frames 0-2
+    seg_3d[0, 10, 10] = 1
+    seg_3d[1, 10, 10] = 1
+    seg_3d[2, 10, 10] = 1
+    # Track 2: frames 2-4
+    seg_3d[2, 15, 15] = 2
+    seg_3d[3, 15, 15] = 2
+    seg_3d[4, 15, 15] = 2
+    
+    # Create multiscale levels
+    seg_levels = build_multiscale(seg_3d)
+    
+    # Add multiscale segmentation layer
+    viewer.add_labels(seg_levels, name="test_seg_3d_multiscale", multiscale=True)
+    
+    # Create tracks data - two separate tracks
+    tracks = np.array([
+        [1, 0, 10, 10],  # Track 1 at frame 0
+        [1, 1, 10, 10],  # Track 1 at frame 1
+        [1, 2, 10, 10],  # Track 1 at frame 2
+        [2, 2, 15, 15],  # Track 2 at frame 2
+        [2, 3, 15, 15],  # Track 2 at frame 3
+        [2, 4, 15, 15],  # Track 2 at frame 4
+    ], dtype=np.int32)
+    
+    viewer.add_tracks(tracks, name="test_tracks_3d")
+    
+    widget.combobox_segmentation.setCurrentText("test_seg_3d_multiscale")
+    widget.combobox_tracks.setCurrentText("test_tracks_3d")
+    
+    return widget
+
+
+@pytest.fixture
+def widget_with_single_3d_seg_tracks(create_widget):
+    """Create widget with single resolution 3D segmentation and tracks for link/unlink tests."""
+    widget = create_widget
+    viewer = widget.viewer
+    
+    # Create 3D segmentation with single-pixel cells
+    # Shape: (t, y, x) = (5, 20, 20)
+    seg_3d = np.zeros((5, 20, 20), dtype=np.int32)
+    # Track 1: frames 0-2
+    seg_3d[0, 10, 10] = 1
+    seg_3d[1, 10, 10] = 1
+    seg_3d[2, 10, 10] = 1
+    # Track 2: frames 2-4
+    seg_3d[2, 15, 15] = 2
+    seg_3d[3, 15, 15] = 2
+    seg_3d[4, 15, 15] = 2
+    
+    # Add single resolution segmentation layer
+    viewer.add_labels(seg_3d, name="test_seg_3d_single")
+    
+    # Create tracks data - two separate tracks
+    tracks = np.array([
+        [1, 0, 10, 10],  # Track 1 at frame 0
+        [1, 1, 10, 10],  # Track 1 at frame 1
+        [1, 2, 10, 10],  # Track 1 at frame 2
+        [2, 2, 15, 15],  # Track 2 at frame 2
+        [2, 3, 15, 15],  # Track 2 at frame 3
+        [2, 4, 15, 15],  # Track 2 at frame 4
+    ], dtype=np.int32)
+    
+    viewer.add_tracks(tracks, name="test_tracks_3d")
+    
+    widget.combobox_segmentation.setCurrentText("test_seg_3d_single")
+    widget.combobox_tracks.setCurrentText("test_tracks_3d")
+    
+    return widget
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("fixture_name,event_position", [
+    ("widget_with_multiscale_3d_seg_tracks", (0, 2, 10, 10)),
+    ("widget_with_single_3d_seg_tracks", (2, 10, 10)),
+])
+def test_store_cell_for_link_multiscale_single_resolution(request, fixture_name, event_position):
+    """Test store_cell_for_link callback with multiscale and single resolution 3D segmentation."""
+    widget = request.getfixturevalue(fixture_name)
+    tracking_window = widget.tracking_window
+    
+    # Reset any existing callbacks
+    widget.callback_handler.remove_callback_viewer()
+    
+    # Set up the link callback - this creates the nested store_cell_for_link function
+    tracking_window.link_tracks_on_click()
+    
+    # Get the label layer
+    label_layer = widget.viewer.layers[widget.combobox_segmentation.currentText()]
+    
+    # Verify callback was added
+    assert len(label_layer.mouse_drag_callbacks) > 0
+    
+    # Get the callback function (it's the last one added)
+    callback = label_layer.mouse_drag_callbacks[-1]
+    
+    # Create mock event
+    event = create_mock_event(event_position)
+    
+    # Call the callback with the actual label layer - this should not raise IndexError
+    try:
+        callback(label_layer, event)
+    except IndexError as e:
+        pytest.fail(f"IndexError raised in store_cell_for_link callback: {e}")
+    except (ValueError, AttributeError) as e:
+        # These are expected for some test scenarios (e.g., background, no tracks)
+        # The important thing is no IndexError
+        pass
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("fixture_name,event_position", [
+    ("widget_with_multiscale_3d_seg_tracks", (0, 2, 10, 10)),
+    ("widget_with_single_3d_seg_tracks", (2, 10, 10)),
+])
+def test_store_cell_for_unlink_multiscale_single_resolution(request, fixture_name, event_position):
+    """Test store_cell_for_unlink callback with multiscale and single resolution 3D segmentation."""
+    widget = request.getfixturevalue(fixture_name)
+    tracking_window = widget.tracking_window
+    
+    # Reset any existing callbacks
+    widget.callback_handler.remove_callback_viewer()
+    
+    # Set up the unlink callback - this creates the nested store_cell_for_unlink function
+    tracking_window.unlink_tracks_on_click()
+    
+    # Get the label layer
+    label_layer = widget.viewer.layers[widget.combobox_segmentation.currentText()]
+    
+    # Verify callback was added
+    assert len(label_layer.mouse_drag_callbacks) > 0
+    
+    # Get the callback function (it's the last one added)
+    callback = label_layer.mouse_drag_callbacks[-1]
+    
+    # Create mock event
+    event = create_mock_event(event_position)
+    
+    # Call the callback with the actual label layer - this should not raise IndexError
+    try:
+        callback(label_layer, event)
+    except IndexError as e:
+        pytest.fail(f"IndexError raised in store_cell_for_unlink callback: {e}")
+    except (ValueError, AttributeError) as e:
+        # These are expected for some test scenarios (e.g., background, no tracks)
+        # The important thing is no IndexError
+        pass

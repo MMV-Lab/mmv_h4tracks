@@ -21,10 +21,11 @@ from scipy import ndimage
 from scipy.optimize import linear_sum_assignment
 from numba import jit
 
+from ._constants import IOU_THRESHOLD
 from ._logger import notify
 from ._grabber import grab_layer
+from ._utils import preserve_and_filter_graph
 from mmv_h4tracks._logger import handle_exception
-from mmv_h4tracks import IOU_THRESHOLD
 
 
 class EvaluationWindow(QWidget):
@@ -166,7 +167,12 @@ class EvaluationWindow(QWidget):
         """
         Start the evaluate segmentation worker to keep UI responsive
         """
+        self.parent.callback_handler.remove_callback_viewer()
+        print("Segmentation evaluation started…")
         worker = self.evaluate_segmentation()
+        worker.finished.connect(
+            lambda: print("Segmentation evaluation finished.")
+        )
         worker.start()
 
     @thread_worker
@@ -181,7 +187,7 @@ class EvaluationWindow(QWidget):
         except ValueError as exc:
             handle_exception(exc)
             return
-        eval_seg = self.parent.initial_layers[0]
+        eval_seg = self.parent.eval_cache[0]
         if eval_seg is None:
             notify(
                 "Segmentation and Tracks must be imported from zarr currently! (Drag and drop will be supported in the future). As a work-around for now export your data as zarr and import it."
@@ -330,7 +336,12 @@ class EvaluationWindow(QWidget):
         """
         Start the evaluate tracking worker to keep UI responsive
         """
+        self.parent.callback_handler.remove_callback_viewer()
+        print("Tracking evaluation started…")
         worker = self.evaluate_tracking()
+        worker.finished.connect(
+            lambda: print("Tracking evaluation finished.")
+        )
         worker.start()
 
     @thread_worker
@@ -348,8 +359,8 @@ class EvaluationWindow(QWidget):
             handle_exception(exc)
             return
 
-        eval_tracks = self.parent.initial_layers[1]
-        eval_seg = self.parent.initial_layers[0]
+        eval_tracks = self.parent.eval_cache[1]
+        eval_seg = self.parent.eval_cache[0]
         if eval_tracks is None or eval_seg is None:
             notify(
                 "Segmentation and Tracks must be imported from zarr currently! (Drag and drop will be supported in the future). As a work-around for now export your data as zarr and import it."
@@ -428,7 +439,11 @@ class EvaluationWindow(QWidget):
             row[2] = int(np.rint(centroid[0]))
             row[3] = int(np.rint(centroid[1]))
 
+        # Preserve and filter graph from existing layer
+        filtered_graph = preserve_and_filter_graph(tracks_layer, tracks)
         tracks_layer.data = tracks
+        if filtered_graph:
+            tracks_layer.graph = filtered_graph
 
     def get_segmentation_fault(self, gt_seg, eval_seg, evaluation_function):
         """Calculate the segmentation fault value.
