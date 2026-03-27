@@ -2,6 +2,8 @@ import multiprocessing
 from multiprocessing import Pool
 import json
 import logging
+import shutil
+from datetime import datetime
 from pathlib import Path
 import time
 
@@ -9,13 +11,15 @@ import numpy as np
 from cellpose import models, core
 from napari.qt.threading import thread_worker
 from qtpy.QtCore import Qt
-from qtpy.QtWidgets import QApplication
+from qtpy.QtWidgets import QApplication, QMessageBox, QInputDialog
 from scipy import ndimage, optimize, spatial
 
 from ._constants import APPROX_INF, MAX_MATCHING_DIST, CUSTOM_MODEL_PREFIX
 from ._grabber import grab_layer
-from ._logger import handle_exception
+from ._session_trained_models import overlap_training_frames_with_stack
+from ._logger import handle_exception, notify
 from ._utils import preserve_and_filter_graph
+from ._train import _sanitize_model_name_fragment
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -198,11 +202,267 @@ def display_models(widget, hardcoded_models, custom_models):
     widget.combobox_segmentation.addItems(custom_models)
 
 
+def custom_model_weights_basename(display_name: str) -> str:
+    """Filesystem basename (no extension) for a custom model weights file."""
+    stem = _sanitize_model_name_fragment(display_name)
+    return stem if stem else "model"
+
+
+def is_custom_model_display_name_taken(widget, display_name: str) -> bool:
+    """True if the display name or its on-disk basename is already used."""
+    if display_name in widget.custom_models:
+        return True
+    stem = custom_model_weights_basename(display_name)
+    dest = Path(__file__).parent / "models" / "custom_models" / stem
+    return dest.is_file()
+
+
+def persist_custom_model_entry(widget, display_name: str, source_weights: Path, params: dict) -> Path:
+    """
+    Copy Cellpose weights into ``models/custom_models/`` (no file extension) and update ``custom_models.json``.
+    """
+    package_root = Path(__file__).parent
+    dest_dir = package_root / "models" / "custom_models"
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    stem = custom_model_weights_basename(display_name)
+    dest_path = dest_dir / stem
+    shutil.copy2(source_weights, dest_path)
+    widget.custom_models[display_name] = {"filename": dest_path.name, "params": params}
+    with open(package_root / "custom_models.json", "w") as file:
+        json.dump(widget.custom_models, file)
+    return dest_path
+
+
+@thread_worker(connect={"errored": handle_exception})
+def _run_cellpose_training_worker(widget, export_dir):
+    """
+    Run Cellpose CLI training on ``export_dir`` only.
+
+    UI (save dialog, persist, prune) runs on the main thread when the worker finishes.
+    """
+    from ._train import train_cellpose
+
+    QApplication.setOverrideCursor(Qt.WaitCursor)
+    try:
+        return train_cellpose(Path(export_dir))
+    finally:
+        QApplication.restoreOverrideCursor()
+
+
+def start_cellpose_training_worker(widget, export_dir: Path):
+    """Start train-only worker; ``returned`` emits ``CellposeCliTrainingResult``."""
+    return _run_cellpose_training_worker(widget, export_dir)
+
+
+def _load_segmentation_image_data(widget, demo: bool):
+    """
+    Load the selected image layer as a squeezed numpy volume (same as segmentation worker).
+    Returns (data_squeezed, removed_dims).
+    """
+    viewer = widget.viewer
+    layer = grab_layer(viewer, widget.parent.combobox_image.currentText())
+
+    if isinstance(layer.data, (list, tuple)) and len(layer.data) > 0:
+        data = layer.data[0]
+    elif isinstance(layer.data, np.ndarray):
+        data = layer.data
+    else:
+        try:
+            data = layer.data[0] if hasattr(layer.data, "__getitem__") else layer.data
+        except (TypeError, IndexError, AttributeError):
+            data = layer.data
+
+    data = np.asarray(data)
+    original_shape = data.shape
+    data_squeezed = np.squeeze(data)
+    if data_squeezed.ndim not in (2, 3):
+        raise ValueError(
+            f"Data must be 2D or 3D after removing trivial dimensions. "
+            f"Original shape: {original_shape}, squeezed: {data_squeezed.shape}"
+        )
+    removed_dims = [i for i, size in enumerate(original_shape) if size == 1]
+    if demo:
+        data_squeezed = data_squeezed[0:5]
+    return data_squeezed, removed_dims
+
+
+def _fill_excluded_frames_from_labels_layer(
+    viewer,
+    mask: np.ndarray,
+    exclude_set: frozenset,
+    labels_layer_name: str,
+    image_ndim: int,
+) -> None:
+    """Copy label data for excluded time indices from the training segmentation layer."""
+    from ._train import _frame_2d, _get_array_from_layer
+
+    try:
+        seg_layer = grab_layer(viewer, labels_layer_name)
+        seg_vol = _get_array_from_layer(seg_layer)
+    except Exception as exc:
+        logger.warning(
+            "Excluded frames not copied from labels layer %r: %s",
+            labels_layer_name,
+            exc,
+        )
+        return
+    if image_ndim == 2:
+        if 0 not in exclude_set:
+            return
+        try:
+            sl = _frame_2d(seg_vol, 0)
+            if sl.shape != mask.shape:
+                logger.warning(
+                    "Training labels shape %s does not match output %s; frame not copied.",
+                    sl.shape,
+                    mask.shape,
+                )
+                return
+            mask[:] = np.asarray(sl, dtype=np.int32)
+        except ValueError as exc:
+            logger.warning("Could not copy 2D excluded frame from training labels: %s", exc)
+        return
+    for i in exclude_set:
+        try:
+            sl = _frame_2d(seg_vol, i)
+            if sl.shape != mask[i].shape:
+                logger.warning(
+                    "Training labels shape %s does not match output slice %s at t=%s; skipped.",
+                    sl.shape,
+                    mask[i].shape,
+                    i,
+                )
+                continue
+            mask[i] = np.asarray(sl, dtype=np.int32)
+        except ValueError as exc:
+            logger.warning("Could not copy excluded frame %s from training labels: %s", i, exc)
+
+
+def _read_tiff_path(path: Path) -> np.ndarray:
+    try:
+        import tifffile
+
+        return np.asarray(tifffile.imread(str(path)))
+    except ImportError:
+        import imageio.v2 as imageio
+
+        return np.asarray(imageio.imread(str(path)))
+
+
+def _fill_excluded_frames_from_training_masks_dir(
+    mask: np.ndarray,
+    exclude_set: frozenset,
+    masks_dir: Path,
+    layer_prefix: str,
+    image_ndim: int,
+) -> None:
+    """Fill excluded time indices from saved training mask TIFFs on disk."""
+    masks_dir = Path(masks_dir)
+    for i in exclude_set:
+        tif_path = masks_dir / f"{layer_prefix}_frame_{i:05d}_masks.tif"
+        if not tif_path.is_file():
+            logger.warning("Missing training mask %s; frame left blank.", tif_path)
+            continue
+        try:
+            sl = _read_tiff_path(tif_path)
+        except Exception as exc:
+            logger.warning("Could not read %s: %s", tif_path, exc)
+            continue
+        if image_ndim == 2:
+            if i != 0:
+                continue
+            if sl.shape != mask.shape:
+                logger.warning(
+                    "Training mask shape %s does not match output %s; frame not copied.",
+                    sl.shape,
+                    mask.shape,
+                )
+                continue
+            mask[:] = np.asarray(sl, dtype=np.int32)
+        else:
+            if i < 0 or i >= mask.shape[0]:
+                continue
+            if sl.shape != mask[i].shape:
+                logger.warning(
+                    "Training mask shape %s does not match output slice %s at t=%s; skipped.",
+                    sl.shape,
+                    mask[i].shape,
+                    i,
+                )
+                continue
+            mask[i] = np.asarray(sl, dtype=np.int32)
+
+
+def _prompt_exclude_training_frames_if_applicable(
+    widget, demo: bool
+) -> tuple[frozenset, Path | None, str | None] | None:
+    """
+    If the current model was trained this session on the same image layer (by sanitized
+    name vs mask filename prefix) and overlapping frames, ask whether to exclude those
+    frames from prediction.
+
+    Returns
+    -------
+    None
+        Predict all frames (no exclusion).
+    (frozenset[int], Path | None, str | None)
+        Excluded frame indices, training masks directory, layer prefix for mask filenames.
+    """
+    selected = widget.combobox_segmentation.currentText()
+    if not selected.startswith(CUSTOM_MODEL_PREFIX):
+        return None
+    display_name = selected[len(CUSTOM_MODEL_PREFIX) :]
+    meta = widget.parent.session_trained_models.get(display_name)
+    if not meta:
+        return None
+    image_name = widget.parent.combobox_image.currentText()
+    if _sanitize_model_name_fragment(image_name) != meta["layer_prefix"]:
+        return None
+    try:
+        data_squeezed, _ = _load_segmentation_image_data(widget, demo)
+    except ValueError:
+        return None
+    training_frames = tuple(meta["frames"])
+    if data_squeezed.ndim == 2:
+        overlap = overlap_training_frames_with_stack(
+            training_frames, 1, is_single_frame_2d=True
+        )
+    else:
+        n_in_stack = data_squeezed.shape[0]
+        overlap = overlap_training_frames_with_stack(
+            training_frames, n_in_stack, is_single_frame_2d=False
+        )
+    if not overlap:
+        return None
+    frames_str = ", ".join(str(f) for f in overlap)
+    text = (
+        f"Frames {frames_str} were used to train this model on this image layer.\n\n"
+        "Exclude those frames from Cellpose prediction and copy their labels from the "
+        "saved training mask TIFFs instead?\n\n"
+        "(Yes: predict only other frames; training frames are filled from disk. "
+        "No: run Cellpose on the full stack.)"
+    )
+    reply = QMessageBox.question(
+        widget,
+        "napari",
+        text,
+        QMessageBox.Yes | QMessageBox.No,
+        QMessageBox.Yes,
+    )
+    if reply != QMessageBox.Yes:
+        return None
+    masks_dir = Path(meta["training_masks_dir"])
+    layer_prefix = meta["layer_prefix"]
+    return (frozenset(overlap), masks_dir, layer_prefix)
+
+
 def run_segmentation(widget):
     """
     Calls segmentation without demo flag set
     """
-    worker = _segment_image(widget)
+    pr = _prompt_exclude_training_frames_if_applicable(widget, False)
+    excl, mdir, mpfx = (None, None, None) if pr is None else pr
+    worker = _segment_image(widget, False, excl, None, mdir, mpfx)
     worker.returned.connect(_add_segmentation_to_viewer)
 
 
@@ -210,7 +470,9 @@ def run_demo_segmentation(widget):
     """
     Calls segmentation with the demo flag set
     """
-    worker = _segment_image(widget, True)
+    pr = _prompt_exclude_training_frames_if_applicable(widget, True)
+    excl, mdir, mpfx = (None, None, None) if pr is None else pr
+    worker = _segment_image(widget, True, excl, None, mdir, mpfx)
     worker.returned.connect(_add_segmentation_to_viewer)
 
 
@@ -226,10 +488,18 @@ def _add_segmentation_to_viewer(widget_and_mask):
     widget, mask = widget_and_mask
     labels = widget.viewer.add_labels(mask, name="calculated segmentation")
     widget.parent.combobox_segmentation.setCurrentText(labels.name)
+    notify("Segmentation finished.")
 
 
 @thread_worker(connect={"errored": handle_exception})
-def _segment_image(widget, demo=False):
+def _segment_image(
+    widget,
+    demo=False,
+    exclude_frame_indices=None,
+    copy_excluded_frames_from_layer=None,
+    excluded_frames_masks_dir: Path | None = None,
+    excluded_frames_layer_prefix: str | None = None,
+):
     """
     Run segmentation on the raw image data
 
@@ -237,6 +507,14 @@ def _segment_image(widget, demo=False):
     ----------
     demo : Boolean
         whether or not to do a demo of the segmentation
+    exclude_frame_indices : frozenset[int] | None
+        Time indices (into ``data_squeezed``) not passed to Cellpose.
+    copy_excluded_frames_from_layer : str | None
+        Labels layer name to copy excluded frames from; if None, excluded frames stay zero.
+    excluded_frames_masks_dir : Path | None
+        If set with ``excluded_frames_layer_prefix``, excluded frames load from mask TIFFs here.
+    excluded_frames_layer_prefix : str | None
+        Prefix in ``{prefix}_frame_XXXXX_masks.tif`` filenames.
     Returns
     -------
     widget, mask
@@ -245,47 +523,8 @@ def _segment_image(widget, demo=False):
     logger.info("Starting segmentation")
     QApplication.setOverrideCursor(Qt.WaitCursor)
 
-    viewer = widget.viewer
-
-    layer = grab_layer(viewer, widget.parent.combobox_image.currentText())
-    
-    # Check if the image layer is multiscale or single resolution
-    # Multiscale layers have data as a list/tuple of arrays (one per resolution level)
-    # Single resolution layers have data as a numpy array
-    if isinstance(layer.data, (list, tuple)) and len(layer.data) > 0:
-        # Multiscale layer - get full resolution (first level, level 0)
-        data = layer.data[0]
-    elif isinstance(layer.data, np.ndarray):
-        # Single resolution layer - use data directly
-        data = layer.data
-    else:
-        # Fallback: try to access as indexable, or use directly
-        try:
-            data = layer.data[0] if hasattr(layer.data, '__getitem__') else layer.data
-        except (TypeError, IndexError, AttributeError):
-            data = layer.data
-    
-    # Convert to numpy array to ensure we have the actual data, not a lazy view/proxy
-    # This is critical for multiscale layers where data might be lazy-loaded
-    data = np.asarray(data)
-    
-    # Remove trivial dimensions (size 1) for processing
-    original_shape = data.shape
-    data_squeezed = np.squeeze(data)
-    
-    # Check if data is 2D or 3D after removing trivial dimensions
-    if data_squeezed.ndim not in [2, 3]:
-        raise ValueError(
-            f"Data must be 2D or 3D after removing trivial dimensions. "
-            f"Original shape: {original_shape}, shape after removing trivial dimensions: {data_squeezed.shape}"
-        )
-
-    # Track which dimensions were removed (size 1 in original) and their positions
-    # This will be used to restore the shape later
-    removed_dims = [i for i, size in enumerate(original_shape) if size == 1]
-    
-    if demo:
-        data_squeezed = data_squeezed[0:5]
+    data_squeezed, removed_dims = _load_segmentation_image_data(widget, demo)
+    exclude_set = exclude_frame_indices or frozenset()
 
     selected_model = widget.combobox_segmentation.currentText()
     parameters = _get_parameters(widget, selected_model)
@@ -296,33 +535,61 @@ def _segment_image(widget, demo=False):
             gpu=True, pretrained_model=parameters.pop("model_path")
         )
         if data_squeezed.ndim == 2:
-            # For 2D data, process directly as a single image
-            mask, _, _ = model.eval(data_squeezed, **parameters)
-            # Keep as 2D - shape restoration will handle adding dimensions back
+            if 0 in exclude_set:
+                mask = np.zeros_like(data_squeezed, dtype=np.int32)
+            else:
+                mask, _, _ = model.eval(data_squeezed, **parameters)
         else:
-            # For 3D data, iterate over first dimension
-            mask = []
-            for layer_slice in data_squeezed:
-                layer_mask, _, _ = model.eval(layer_slice, **parameters)
-                mask.append(layer_mask)
-            mask = np.array(mask)
+            n_t = data_squeezed.shape[0]
+            mask = np.zeros((n_t, *data_squeezed.shape[1:]), dtype=np.int32)
+            for i in range(n_t):
+                if i in exclude_set:
+                    continue
+                layer_mask, _, _ = model.eval(data_squeezed[i], **parameters)
+                mask[i] = layer_mask
     else:
         logger.info("Using CPU for segmentation")
-        # set process limit
         AMOUNT_OF_PROCESSES = widget.parent.get_process_limit()
         logger.debug("Amount of processes: " + str(AMOUNT_OF_PROCESSES))
 
         if data_squeezed.ndim == 2:
-            # For 2D data, process directly as a single image
-            mask = segment_slice_cpu(data_squeezed, parameters)
-            # Keep as 2D - shape restoration will handle adding dimensions back
+            if 0 in exclude_set:
+                mask = np.zeros_like(data_squeezed, dtype=np.int32)
+            else:
+                mask = segment_slice_cpu(data_squeezed, parameters)
         else:
-            # For 3D data, iterate over first dimension
-            data_with_parameters = [(layer_slice, parameters) for layer_slice in data_squeezed]
+            n_t = data_squeezed.shape[0]
+            mask = np.zeros((n_t, *data_squeezed.shape[1:]), dtype=np.int32)
+            indices_to_run = [i for i in range(n_t) if i not in exclude_set]
+            if indices_to_run:
+                data_with_parameters = [
+                    (data_squeezed[i], parameters) for i in indices_to_run
+                ]
+                with Pool(AMOUNT_OF_PROCESSES) as p:
+                    parts = p.starmap(segment_slice_cpu, data_with_parameters)
+                for idx, layer_mask in zip(indices_to_run, parts):
+                    mask[idx] = layer_mask
 
-            with Pool(AMOUNT_OF_PROCESSES) as p:
-                mask = p.starmap(segment_slice_cpu, data_with_parameters)
-                mask = np.asarray(mask)
+    if (
+        exclude_set
+        and excluded_frames_masks_dir is not None
+        and excluded_frames_layer_prefix
+    ):
+        _fill_excluded_frames_from_training_masks_dir(
+            mask,
+            exclude_set,
+            Path(excluded_frames_masks_dir),
+            excluded_frames_layer_prefix,
+            data_squeezed.ndim,
+        )
+    elif exclude_set and copy_excluded_frames_from_layer:
+        _fill_excluded_frames_from_labels_layer(
+            widget.viewer,
+            mask,
+            exclude_set,
+            copy_excluded_frames_from_layer,
+            data_squeezed.ndim,
+        )
 
     # Ensure mask is a proper numpy array before shape restoration
     if isinstance(mask, list):
@@ -681,6 +948,77 @@ def _process_matches(matches):
     return tracks.astype(int)
 
 
+def scan_mmvh4tracks_training_temp_on_startup(main_widget) -> None:
+    """
+    On plugin load: clean stale training temp dirs; offer to resume interrupted training.
+    """
+    from ._train import (
+        _safe_rmtree,
+        classify_mmvh4tracks_training_dir,
+        iter_mmvh4tracks_train_directories,
+        parse_layer_prefix_and_frames_from_masks_dir,
+        parse_model_fragment_from_train_dir_name,
+        resume_model_fragment_needs_confirm,
+    )
+
+    seg = main_widget.segmentation_window
+    dirs = list(iter_mmvh4tracks_train_directories())
+    interrupted: list[Path] = []
+    for d in dirs:
+        kind = classify_mmvh4tracks_training_dir(d)
+        if kind in ("empty", "masks_only", "incomplete"):
+            _safe_rmtree(d)
+        elif kind == "interrupted":
+            interrupted.append(d)
+
+    for d in interrupted:
+        mtime = datetime.fromtimestamp(d.stat().st_mtime)
+        day_str = mtime.strftime("%Y-%m-%d %H:%M")
+        fragment = parse_model_fragment_from_train_dir_name(d.name) or d.name
+        reply = QMessageBox.question(
+            main_widget,
+            "napari",
+            f"It seems training on data {fragment} on {day_str} was interrupted.\n\n"
+            "Would you like to try again?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            _safe_rmtree(d)
+            continue
+        model_name = fragment
+        if resume_model_fragment_needs_confirm(fragment):
+            name, ok = QInputDialog.getText(
+                main_widget,
+                "Model name",
+                "Confirm model name for resumed training:",
+                text=fragment,
+            )
+            if not ok or not name.strip():
+                _safe_rmtree(d)
+                continue
+            model_name = name.strip()
+        if is_custom_model_display_name_taken(seg, model_name):
+            notify(
+                f"A custom model named {model_name!r} already exists. "
+                "Removing interrupted export."
+            )
+            _safe_rmtree(d)
+            continue
+        parsed = parse_layer_prefix_and_frames_from_masks_dir(d)
+        if not parsed:
+            _safe_rmtree(d)
+            continue
+        layer_prefix, train_frames = parsed
+        worker = start_cellpose_training_worker(seg, d)
+        worker.returned.connect(
+            lambda r, mn=model_name, tf=train_frames, lp=layer_prefix: seg._complete_cellpose_training_after_worker(
+                r, mn, tf, lp
+            )
+        )
+        return
+
+
 def remove_frame_from_track(tracks, track_entry):
     """Handles the logic for removing a frame from a track.
     Includes splitting the track if necessary."""
@@ -691,7 +1029,6 @@ def remove_frame_from_track(tracks, track_entry):
 
     # get all track entries with the same track id
     track = tracks[tracks[:, 0] == track_id]
-    print(f"track: {track}")
 
     # if entries with lower or higher frame exist:
     # connection(s) must be removed
@@ -713,7 +1050,6 @@ def remove_frame_from_track(tracks, track_entry):
             indices_to_remove.append(lower_indices[0])
         if len(higher_indices) == 1:
             indices_to_remove.append(higher_indices[0])
-    print(f"indices_to_remove: {indices_to_remove}")
 
     # if more than the one entry needs to be removed no splitting
     # is necessary
@@ -749,11 +1085,8 @@ def split_noncontinuous_tracks(tracks):
 
         # if the track is not continuous, split it
         if not np.all(np.diff(current_track[:, 1]) == 1):
-            print(f"Splitting track {track_id}")
-            print(f"Current track: {current_track}")
             # get the indices of the noncontinuous entries
             jumped_indices = np.where(np.diff(current_track[:, 1]) != 1)[0] + 1
-            print(f"Jumped indices: {jumped_indices}")
             # get lists of indices to update
             # each list starts at the first entry and goes to the
             # end of the track
@@ -763,11 +1096,9 @@ def split_noncontinuous_tracks(tracks):
                 index_in_tracks = np.where(
                     np.all(tracks == current_track[index], axis=1)
                 )[0][0]
-                print(f"index_in_tracks: {index_in_tracks}")
                 indices_to_update.append(
                     np.arange(len(current_track) - index) + index_in_tracks
                 )
-            print(f"Indices to update: {indices_to_update}")
 
             for index_list in indices_to_update:
                 # get the new track id

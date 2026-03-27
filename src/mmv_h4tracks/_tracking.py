@@ -675,7 +675,6 @@ class TrackingWindow(QWidget):
 
         self.selected_cells = sorted(self.selected_cells, key=lambda x: x[0])
         selected_cells_array = np.array(self.selected_cells)
-        print(f"Selected cells array (sorted): {selected_cells_array}")
 
         # assure no two selected cells are from the same slice
         if len(selected_cells_array) > 0 and len(selected_cells_array[:, 0]) != len(
@@ -863,8 +862,6 @@ class TrackingWindow(QWidget):
             notify("All selected cells must be tracked.")
             return
 
-        print(f"Selected cells initially: {self.selected_cells}")
-
         min_z = np.min(np.asarray(self.selected_cells)[:, 0])
         max_z = np.max(np.asarray(self.selected_cells)[:, 0])
         track = [
@@ -883,28 +880,23 @@ class TrackingWindow(QWidget):
                 and cell[0] >= min_z
                 and cell[0] <= max_z
             ]
-            print(f"Missing cells: {missing_cells}")
             self.selected_cells.extend(missing_cells)
 
         self.selected_cells.sort(key=lambda x: x[0])
 
-        print(f"Selected cells with missing cells added: {self.selected_cells}")
         # if only part of the track is removed the outermost entries must remain
         if min_z_track < min_z:
             self.selected_cells.pop(0)
         if max_z_track > max_z:
             self.selected_cells.pop(-1)
-        print(f"Cells being removed: {self.selected_cells}")
 
         # remove the selected cells from the tracks
         self.remove_entries_from_tracks(self.selected_cells)
         if min_z_track < min_z and max_z_track > max_z:
-            print("Splitting track")
             # split the track
             track_id = np.amax(tracks_layer.data[:, 0]) + 1
             if self.cached_tracks is not None:
                 track_id = np.amax(self.cached_tracks[:, 0]) + 1
-            print(f"New track id: {track_id}")
             track_to_reassign = [entry for entry in track if entry[0] >= max_z]
             self.remove_entries_from_tracks(track_to_reassign)
             self.add_entries_to_tracks(track_to_reassign, track_id)
@@ -1137,7 +1129,6 @@ class TrackingWindow(QWidget):
         cells : list
             The cells to remove
         """
-        print(f"Amount of cells to remove: {len(cells)}")
         tracks_layer = self.get_tracks_layer()
         if tracks_layer is None:
             raise ValueError("Can't remove tracks from non-existing layer")
@@ -1156,7 +1147,6 @@ class TrackingWindow(QWidget):
                 mask &= ~np.all(tracks[:, 1:4] == cell, axis=1)
             tracks = tracks[mask]
             track_results.append(tracks)
-            print(f"Removed {old_length - len(tracks)} cells")
         if len(track_results[0]) < 1:
             if len(track_results) > 1 and len(track_results[1]) > 1:
                 # Preserve and filter graph from existing layer
@@ -1238,7 +1228,6 @@ class TrackingWindow(QWidget):
         track_id : int
             The track id of the cells
         """
-        print(f"Amount of cells to add: {len(cells)}")
         if len(cells) == 0:
             msg = QMessageBox()
             msg.setIcon(QMessageBox.Warning)
@@ -1325,7 +1314,6 @@ class TrackingWindow(QWidget):
         """
         Updates all centroids to account for changed segmentation
         """
-        print("Updating all centroids")
         self.parent.callback_handler.remove_callback_viewer()
         label_layer = grab_layer(
             self.viewer, self.parent.combobox_segmentation.currentText()
@@ -1373,7 +1361,6 @@ class TrackingWindow(QWidget):
         tracks_layer.data = updated_tracks
         if filtered_graph:
             tracks_layer.graph = filtered_graph
-        print("Finished updating all centroids")
         self.parent.align_cache = label_data
 
     def update_single_centroid(self, track_id: int, frame: int):

@@ -10,14 +10,28 @@ from qtpy.QtWidgets import (
     QGridLayout,
     QSizePolicy,
     QApplication,
+    QFrame,
+    QLabel,
+    QLineEdit,
+    QToolButton,
+    QFileDialog,
 )
 from qtpy.QtCore import Qt
 from scipy import ndimage
 import napari
 import pandas as pd
 
+from ._constants import CUSTOM_MODEL_PREFIX
 from ._logger import notify, handle_exception
 from ._grabber import grab_layer
+from ._train import (
+    export_cellpose_training_pairs,
+    parse_use_frames,
+    _sanitize_model_name_fragment,
+)
+from pathlib import Path
+import shutil
+
 from ._utils import preserve_and_filter_graph
 import mmv_h4tracks._processing as processing
 from .add_models import ModelWindow
@@ -136,6 +150,46 @@ class SegmentationWindow(QWidget):
             self.btn_add_custom_model, 2, 0, 1, -1
         )
 
+        train_cellpose_section = QFrame()
+        train_cellpose_section.setLayout(QVBoxLayout())
+        train_cellpose_section.layout().setContentsMargins(0, 0, 0, 0)
+        btn_toggle_train_cellpose = QToolButton()
+        btn_toggle_train_cellpose.setCheckable(True)
+        btn_toggle_train_cellpose.setChecked(False)
+        btn_toggle_train_cellpose.setArrowType(Qt.RightArrow)
+        btn_toggle_train_cellpose.setText("Train new Cellpose model")
+        btn_toggle_train_cellpose.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        btn_toggle_train_cellpose.setStyleSheet(
+            "QToolButton { border: none; text-align: left; }"
+        )
+        train_cellpose_content = QWidget()
+        train_cellpose_content.setVisible(False)
+        train_cellpose_grid = QGridLayout(train_cellpose_content)
+        train_cellpose_grid.setContentsMargins(20, 0, 0, 0)
+        train_cellpose_grid.setColumnStretch(1, 1)
+        label_use_frames = QLabel("Use frames")
+        self.lineedit_use_frames = QLineEdit()
+        label_model_name = QLabel("Model name")
+        self.lineedit_model_name = QLineEdit()
+        self.btn_train_cellpose_model = QPushButton("Train model")
+        self.btn_train_cellpose_model.clicked.connect(self._on_train_cellpose_clicked)
+        train_cellpose_grid.addWidget(label_use_frames, 0, 0)
+        train_cellpose_grid.addWidget(self.lineedit_use_frames, 0, 1)
+        train_cellpose_grid.addWidget(label_model_name, 1, 0)
+        train_cellpose_grid.addWidget(self.lineedit_model_name, 1, 1)
+        train_cellpose_grid.addWidget(self.btn_train_cellpose_model, 2, 0, 1, 2)
+
+        def _on_train_cellpose_toggled(checked: bool) -> None:
+            train_cellpose_content.setVisible(checked)
+            btn_toggle_train_cellpose.setArrowType(
+                Qt.DownArrow if checked else Qt.RightArrow
+            )
+
+        btn_toggle_train_cellpose.toggled.connect(_on_train_cellpose_toggled)
+        train_cellpose_section.layout().addWidget(btn_toggle_train_cellpose)
+        train_cellpose_section.layout().addWidget(train_cellpose_content)
+        automatic_segmentation.layout().addWidget(train_cellpose_section, 3, 0, 1, -1)
+
         segmentation_correction = QGroupBox("Segmentation correction")
         segmentation_correction.setLayout(QGridLayout())
         segmentation_correction.layout().addWidget(h_spacer_2, 0, 0, 1, -1)
@@ -171,6 +225,102 @@ class SegmentationWindow(QWidget):
         self.parent.callback_handler.remove_callback_viewer()
         self.model_window = ModelWindow(self)
         self.model_window.show()
+
+    def _on_train_cellpose_clicked(self):
+        frames = parse_use_frames(self.lineedit_use_frames.text())
+        if frames is None:
+            notify(
+                "Enter one or more frame indices as integers separated by commas."
+            )
+            return
+        model_name = self.lineedit_model_name.text().strip()
+        if not model_name:
+            notify("Please enter a model name.")
+            return
+        if processing.is_custom_model_display_name_taken(self, model_name):
+            notify(
+                "A custom model with this name (or on-disk file) already exists. "
+                "Choose another name."
+            )
+            return
+        self.parent.callback_handler.remove_callback_viewer()
+        image_layer_name = self.parent.combobox_image.currentText()
+        segmentation_layer_name = self.parent.combobox_segmentation.currentText()
+        layer_prefix = _sanitize_model_name_fragment(image_layer_name)
+        try:
+            export_result = export_cellpose_training_pairs(
+                self.viewer,
+                image_layer_name,
+                segmentation_layer_name,
+                frames,
+                model_name,
+            )
+        except ValueError as exc:
+            notify(str(exc))
+            return
+
+        worker = processing.start_cellpose_training_worker(
+            self, export_result.export_dir
+        )
+
+        train_frames = tuple(export_result.frame_indices)
+
+        worker.returned.connect(
+            lambda r, mn=model_name, tf=train_frames, lp=layer_prefix: self._complete_cellpose_training_after_worker(
+                r, mn, tf, lp
+            )
+        )
+
+    def _complete_cellpose_training_after_worker(
+        self,
+        result,
+        model_name: str,
+        train_frames: tuple[int, ...],
+        layer_prefix: str,
+    ) -> None:
+        """Main thread: save ``.pth``, register custom model, prune export, session meta."""
+        from ._train import prune_cellpose_training_export_dir, _safe_rmtree
+
+        notify(
+            "Cellpose training finished. Please choose where to save the model weights "
+            "as a .pth file (this is required to register the custom model)."
+        )
+        default_path = str(Path.home() / f"{model_name}.pth")
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save trained model",
+            default_path,
+            "PyTorch weights (*.pth)",
+        )
+        if not path:
+            _safe_rmtree(result.export_dir)
+            notify("Save cancelled; training export removed and model not registered.")
+            return
+        if not path.lower().endswith(".pth"):
+            path = path + ".pth"
+        try:
+            shutil.copy2(result.source_weights_path, path)
+            params = {
+                "diameter": float(result.diam_mean),
+                "channels": [0, 0],
+            }
+            processing.persist_custom_model_entry(
+                self, model_name, result.source_weights_path, params
+            )
+            prune_cellpose_training_export_dir(result.export_dir)
+            hardcoded_models, custom_models = processing.read_models(self)
+            processing.display_models(self, hardcoded_models, custom_models)
+            self.parent.register_session_trained_model(
+                model_name,
+                result.export_dir,
+                layer_prefix,
+                train_frames,
+            )
+            combo_name = CUSTOM_MODEL_PREFIX + model_name
+            self.combobox_segmentation.setCurrentText(combo_name)
+            notify(f"Registered custom model: {combo_name}")
+        except Exception as exc:
+            notify(str(exc))
 
     def toggle_segmentation_button(self, text):
         """
