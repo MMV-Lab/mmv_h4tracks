@@ -73,7 +73,9 @@ To train your own Cellpose model, [this](https://cellpose.readthedocs.io/en/late
 
 ##### Train new models
 
-The plugin also allows users to train new Cellpose models. To do so, ... (select frames), (click ??), (add parameters...).
+The plugin also allows users to train new Cellpose models. For this, expand “Train new Cellpose model”, select the frames to use for training, provide a model name, and click “Train model.” Once training finishes successfully, a popup prompts the user to choose the path where the model should be saved.
+
+By default, training runs for 200 epochs. If the “Longer Training” option is enabled, the number of training epochs is increased to 1000.
 
 Models trained within the plugin remain available after restarting it. If the plugin is reinstalled or the model needs to be used on another computer, it can simply be re-added as a custom model.
 
