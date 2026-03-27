@@ -15,11 +15,6 @@ from qtpy.QtWidgets import (
     QLineEdit,
     QToolButton,
     QFileDialog,
-    QFrame,
-    QLabel,
-    QLineEdit,
-    QToolButton,
-    QFileDialog,
 )
 from qtpy.QtCore import Qt, QRegularExpression
 from qtpy.QtGui import QRegularExpressionValidator
@@ -28,18 +23,10 @@ import napari
 import pandas as pd
 
 from ._constants import CUSTOM_MODEL_PREFIX
-from ._constants import CUSTOM_MODEL_PREFIX
 from ._logger import notify, handle_exception
 from ._grabber import grab_layer
 from ._train import (
-    export_cellpose_training_pairs,
-    parse_use_frames,
-    _sanitize_model_name_fragment,
-)
-from pathlib import Path
-import shutil
-
-from ._train import (
+    CELLPOSE_TRAIN_N_EPOCHS_LONG,
     export_cellpose_training_pairs,
     parse_use_frames,
     _sanitize_model_name_fragment,
@@ -194,13 +181,19 @@ class SegmentationWindow(QWidget):
             QRegularExpressionValidator(QRegularExpression(r"^[\w-]*$"))
         )
         self.lineedit_model_name.setMaxLength(80)
+        self.checkbox_cellpose_longer_training = QCheckBox("Longer Training")
+        self.checkbox_cellpose_longer_training.setToolTip(
+            "enabling will make training take 5x as long, but may produce better results"
+        )
+        self.checkbox_cellpose_longer_training.setChecked(False)
         self.btn_train_cellpose_model = QPushButton("Train model")
         self.btn_train_cellpose_model.clicked.connect(self._on_train_cellpose_clicked)
         train_cellpose_grid.addWidget(label_use_frames, 0, 0)
         train_cellpose_grid.addWidget(self.lineedit_use_frames, 0, 1)
         train_cellpose_grid.addWidget(label_model_name, 1, 0)
         train_cellpose_grid.addWidget(self.lineedit_model_name, 1, 1)
-        train_cellpose_grid.addWidget(self.btn_train_cellpose_model, 2, 0, 1, 2)
+        train_cellpose_grid.addWidget(self.checkbox_cellpose_longer_training, 2, 0, 1, 2)
+        train_cellpose_grid.addWidget(self.btn_train_cellpose_model, 3, 0, 1, 2)
 
         def _on_train_cellpose_toggled(checked: bool) -> None:
             train_cellpose_content.setVisible(checked)
@@ -283,8 +276,13 @@ class SegmentationWindow(QWidget):
             notify(str(exc))
             return
 
+        train_epochs = (
+            CELLPOSE_TRAIN_N_EPOCHS_LONG
+            if self.checkbox_cellpose_longer_training.isChecked()
+            else None
+        )
         worker = processing.start_cellpose_training_worker(
-            self, export_result.export_dir
+            self, export_result.export_dir, n_epochs=train_epochs
         )
 
         train_frames = tuple(export_result.frame_indices)
@@ -612,12 +610,12 @@ class SegmentationWindow(QWidget):
 
         self.parent.callback_handler.add_callback_viewer(_replace_label)
         QApplication.setOverrideCursor(Qt.CrossCursor)
-        """for layer in self.viewer.layers:
-
-            @layer.mouse_drag_callbacks.append
-            def _replace_label(layer, event):
-                self._replace_label(event)
-                self._update_callbacks()"""
+        # Previous napari callback style (replaced by callback_handler):
+        # for layer in self.viewer.layers:
+        #     @layer.mouse_drag_callbacks.append
+        #     def _replace_label(layer, event):
+        #         self._replace_label(event)
+        #         self._update_callbacks()
 
     def _add_merge_callback(self):
         """

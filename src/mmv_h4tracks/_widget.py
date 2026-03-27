@@ -206,6 +206,24 @@ class MMVH4TRACKS(QWidget):
         computation_mode.layout().addWidget(h_spacer_1, 0, 0, 1, -1)
         computation_mode.layout().addWidget(self.rb_eco, 1, 0)
         computation_mode.layout().addWidget(rb_heavy, 1, 1)
+        computation_mode.layout().setColumnStretch(2, 1)
+
+        self.label_gpu_status = QLabel()
+        try:
+            from cellpose import core as _cellpose_core
+
+            _gpu_ok = bool(_cellpose_core.use_gpu())
+        except Exception:
+            _gpu_ok = False
+        if _gpu_ok:
+            self.label_gpu_status.setText("GPU: available")
+            self.label_gpu_status.setStyleSheet("color: #6a9e6a;")
+        else:
+            self.label_gpu_status.setText("GPU: not available")
+            self.label_gpu_status.setStyleSheet("color: #888888;")
+        self.label_gpu_status.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        computation_mode.layout().addWidget(self.label_gpu_status, 1, 2)
+
         self.file_interaction = QGroupBox()
         self.file_interaction.setLayout(QGridLayout())
         self.file_interaction.layout().addWidget(h_spacer_3, 0, 0, 1, -1)

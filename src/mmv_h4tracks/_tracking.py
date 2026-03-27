@@ -89,7 +89,7 @@ class TrackingWindow(QWidget):
             "Overlap-based tracking (single cell)"
         )  # TODO: clicking an already tracked cell breaks the onclicks/cursor
         btn_auto_track.setToolTip(
-            "Click on a cell to track based on overlap \n\n" "Hotkey: S"
+            "Click on a cell to track based on overlap \n\n" "Hotkey: G"
         )
 
         self.btn_remove_correspondence = QPushButton(UNLINK_TEXT)
@@ -555,54 +555,53 @@ class TrackingWindow(QWidget):
                 label_layer = grab_layer(
                     self.viewer, self.parent.combobox_segmentation.currentText()
                 )
+
+                # Extract position based on segmentation layer dimensionality
+                # For multiscale layers, data is a list/tuple, so get ndim from first level
+                if isinstance(label_layer.data, (list, tuple)):
+                    ndim = label_layer.data[0].ndim
+                    # Get the actual data array (first level for multiscale)
+                    data_array = label_layer.data[0]
+                else:
+                    ndim = label_layer.data.ndim
+                    data_array = label_layer.data
+                if ndim == 2:
+                    raise ValueError("2D image can not be tracked.")
+                position = tuple(int(round(p)) for p in event.position[-ndim:])
+                z = int(position[0])
+                selected_id = label_layer.get_value(position)
+                if selected_id == 0:
+                    raise ValueError("The background can not be tracked.")
+                # Convert to numpy array to handle dask arrays from OME-Zarr
+                # This is critical for lazy-loaded data
+                frame_data = np.asarray(data_array[z])
+                centroid = ndimage.center_of_mass(
+                    frame_data,
+                    labels=frame_data,
+                    index=selected_id,
+                )
+                # Ensure centroid elements are converted to Python scalars
+                # Convert to numpy array first to handle both tuple and array returns
+                centroid = [int(np.rint(c.item())) for c in np.asarray(centroid)]
+                cell = [z, centroid[0], centroid[1]]
+                # For multiscale, need to check against first level
+                if isinstance(label_layer.data, (list, tuple)):
+                    check_data = label_layer.data[0]
+                else:
+                    check_data = label_layer.data
+                if check_data[*cell] != selected_id:
+                    # centroid outside of the cell, calculate medoid instead
+                    coords = np.argwhere(frame_data == selected_id)
+                    medoid = [z, *calculate_medoid(coords)]
+                    notify(f"Calculated medoid: {medoid}")
+                    cell = medoid
+                if cell not in self.selected_cells:
+                    self.selected_cells.append(cell)
+                    self.selected_cells.sort()
             except ValueError as exc:
                 handle_exception(exc)
-                self.reset_button_labels
                 self.parent.callback_handler.remove_callback_viewer()
                 return
-
-            # Extract position based on segmentation layer dimensionality
-            # For multiscale layers, data is a list/tuple, so get ndim from first level
-            if isinstance(label_layer.data, (list, tuple)):
-                ndim = label_layer.data[0].ndim
-                # Get the actual data array (first level for multiscale)
-                data_array = label_layer.data[0]
-            else:
-                ndim = label_layer.data.ndim
-                data_array = label_layer.data
-            if ndim == 2:
-                raise ValueError("2D image can not be tracked.")
-            position = tuple(int(round(p)) for p in event.position[-ndim:])
-            z = int(position[0])
-            selected_id = label_layer.get_value(position)
-            if selected_id == 0:
-                raise ValueError("The background can not be tracked.")
-            # Convert to numpy array to handle dask arrays from OME-Zarr
-            # This is critical for lazy-loaded data
-            frame_data = np.asarray(data_array[z])
-            centroid = ndimage.center_of_mass(
-                frame_data,
-                labels=frame_data,
-                index=selected_id,
-            )
-            # Ensure centroid elements are converted to Python scalars
-            # Convert to numpy array first to handle both tuple and array returns
-            centroid = [int(np.rint(c.item())) for c in np.asarray(centroid)]
-            cell = [z, centroid[0], centroid[1]]
-            # For multiscale, need to check against first level
-            if isinstance(label_layer.data, (list, tuple)):
-                check_data = label_layer.data[0]
-            else:
-                check_data = label_layer.data
-            if check_data[*cell] != selected_id:
-                # centroid outside of the cell, calculate medoid instead
-                coords = np.argwhere(frame_data == selected_id)
-                medoid = [z, *calculate_medoid(coords)]
-                notify(f"Calculated medoid: {medoid}")
-                cell = medoid
-            if cell not in self.selected_cells:
-                self.selected_cells.append(cell)
-                self.selected_cells.sort()
 
         # check if button text is confirm or link
         if self.btn_insert_correspondence.text() == LINK_TEXT:
@@ -752,43 +751,42 @@ class TrackingWindow(QWidget):
                 label_layer = grab_layer(
                     self.viewer, self.parent.combobox_segmentation.currentText()
                 )
+
+                # Extract position based on segmentation layer dimensionality
+                # For multiscale layers, data is a list/tuple, so get ndim from first level
+                if isinstance(label_layer.data, (list, tuple)):
+                    ndim = label_layer.data[0].ndim
+                    # Get the actual data array (first level for multiscale)
+                    data_array = label_layer.data[0]
+                else:
+                    ndim = label_layer.data.ndim
+                    data_array = label_layer.data
+                if ndim == 2:
+                    raise ValueError("2D image can not be tracked.")
+                position = tuple(int(round(p)) for p in event.position[-ndim:])
+                z = position[0]
+                selected_id = label_layer.get_value(position)
+                if selected_id == 0:
+                    raise ValueError("The background can not be tracked.")
+                # Convert to numpy array to handle dask arrays from OME-Zarr
+                # This is critical for lazy-loaded data
+                frame_data = np.asarray(data_array[z])
+                centroid = ndimage.center_of_mass(
+                    frame_data,
+                    labels=frame_data,
+                    index=selected_id,
+                )
+                # Ensure centroid elements are converted to Python scalars
+                # Convert to numpy array first to handle both tuple and array returns
+                centroid = [int(np.rint(c.item())) for c in np.asarray(centroid)]
+                cell = [z, centroid[0], centroid[1]]
+                if cell not in self.selected_cells:
+                    self.selected_cells.append(cell)
+                    self.selected_cells.sort(key=lambda x: x[0])
             except ValueError as exc:
                 handle_exception(exc)
-                self.reset_button_labels
                 self.parent.callback_handler.remove_callback_viewer()
                 return
-
-            # Extract position based on segmentation layer dimensionality
-            # For multiscale layers, data is a list/tuple, so get ndim from first level
-            if isinstance(label_layer.data, (list, tuple)):
-                ndim = label_layer.data[0].ndim
-                # Get the actual data array (first level for multiscale)
-                data_array = label_layer.data[0]
-            else:
-                ndim = label_layer.data.ndim
-                data_array = label_layer.data
-            if ndim == 2:
-                raise ValueError("2D image can not be tracked.")
-            position = tuple(int(round(p)) for p in event.position[-ndim:])
-            z = position[0]
-            selected_id = label_layer.get_value(position)
-            if selected_id == 0:
-                raise ValueError("The background can not be tracked.")
-            # Convert to numpy array to handle dask arrays from OME-Zarr
-            # This is critical for lazy-loaded data
-            frame_data = np.asarray(data_array[z])
-            centroid = ndimage.center_of_mass(
-                frame_data,
-                labels=frame_data,
-                index=selected_id,
-            )
-            # Ensure centroid elements are converted to Python scalars
-            # Convert to numpy array first to handle both tuple and array returns
-            centroid = [int(np.rint(c.item())) for c in np.asarray(centroid)]
-            cell = [z, centroid[0], centroid[1]]
-            if cell not in self.selected_cells:
-                self.selected_cells.append(cell)
-                self.selected_cells.sort(key=lambda x: x[0])
 
         # check if button text is confirm or unlink
         if self.btn_remove_correspondence.text() == UNLINK_TEXT:
