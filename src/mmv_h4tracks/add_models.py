@@ -11,10 +11,12 @@ from qtpy.QtWidgets import (
     QPushButton,
     QWidget,
 )
-from qtpy.QtCore import Qt
+from qtpy.QtCore import Qt, QRegularExpression
+from qtpy.QtGui import QRegularExpressionValidator
 import napari
 
 import mmv_h4tracks._processing as processing
+from mmv_h4tracks._logger import notify
 
 SHOW_OPTIONS_TEXT = "Show advanced options"
 HIDE_OPTIONS_TEXT = "Hide advanced options"
@@ -74,6 +76,10 @@ class ModelWindow(QWidget):
 
         # Lineedits
         self.lineedit_name = QLineEdit()
+        self.lineedit_name.setValidator(
+            QRegularExpressionValidator(QRegularExpression(r"^[\w-]*$"))
+        )
+        self.lineedit_name.setMaxLength(80)
         self.lineedit_file = QLineEdit()
         self.lineedit_diameter = QLineEdit()
         self.lineedit_channels = QLineEdit("0, 0")
@@ -179,6 +185,20 @@ class ModelWindow(QWidget):
         """
         Adds a custom Cellpose model to the list of models
         """
+        raw_name = self.lineedit_name.text().strip()
+        if not raw_name:
+            notify("Please enter a model name.")
+            return
+        if not getattr(self, "model_path", None):
+            notify("Please select a model file.")
+            return
+        canonical = processing.custom_model_weights_basename(raw_name)
+        if processing.is_custom_model_display_name_taken(self.parent, raw_name):
+            notify(
+                "A custom model with this name already exists. Choose another name."
+            )
+            return
+
         QApplication.setOverrideCursor(Qt.WaitCursor)
         params = {
             "diameter": float(self.lineedit_diameter.text()),
@@ -242,16 +262,16 @@ class ModelWindow(QWidget):
         if rescale != "":
             params["rescale"] = float(rescale)
 
-        model_entry = {"filename": Path(self.model_path).name, "params": params}
-        self.parent.custom_models[self.lineedit_name.text()] = model_entry
+        model_entry = {"filename": canonical, "params": params}
+        self.parent.custom_models[canonical] = model_entry
         with open(Path(__file__).parent / "custom_models.json", "w") as file:
             json.dump(self.parent.custom_models, file)
 
         old_path = Path(self.model_path)
         path = Path(__file__).parent / "models" / "custom_models"
         path.mkdir(parents=True, exist_ok=True)
-        new_path = Path(__file__).parent / "models" / "custom_models" / old_path.name
-        shutil.copy(old_path, new_path)
+        new_path = path / canonical
+        shutil.copy2(old_path, new_path)
 
         hardcoded_models, custom_models = processing.read_models(self.parent)
         processing.display_models(self.parent, hardcoded_models, custom_models)

@@ -9,6 +9,7 @@ Export raw / segmentation pairs for Cellpose training (per-frame TIFF files).
 from __future__ import annotations
 
 import importlib
+import logging
 import re
 import shutil
 import sys
@@ -169,11 +170,6 @@ def parse_model_fragment_from_train_dir_name(dir_name: str) -> str | None:
     if not dir_name.startswith(MMV_TRAIN_DIR_PREFIX):
         return None
     return dir_name[len(MMV_TRAIN_DIR_PREFIX) :]
-
-
-def resume_model_fragment_needs_confirm(fragment: str) -> bool:
-    """If True, user should confirm/edit the name (may include sanitization artifacts)."""
-    return not bool(re.fullmatch(r"[A-Za-z0-9-]+", fragment))
 
 
 def classify_mmvh4tracks_training_dir(path: Path) -> str:
@@ -386,6 +382,43 @@ def _diameter_hint_from_cellpose_checkpoint(weights_path: Path) -> float:
     return 30.0
 
 
+def _cellpose_stderr_logger_setup(*_args, **_kwargs):
+    """
+    Drop-in replacement for ``cellpose.io.logger_setup`` when training from napari.
+
+    Cellpose's default setup uses a file plus ``StreamHandler(sys.stdout)``; under Qt,
+    stdout often does not reach the terminal. We configure **stderr** only (no log
+    files). Accepts the same arguments as ``logger_setup`` but ignores them.
+    """
+
+    fmt = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
+    handler = logging.StreamHandler(sys.stderr)
+    handler.setLevel(logging.INFO)
+    handler.setFormatter(fmt)
+    logging.basicConfig(level=logging.INFO, handlers=[handler], force=True)
+
+    root = logging.getLogger()
+    root.setLevel(logging.INFO)
+    for name in (
+        "cellpose",
+        "cellpose.io",
+        "cellpose.train",
+        "cellpose.models",
+        "cellpose.cli",
+        "cellpose.__main__",
+    ):
+        logging.getLogger(name).setLevel(logging.INFO)
+
+    io_logger = logging.getLogger("cellpose.io")
+    try:
+        from cellpose.version import version_str as _cp_version
+
+        io_logger.info("%s (training logs -> stderr)", _cp_version)
+    except Exception:
+        io_logger.info("Cellpose training logs -> stderr")
+    return io_logger, None
+
+
 def train_cellpose(export_dir: Path) -> CellposeCliTrainingResult:
     """
     Run ``python -m cellpose`` training on ``export_dir`` (must match plugin export layout).
@@ -398,16 +431,24 @@ def train_cellpose(export_dir: Path) -> CellposeCliTrainingResult:
         "cellpose",
         "--dir", str(export_dir),
         "--train",
-        "--n_epochs", "20",
+        "--n_epochs", "200",
         "--pretrained_model", "nuclei",
         "--chan", "0",
         "--chan2", "0",
         "--min_train_mask", "1",
-        "--verbose"
+        "--verbose",
+        "--use_gpu"
     ]
 
-    cellpose_main = importlib.import_module("cellpose.__main__")
-    cellpose_main.main()
+    import cellpose.io as _cellpose_io
+
+    _saved_logger_setup = _cellpose_io.logger_setup
+    _cellpose_io.logger_setup = _cellpose_stderr_logger_setup
+    try:
+        cellpose_main = importlib.import_module("cellpose.__main__")
+        cellpose_main.main()
+    finally:
+        _cellpose_io.logger_setup = _saved_logger_setup
 
     weights = find_cellpose_cli_weights(export_dir)
     diam = _diameter_hint_from_cellpose_checkpoint(weights)

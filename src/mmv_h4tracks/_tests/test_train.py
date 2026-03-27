@@ -14,7 +14,6 @@ from mmv_h4tracks._train import (
     prune_cellpose_training_export_dir,
     classify_mmvh4tracks_training_dir,
     parse_layer_prefix_and_frames_from_masks_dir,
-    resume_model_fragment_needs_confirm,
     _sanitize_model_name_fragment,
     _cellpose_training_raw_cyx,
     _frame_2d,
@@ -233,13 +232,6 @@ def test_parse_layer_prefix_and_frames_from_masks_dir(tmp_path):
     assert frames == (2, 10)
 
 
-def test_resume_model_fragment_needs_confirm():
-    assert not resume_model_fragment_needs_confirm("GFP")
-    assert not resume_model_fragment_needs_confirm("abc123")
-    assert resume_model_fragment_needs_confirm("my_model")
-    assert resume_model_fragment_needs_confirm("a_b")
-
-
 def test_is_custom_model_display_name_taken_key_only():
     from mmv_h4tracks._processing import is_custom_model_display_name_taken
 
@@ -251,3 +243,22 @@ def test_is_custom_model_display_name_taken_key_only():
     assert not is_custom_model_display_name_taken(w, "fresh")
     w.custom_models["used"] = {}
     assert is_custom_model_display_name_taken(w, "used")
+
+
+def test_persist_custom_model_entry_json_key_matches_filename(tmp_path, monkeypatch):
+    """``custom_models`` key and ``filename`` field are both the canonical basename."""
+    import mmv_h4tracks._processing as proc
+
+    fake_pkg = tmp_path / "mmv_h4tracks"
+    fake_pkg.mkdir(parents=True)
+    (fake_pkg / "models" / "custom_models").mkdir(parents=True)
+    monkeypatch.setattr(proc, "__file__", str(fake_pkg / "_processing.py"))
+    source = tmp_path / "w.pth"
+    source.write_bytes(b"x")
+    widget = Mock()
+    widget.custom_models = {}
+    proc.persist_custom_model_entry(widget, "a b", source, {})
+    canonical = proc.custom_model_weights_basename("a b")
+    assert canonical == "a_b"
+    assert widget.custom_models[canonical]["filename"] == canonical
+    assert (fake_pkg / "models" / "custom_models" / canonical).is_file()

@@ -15,15 +15,30 @@ from qtpy.QtWidgets import (
     QLineEdit,
     QToolButton,
     QFileDialog,
+    QFrame,
+    QLabel,
+    QLineEdit,
+    QToolButton,
+    QFileDialog,
 )
-from qtpy.QtCore import Qt
+from qtpy.QtCore import Qt, QRegularExpression
+from qtpy.QtGui import QRegularExpressionValidator
 from scipy import ndimage
 import napari
 import pandas as pd
 
 from ._constants import CUSTOM_MODEL_PREFIX
+from ._constants import CUSTOM_MODEL_PREFIX
 from ._logger import notify, handle_exception
 from ._grabber import grab_layer
+from ._train import (
+    export_cellpose_training_pairs,
+    parse_use_frames,
+    _sanitize_model_name_fragment,
+)
+from pathlib import Path
+import shutil
+
 from ._train import (
     export_cellpose_training_pairs,
     parse_use_frames,
@@ -169,8 +184,16 @@ class SegmentationWindow(QWidget):
         train_cellpose_grid.setColumnStretch(1, 1)
         label_use_frames = QLabel("Use frames")
         self.lineedit_use_frames = QLineEdit()
+        self.lineedit_use_frames.setValidator(
+            QRegularExpressionValidator(QRegularExpression(r"^[0-9,]*$"))
+        )
         label_model_name = QLabel("Model name")
         self.lineedit_model_name = QLineEdit()
+        # Match ``_sanitize_model_name_fragment``: only word chars and hyphen (no strip/replace).
+        self.lineedit_model_name.setValidator(
+            QRegularExpressionValidator(QRegularExpression(r"^[\w-]*$"))
+        )
+        self.lineedit_model_name.setMaxLength(80)
         self.btn_train_cellpose_model = QPushButton("Train model")
         self.btn_train_cellpose_model.clicked.connect(self._on_train_cellpose_clicked)
         train_cellpose_grid.addWidget(label_use_frames, 0, 0)
@@ -233,13 +256,14 @@ class SegmentationWindow(QWidget):
                 "Enter one or more frame indices as integers separated by commas."
             )
             return
-        model_name = self.lineedit_model_name.text().strip()
-        if not model_name:
+        raw_model_name = self.lineedit_model_name.text().strip()
+        if not raw_model_name:
             notify("Please enter a model name.")
             return
-        if processing.is_custom_model_display_name_taken(self, model_name):
+        model_name = processing.custom_model_weights_basename(raw_model_name)
+        if processing.is_custom_model_display_name_taken(self, raw_model_name):
             notify(
-                "A custom model with this name (or on-disk file) already exists. "
+                "A custom model with this name already exists. "
                 "Choose another name."
             )
             return

@@ -4,6 +4,8 @@ import json
 import logging
 import shutil
 from datetime import datetime
+import shutil
+from datetime import datetime
 from pathlib import Path
 import time
 
@@ -11,14 +13,17 @@ import numpy as np
 from cellpose import models, core
 from napari.qt.threading import thread_worker
 from qtpy.QtCore import Qt
-from qtpy.QtWidgets import QApplication, QMessageBox, QInputDialog
+from qtpy.QtWidgets import QApplication, QMessageBox
 from scipy import ndimage, optimize, spatial
 
 from ._constants import APPROX_INF, MAX_MATCHING_DIST, CUSTOM_MODEL_PREFIX
 from ._grabber import grab_layer
 from ._session_trained_models import overlap_training_frames_with_stack
 from ._logger import handle_exception, notify
+from ._session_trained_models import overlap_training_frames_with_stack
+from ._logger import handle_exception, notify
 from ._utils import preserve_and_filter_graph
+from ._train import _sanitize_model_name_fragment
 from ._train import _sanitize_model_name_fragment
 
 logger = logging.getLogger(__name__)
@@ -203,31 +208,36 @@ def display_models(widget, hardcoded_models, custom_models):
 
 
 def custom_model_weights_basename(display_name: str) -> str:
-    """Filesystem basename (no extension) for a custom model weights file."""
+    """
+    Canonical custom model name: used as ``custom_models.json`` key and as the weights
+    filename (no extension) under ``models/custom_models/``.
+    """
     stem = _sanitize_model_name_fragment(display_name)
     return stem if stem else "model"
 
 
 def is_custom_model_display_name_taken(widget, display_name: str) -> bool:
-    """True if the display name or its on-disk basename is already used."""
-    if display_name in widget.custom_models:
+    """True if the canonical name is already a JSON key or weights file on disk."""
+    canonical = custom_model_weights_basename(display_name)
+    if canonical in widget.custom_models:
         return True
-    stem = custom_model_weights_basename(display_name)
-    dest = Path(__file__).parent / "models" / "custom_models" / stem
+    dest = Path(__file__).parent / "models" / "custom_models" / canonical
     return dest.is_file()
 
 
 def persist_custom_model_entry(widget, display_name: str, source_weights: Path, params: dict) -> Path:
     """
     Copy Cellpose weights into ``models/custom_models/`` (no file extension) and update ``custom_models.json``.
+
+    The JSON key and on-disk basename are always ``custom_model_weights_basename(display_name)``.
     """
     package_root = Path(__file__).parent
     dest_dir = package_root / "models" / "custom_models"
     dest_dir.mkdir(parents=True, exist_ok=True)
-    stem = custom_model_weights_basename(display_name)
-    dest_path = dest_dir / stem
+    canonical = custom_model_weights_basename(display_name)
+    dest_path = dest_dir / canonical
     shutil.copy2(source_weights, dest_path)
-    widget.custom_models[display_name] = {"filename": dest_path.name, "params": params}
+    widget.custom_models[canonical] = {"filename": canonical, "params": params}
     with open(package_root / "custom_models.json", "w") as file:
         json.dump(widget.custom_models, file)
     return dest_path
@@ -463,6 +473,9 @@ def run_segmentation(widget):
     pr = _prompt_exclude_training_frames_if_applicable(widget, False)
     excl, mdir, mpfx = (None, None, None) if pr is None else pr
     worker = _segment_image(widget, False, excl, None, mdir, mpfx)
+    pr = _prompt_exclude_training_frames_if_applicable(widget, False)
+    excl, mdir, mpfx = (None, None, None) if pr is None else pr
+    worker = _segment_image(widget, False, excl, None, mdir, mpfx)
     worker.returned.connect(_add_segmentation_to_viewer)
 
 
@@ -470,6 +483,9 @@ def run_demo_segmentation(widget):
     """
     Calls segmentation with the demo flag set
     """
+    pr = _prompt_exclude_training_frames_if_applicable(widget, True)
+    excl, mdir, mpfx = (None, None, None) if pr is None else pr
+    worker = _segment_image(widget, True, excl, None, mdir, mpfx)
     pr = _prompt_exclude_training_frames_if_applicable(widget, True)
     excl, mdir, mpfx = (None, None, None) if pr is None else pr
     worker = _segment_image(widget, True, excl, None, mdir, mpfx)
@@ -489,9 +505,18 @@ def _add_segmentation_to_viewer(widget_and_mask):
     labels = widget.viewer.add_labels(mask, name="calculated segmentation")
     widget.parent.combobox_segmentation.setCurrentText(labels.name)
     notify("Segmentation finished.")
+    notify("Segmentation finished.")
 
 
 @thread_worker(connect={"errored": handle_exception})
+def _segment_image(
+    widget,
+    demo=False,
+    exclude_frame_indices=None,
+    copy_excluded_frames_from_layer=None,
+    excluded_frames_masks_dir: Path | None = None,
+    excluded_frames_layer_prefix: str | None = None,
+):
 def _segment_image(
     widget,
     demo=False,
@@ -515,6 +540,14 @@ def _segment_image(
         If set with ``excluded_frames_layer_prefix``, excluded frames load from mask TIFFs here.
     excluded_frames_layer_prefix : str | None
         Prefix in ``{prefix}_frame_XXXXX_masks.tif`` filenames.
+    exclude_frame_indices : frozenset[int] | None
+        Time indices (into ``data_squeezed``) not passed to Cellpose.
+    copy_excluded_frames_from_layer : str | None
+        Labels layer name to copy excluded frames from; if None, excluded frames stay zero.
+    excluded_frames_masks_dir : Path | None
+        If set with ``excluded_frames_layer_prefix``, excluded frames load from mask TIFFs here.
+    excluded_frames_layer_prefix : str | None
+        Prefix in ``{prefix}_frame_XXXXX_masks.tif`` filenames.
     Returns
     -------
     widget, mask
@@ -523,6 +556,8 @@ def _segment_image(
     logger.info("Starting segmentation")
     QApplication.setOverrideCursor(Qt.WaitCursor)
 
+    data_squeezed, removed_dims = _load_segmentation_image_data(widget, demo)
+    exclude_set = exclude_frame_indices or frozenset()
     data_squeezed, removed_dims = _load_segmentation_image_data(widget, demo)
     exclude_set = exclude_frame_indices or frozenset()
 
@@ -539,7 +574,18 @@ def _segment_image(
                 mask = np.zeros_like(data_squeezed, dtype=np.int32)
             else:
                 mask, _, _ = model.eval(data_squeezed, **parameters)
+            if 0 in exclude_set:
+                mask = np.zeros_like(data_squeezed, dtype=np.int32)
+            else:
+                mask, _, _ = model.eval(data_squeezed, **parameters)
         else:
+            n_t = data_squeezed.shape[0]
+            mask = np.zeros((n_t, *data_squeezed.shape[1:]), dtype=np.int32)
+            for i in range(n_t):
+                if i in exclude_set:
+                    continue
+                layer_mask, _, _ = model.eval(data_squeezed[i], **parameters)
+                mask[i] = layer_mask
             n_t = data_squeezed.shape[0]
             mask = np.zeros((n_t, *data_squeezed.shape[1:]), dtype=np.int32)
             for i in range(n_t):
@@ -557,7 +603,43 @@ def _segment_image(
                 mask = np.zeros_like(data_squeezed, dtype=np.int32)
             else:
                 mask = segment_slice_cpu(data_squeezed, parameters)
+            if 0 in exclude_set:
+                mask = np.zeros_like(data_squeezed, dtype=np.int32)
+            else:
+                mask = segment_slice_cpu(data_squeezed, parameters)
         else:
+            n_t = data_squeezed.shape[0]
+            mask = np.zeros((n_t, *data_squeezed.shape[1:]), dtype=np.int32)
+            indices_to_run = [i for i in range(n_t) if i not in exclude_set]
+            if indices_to_run:
+                data_with_parameters = [
+                    (data_squeezed[i], parameters) for i in indices_to_run
+                ]
+                with Pool(AMOUNT_OF_PROCESSES) as p:
+                    parts = p.starmap(segment_slice_cpu, data_with_parameters)
+                for idx, layer_mask in zip(indices_to_run, parts):
+                    mask[idx] = layer_mask
+
+    if (
+        exclude_set
+        and excluded_frames_masks_dir is not None
+        and excluded_frames_layer_prefix
+    ):
+        _fill_excluded_frames_from_training_masks_dir(
+            mask,
+            exclude_set,
+            Path(excluded_frames_masks_dir),
+            excluded_frames_layer_prefix,
+            data_squeezed.ndim,
+        )
+    elif exclude_set and copy_excluded_frames_from_layer:
+        _fill_excluded_frames_from_labels_layer(
+            widget.viewer,
+            mask,
+            exclude_set,
+            copy_excluded_frames_from_layer,
+            data_squeezed.ndim,
+        )
             n_t = data_squeezed.shape[0]
             mask = np.zeros((n_t, *data_squeezed.shape[1:]), dtype=np.int32)
             indices_to_run = [i for i in range(n_t) if i not in exclude_set]
@@ -958,7 +1040,6 @@ def scan_mmvh4tracks_training_temp_on_startup(main_widget) -> None:
         iter_mmvh4tracks_train_directories,
         parse_layer_prefix_and_frames_from_masks_dir,
         parse_model_fragment_from_train_dir_name,
-        resume_model_fragment_needs_confirm,
     )
 
     seg = main_widget.segmentation_window
@@ -986,18 +1067,7 @@ def scan_mmvh4tracks_training_temp_on_startup(main_widget) -> None:
         if reply != QMessageBox.Yes:
             _safe_rmtree(d)
             continue
-        model_name = fragment
-        if resume_model_fragment_needs_confirm(fragment):
-            name, ok = QInputDialog.getText(
-                main_widget,
-                "Model name",
-                "Confirm model name for resumed training:",
-                text=fragment,
-            )
-            if not ok or not name.strip():
-                _safe_rmtree(d)
-                continue
-            model_name = name.strip()
+        model_name = custom_model_weights_basename(fragment)
         if is_custom_model_display_name_taken(seg, model_name):
             notify(
                 f"A custom model named {model_name!r} already exists. "
