@@ -60,8 +60,7 @@ def segment_slice_cpu(layer_slice, parameters):
     )
     logger.info("Segmentation process started")
     model = models.CellposeModel(gpu=False, pretrained_model=parameters["model_path"])
-    eval_params = parameters
-    eval_params.pop("model_path", None)
+    eval_params = {k: v for k, v in parameters.items() if k != "model_path"}
     mask, _, _ = model.eval(layer_slice, **eval_params)
     endtime = time.time()
     logger.debug(

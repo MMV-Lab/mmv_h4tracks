@@ -39,6 +39,10 @@ dependencies = [
     "scipy>=1.11.0",
     "ome-zarr>=0.12.0",
     "napari-ome-zarr",
+    "pandas",
+    "scikit-image",
+    "numba",
+    "opencv-python-headless",
 ]
 [project.optional-dependencies]
 all = [
