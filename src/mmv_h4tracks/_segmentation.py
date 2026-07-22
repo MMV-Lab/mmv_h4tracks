@@ -117,11 +117,11 @@ class SegmentationWindow(QWidget):
         btn_grab_label.clicked.connect(self._add_select_callback)
 
         # QComboBoxes
-        self.combobox_segmentation = QComboBox()
-        self.combobox_segmentation.setToolTip("select model")
+        self.combobox_cellpose_model = QComboBox()
+        self.combobox_cellpose_model.setToolTip("select model")
         hardcoded_models, custom_models = processing.read_models(self)
         processing.display_models(self, hardcoded_models, custom_models)
-        self.combobox_segmentation.currentTextChanged.connect(
+        self.combobox_cellpose_model.currentTextChanged.connect(
             self.toggle_segmentation_button
         )
 
@@ -144,7 +144,7 @@ class SegmentationWindow(QWidget):
         automatic_segmentation.setLayout(QGridLayout())
         automatic_segmentation.layout().addWidget(h_spacer_1, 0, 0, 1, -1)
         automatic_segmentation.layout().addWidget(
-            self.combobox_segmentation, 1, 0, 1, 1
+            self.combobox_cellpose_model, 1, 0, 1, 1
         )
         automatic_segmentation.layout().addWidget(self.btn_segment, 1, 1, 1, 1)
         automatic_segmentation.layout().addWidget(self.checkbox_preview, 1, 2, 1, 1)
@@ -338,8 +338,9 @@ class SegmentationWindow(QWidget):
                 layer_prefix,
                 train_frames,
             )
-            combo_name = CUSTOM_MODEL_PREFIX + model_name
-            self.combobox_segmentation.setCurrentText(combo_name)
+            canonical = processing.custom_model_weights_basename(model_name)
+            combo_name = CUSTOM_MODEL_PREFIX + canonical
+            self.combobox_cellpose_model.setCurrentText(combo_name)
             notify(f"Registered custom model: {combo_name}")
         except Exception as exc:
             notify(str(exc))

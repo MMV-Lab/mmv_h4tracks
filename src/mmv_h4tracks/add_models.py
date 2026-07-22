@@ -16,6 +16,7 @@ from qtpy.QtGui import QRegularExpressionValidator
 import napari
 
 import mmv_h4tracks._processing as processing
+from mmv_h4tracks._constants import CUSTOM_MODEL_PREFIX
 from mmv_h4tracks._logger import notify
 
 SHOW_OPTIONS_TEXT = "Show advanced options"
@@ -275,6 +276,9 @@ class ModelWindow(QWidget):
 
         hardcoded_models, custom_models = processing.read_models(self.parent)
         processing.display_models(self.parent, hardcoded_models, custom_models)
+        self.parent.combobox_cellpose_model.setCurrentText(
+            CUSTOM_MODEL_PREFIX + canonical
+        )
         QApplication.restoreOverrideCursor()
         self.close()
 

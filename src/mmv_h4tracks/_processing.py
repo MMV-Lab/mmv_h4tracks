@@ -192,13 +192,13 @@ def read_models(widget):
 
 def display_models(widget, hardcoded_models, custom_models):
     """
-    Adds the passed models to the segmentation combobox.
+    Adds the passed models to the Cellpose model combobox.
     """
     hardcoded_models.sort()
     custom_models.sort()
-    widget.combobox_segmentation.clear()
-    widget.combobox_segmentation.addItems(hardcoded_models)
-    widget.combobox_segmentation.addItems(custom_models)
+    widget.combobox_cellpose_model.clear()
+    widget.combobox_cellpose_model.addItems(hardcoded_models)
+    widget.combobox_cellpose_model.addItems(custom_models)
 
 
 def custom_model_weights_basename(display_name: str) -> str:
@@ -415,7 +415,7 @@ def _prompt_exclude_training_frames_if_applicable(
     (frozenset[int], Path | None, str | None)
         Excluded frame indices, training masks directory, layer prefix for mask filenames.
     """
-    selected = widget.combobox_segmentation.currentText()
+    selected = widget.combobox_cellpose_model.currentText()
     if not selected.startswith(CUSTOM_MODEL_PREFIX):
         return None
     display_name = selected[len(CUSTOM_MODEL_PREFIX) :]
@@ -534,7 +534,7 @@ def _segment_image(
     data_squeezed, removed_dims = _load_segmentation_image_data(widget, demo)
     exclude_set = exclude_frame_indices or frozenset()
 
-    selected_model = widget.combobox_segmentation.currentText()
+    selected_model = widget.combobox_cellpose_model.currentText()
     parameters = _get_parameters(widget, selected_model)
 
     if core.use_gpu():
