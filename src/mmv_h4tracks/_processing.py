@@ -1,7 +1,5 @@
 import multiprocessing
-import json
 import logging
-import shutil
 from datetime import datetime
 from pathlib import Path
 import time
@@ -15,6 +13,10 @@ from scipy import ndimage, optimize, spatial
 
 from ._constants import APPROX_INF, MAX_MATCHING_DIST, CUSTOM_MODEL_PREFIX
 from ._concurrency import map_parallel, starmap_parallel
+from ._custom_models import (
+    get_custom_model_store,
+    package_models_dir,
+)
 from ._grabber import grab_layer
 from ._session_trained_models import overlap_training_frames_with_stack
 from ._logger import handle_exception, notify
@@ -164,26 +166,24 @@ def match_centroids(
 
 def read_custom_model_dict():
     """
-    Reads the parameters of the custom models from the 'custom_models.json' file and returns them
+    Read custom model parameters from the user data store
+    (``~/.mmv_h4tracks`` or ``MMV_H4TRACKS_USER_DATA``).
     """
-    try:
-        with open(Path(__file__).parent / "custom_models.json", "r") as file:
-            return json.load(file)
-    except FileNotFoundError:
-        return {}
+    return get_custom_model_store().load()
 
 
 def read_models(widget):
     """
-    Reads the available models from the 'models' and 'custom models' directory and returns them
+    Reads the available models from the package ``models/`` dir and the user
+    custom-model store and returns them.
     """
-    path = Path(__file__).parent / "models"
+    path = package_models_dir()
 
     hardcoded_models = [file.name for file in path.iterdir() if not file.is_dir()]
     custom_models = []
 
-    p = Path(__file__).parent / "models" / "custom_models"
-    custom_model_filenames = [file.name for file in p.glob("*") if file.is_file()]
+    store = get_custom_model_store()
+    custom_model_filenames = store.list_weight_filenames()
     for custom_model in widget.custom_models:
         if widget.custom_models[custom_model]["filename"] in custom_model_filenames:
             custom_models.append(CUSTOM_MODEL_PREFIX + custom_model)
@@ -204,7 +204,7 @@ def display_models(widget, hardcoded_models, custom_models):
 def custom_model_weights_basename(display_name: str) -> str:
     """
     Canonical custom model name: used as ``custom_models.json`` key and as the weights
-    filename (no extension) under ``models/custom_models/``.
+    filename (no extension) under the user custom-models directory.
     """
     stem = _sanitize_model_name_fragment(display_name)
     return stem if stem else "model"
@@ -215,26 +215,24 @@ def is_custom_model_display_name_taken(widget, display_name: str) -> bool:
     canonical = custom_model_weights_basename(display_name)
     if canonical in widget.custom_models:
         return True
-    dest = Path(__file__).parent / "models" / "custom_models" / canonical
-    return dest.is_file()
+    return get_custom_model_store().weights_path(canonical).is_file()
 
 
 def persist_custom_model_entry(widget, display_name: str, source_weights: Path, params: dict) -> Path:
     """
-    Copy Cellpose weights into ``models/custom_models/`` (no file extension) and update ``custom_models.json``.
+    Copy Cellpose weights into the user custom-model store and update the registry JSON.
 
     The JSON key and on-disk basename are always ``custom_model_weights_basename(display_name)``.
     """
-    package_root = Path(__file__).parent
-    dest_dir = package_root / "models" / "custom_models"
-    dest_dir.mkdir(parents=True, exist_ok=True)
+    store = get_custom_model_store()
     canonical = custom_model_weights_basename(display_name)
-    dest_path = dest_dir / canonical
-    shutil.copy2(source_weights, dest_path)
-    widget.custom_models[canonical] = {"filename": canonical, "params": params}
-    with open(package_root / "custom_models.json", "w") as file:
-        json.dump(widget.custom_models, file)
-    return dest_path
+    return store.persist(
+        display_name,
+        source_weights,
+        params,
+        widget.custom_models,
+        canonical=canonical,
+    )
 
 
 @thread_worker(connect={"errored": handle_exception})
@@ -643,7 +641,7 @@ def _get_parameters(widget, model: str):
     ValueError
         If ``model`` is not a known hardcoded or registered custom model.
     """
-    models_root = Path(__file__).parent.absolute() / "models"
+    models_root = package_models_dir()
 
     if model == "Neutrophil_granulocytes":
         return {
@@ -665,7 +663,7 @@ def _get_parameters(widget, model: str):
             entry = widget.custom_models[key]
             params = dict(entry["params"])
             params["model_path"] = str(
-                models_root / "custom_models" / entry["filename"]
+                get_custom_model_store().weights_path(entry["filename"])
             )
             return params
 

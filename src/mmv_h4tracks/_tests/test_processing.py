@@ -56,10 +56,15 @@ def test_calculate_centroid():
 
 
 @pytest.mark.unit
-def test_read_custom_model_dict(create_widget):
-    create_widget
-    model_dict = processing.read_custom_model_dict()
-    assert model_dict == {}
+def test_read_custom_model_dict(tmp_path):
+    from mmv_h4tracks._custom_models import CustomModelStore, set_custom_model_store
+
+    set_custom_model_store(CustomModelStore(tmp_path / "empty_store"))
+    try:
+        model_dict = processing.read_custom_model_dict()
+        assert model_dict == {}
+    finally:
+        set_custom_model_store(None)
 
 
 @pytest.mark.unit

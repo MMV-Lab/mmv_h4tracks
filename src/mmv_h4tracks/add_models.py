@@ -1,6 +1,4 @@
-import json
 from pathlib import Path
-import shutil
 from qtpy.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -260,16 +258,9 @@ class ModelWindow(QWidget):
         if rescale != "":
             params["rescale"] = float(rescale)
 
-        model_entry = {"filename": canonical, "params": params}
-        self.parent.custom_models[canonical] = model_entry
-        with open(Path(__file__).parent / "custom_models.json", "w") as file:
-            json.dump(self.parent.custom_models, file)
-
-        old_path = Path(self.model_path)
-        path = Path(__file__).parent / "models" / "custom_models"
-        path.mkdir(parents=True, exist_ok=True)
-        new_path = path / canonical
-        shutil.copy2(old_path, new_path)
+        processing.persist_custom_model_entry(
+            self.parent, raw_name, Path(self.model_path), params
+        )
 
         hardcoded_models, custom_models = processing.read_models(self.parent)
         processing.display_models(self.parent, hardcoded_models, custom_models)

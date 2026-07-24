@@ -5,7 +5,17 @@ from __future__ import annotations
 import pytest
 
 from mmv_h4tracks import MMVH4TRACKS
+from mmv_h4tracks._custom_models import CustomModelStore, set_custom_model_store
 from mmv_h4tracks._tests.fixture_helpers import reset_widget
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _isolate_custom_model_store(tmp_path_factory):
+    """Keep tests off the real ``~/.mmv_h4tracks`` registry."""
+    store = CustomModelStore(tmp_path_factory.mktemp("mmv_custom_models"))
+    set_custom_model_store(store)
+    yield store
+    set_custom_model_store(None)
 
 
 @pytest.fixture(scope="module")
