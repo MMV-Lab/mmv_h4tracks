@@ -1,5 +1,4 @@
 import multiprocessing
-from multiprocessing import Pool
 import json
 import logging
 import shutil
@@ -15,6 +14,7 @@ from qtpy.QtWidgets import QApplication, QMessageBox
 from scipy import ndimage, optimize, spatial
 
 from ._constants import APPROX_INF, MAX_MATCHING_DIST, CUSTOM_MODEL_PREFIX
+from ._concurrency import map_parallel, starmap_parallel
 from ._grabber import grab_layer
 from ._session_trained_models import overlap_training_frames_with_stack
 from ._logger import handle_exception, notify
@@ -563,8 +563,9 @@ def _segment_image(
                 data_with_parameters = [
                     (data_squeezed[i], parameters) for i in indices_to_run
                 ]
-                with Pool(AMOUNT_OF_PROCESSES) as p:
-                    parts = p.starmap(segment_slice_cpu, data_with_parameters)
+                parts = starmap_parallel(
+                    segment_slice_cpu, data_with_parameters, AMOUNT_OF_PROCESSES
+                )
                 for idx, layer_mask in zip(indices_to_run, parts):
                     mask[idx] = layer_mask
 
@@ -773,32 +774,13 @@ def _check_for_tracks_layer(widget):
     return tracks_name, collision
 
 
-def _calculate_processes_limit(widget):
-    """
-    Calculate the amount of processes to use for multiprocessing
-
-    Parameters
-    ----------
-    widget : QWidget
-        the widget containing the viewer and the comboboxes
-
-    Returns
-    -------
-    int
-        the amount of processes to use
-    """
-    if widget.parent.rb_eco.isChecked():
-        return max(1, int(multiprocessing.cpu_count() * 0.4))
-    else:
-        return max(1, int(multiprocessing.cpu_count() * 0.8))
-
-
 def _calculate_centroids_parallel(widget, data):
     """
     Calculate the centroids of objects in a 2D slice.
     """
-    with Pool(_calculate_processes_limit(widget)) as p:
-        return p.map(calculate_centroids, data)
+    return map_parallel(
+        calculate_centroids, data, widget.parent.get_process_limit()
+    )
 
 
 def _match_centroids_parallel(widget, extended_centroids):
@@ -809,8 +791,9 @@ def _match_centroids_parallel(widget, extended_centroids):
         (extended_centroids[i - 1], extended_centroids[i])
         for i in range(1, len(extended_centroids))
     ]
-    with Pool(_calculate_processes_limit(widget)) as p:
-        return p.map(match_centroids, (slice_pairs))
+    return map_parallel(
+        match_centroids, slice_pairs, widget.parent.get_process_limit()
+    )
 
 
 def _process_matches(matches):

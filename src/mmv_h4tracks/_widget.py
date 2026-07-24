@@ -1,5 +1,4 @@
 import napari
-import multiprocessing
 import warnings
 
 from qtpy.QtWidgets import (
@@ -989,10 +988,9 @@ class MMVH4TRACKS(QWidget):
         int
             The number of processes to use for computation
         """
-        if self.rb_eco.isChecked():
-            return max(1, int(multiprocessing.cpu_count() * 0.4))
-        else:
-            return max(1, int(multiprocessing.cpu_count() * 0.8))
+        from ._concurrency import process_limit_from_eco
+
+        return process_limit_from_eco(self.rb_eco.isChecked())
 
     def set_progress_range(self, min_: int, max_: int):
         """

@@ -1,4 +1,4 @@
-from multiprocessing import Pool
+import math
 
 import numpy as np
 from qtpy.QtWidgets import (
@@ -21,8 +21,8 @@ from matplotlib.figure import Figure
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from napari.qt.threading import thread_worker
 from skimage import measure
-import math
 
+from ._concurrency import starmap_parallel
 from ._qt_utils import apply_napari_dark_theme
 
 from mmv_h4tracks._logger import handle_exception
@@ -250,8 +250,11 @@ class AnalysisWindow(QWidget):
             )
         AMOUNT_OF_PROCESSES = self.parent.get_process_limit()
 
-        with Pool(AMOUNT_OF_PROCESSES) as p:
-            sizes = p.starmap(calculate_size_single_track, track_and_segmentation)
+        sizes = starmap_parallel(
+            calculate_size_single_track,
+            track_and_segmentation,
+            AMOUNT_OF_PROCESSES,
+        )
 
         return np.array(sizes)
 

@@ -1,6 +1,5 @@
 import logging
 import math
-from multiprocessing import Pool
 
 import numpy as np
 from qtpy.QtWidgets import (
@@ -22,6 +21,7 @@ from scipy import ndimage
 from scipy.optimize import linear_sum_assignment
 from numba import jit
 
+from ._concurrency import starmap_parallel
 from ._constants import IOU_THRESHOLD, IOU_LOW_THRESHOLD
 from ._logger import notify
 from ._grabber import grab_layer
@@ -452,17 +452,13 @@ class EvaluationWindow(QWidget):
         amount_of_processes = self.parent.get_process_limit()
 
         slice_pairs = [(gt_seg[i], eval_seg[i]) for i in range(len(gt_seg))]
-        # Avoid Pool spawn overhead for single-process / tiny stacks (esp. Windows).
-        if amount_of_processes <= 1 or len(slice_pairs) <= 2:
-            return sum(
-                evaluation_function(gt_slice, eval_slice)
-                for gt_slice, eval_slice in slice_pairs
+        return sum(
+            starmap_parallel(
+                evaluation_function,
+                slice_pairs,
+                amount_of_processes,
             )
-
-        with Pool(amount_of_processes) as p:
-            faults = sum(p.starmap(evaluation_function, slice_pairs))
-
-        return faults
+        )
 
     def get_track_fault(self, gt_seg, gt_tracks, eval_seg, eval_tracks):
         """

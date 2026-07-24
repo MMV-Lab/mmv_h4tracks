@@ -1,4 +1,3 @@
-from multiprocessing import Pool
 from threading import Event
 
 from tqdm import tqdm
@@ -20,6 +19,7 @@ from qtpy.QtWidgets import (
 )
 from scipy import ndimage, stats
 
+from ._concurrency import starmap_parallel
 from ._constants import (
     LINK_TEXT,
     UNLINK_TEXT,
@@ -224,7 +224,7 @@ class TrackingWindow(QWidget):
 
         segmentation = layer_as_numpy(label_layer)
 
-        AMOUNT_OF_PROCESSES = self.parent.get_process_limit()
+        n_workers = self.parent.get_process_limit()
 
         track_id = 1
         tracks = np.ndarray([])
@@ -256,8 +256,9 @@ class TrackingWindow(QWidget):
                         continue
                 threads_input.append([segmentation, start_slice, label_id])
 
-            with Pool(AMOUNT_OF_PROCESSES) as pool:
-                track_cells = pool.starmap(track_by_overlap, threads_input)
+            track_cells = starmap_parallel(
+                track_by_overlap, threads_input, n_workers
+            )
 
             for entry in track_cells:
                 if entry is None:

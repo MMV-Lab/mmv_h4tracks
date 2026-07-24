@@ -117,21 +117,13 @@ def test_display_models(create_widget):
 @pytest.mark.integration
 @pytest.mark.schema
 def test_track_segmentation_schema(widget_with_segmentation, qtbot, monkeypatch):
-    """Schema-check proximity tracking on a tiny synthetic stack (no Pool)."""
+    """Schema-check proximity tracking on a tiny synthetic stack."""
+    # Force serial map/starmap (no Pool spawn) via the shared concurrency policy.
     monkeypatch.setattr(
-        processing,
-        "_calculate_centroids_parallel",
-        lambda _w, data: list(map(processing.calculate_centroids, data)),
+        widget_with_segmentation,
+        "get_process_limit",
+        lambda: 1,
     )
-
-    def _match_serial(_w, extended_centroids):
-        pairs = [
-            (extended_centroids[i - 1], extended_centroids[i])
-            for i in range(1, len(extended_centroids))
-        ]
-        return list(map(processing.match_centroids, pairs))
-
-    monkeypatch.setattr(processing, "_match_centroids_parallel", _match_serial)
 
     widget = widget_with_segmentation
     tracking_widget = widget.tracking_window
