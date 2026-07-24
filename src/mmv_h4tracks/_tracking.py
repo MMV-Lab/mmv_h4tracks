@@ -1,7 +1,6 @@
 from multiprocessing import Pool
 from threading import Event
 
-import napari
 from tqdm import tqdm
 import numpy as np
 import pandas as pd
@@ -25,6 +24,7 @@ from ._constants import LINK_TEXT, UNLINK_TEXT, CONFIRM_TEXT, MIN_TRACK_LENGTH
 from ._logger import notify, choice_dialog, handle_exception
 from ._grabber import grab_layer
 from ._utils import preserve_and_filter_graph
+from ._qt_utils import apply_napari_dark_theme, layer_as_numpy
 import mmv_h4tracks._processing as processing
 
 
@@ -51,10 +51,7 @@ class TrackingWindow(QWidget):
         self.parent = parent
         self.viewer = parent.viewer
         self.choice_event = Event()
-        try:
-            self.setStyleSheet(napari.qt.get_stylesheet(theme="dark"))
-        except TypeError:
-            self.setStyleSheet(napari.qt.get_stylesheet(theme_id="dark"))
+        apply_napari_dark_theme(self)
 
         self.cached_tracks = None
         self.cached_graph = None
@@ -196,7 +193,7 @@ class TrackingWindow(QWidget):
                     [QMessageBox.Yes, QMessageBox.No],
                 )
                 self.ret = ret
-                if ret == 65536:
+                if ret == QMessageBox.No:
                     worker.quit()
                 self.choice_event.set()
 
@@ -222,13 +219,7 @@ class TrackingWindow(QWidget):
         if label_layer is None:
             raise ValueError("No segmentation layer to track")
 
-        # Get the actual data array, handling both multiscale and dask arrays
-        if isinstance(label_layer.data, (list, tuple)):
-            # Multiscale: use first level
-            segmentation = np.asarray(label_layer.data[0])
-        else:
-            # Single resolution: convert to numpy to handle dask arrays
-            segmentation = np.asarray(label_layer.data)
+        segmentation = layer_as_numpy(label_layer)
 
         AMOUNT_OF_PROCESSES = self.parent.get_process_limit()
 
@@ -557,14 +548,8 @@ class TrackingWindow(QWidget):
                 )
 
                 # Extract position based on segmentation layer dimensionality
-                # For multiscale layers, data is a list/tuple, so get ndim from first level
-                if isinstance(label_layer.data, (list, tuple)):
-                    ndim = label_layer.data[0].ndim
-                    # Get the actual data array (first level for multiscale)
-                    data_array = label_layer.data[0]
-                else:
-                    ndim = label_layer.data.ndim
-                    data_array = label_layer.data
+                data_array = layer_as_numpy(label_layer)
+                ndim = data_array.ndim
                 if ndim == 2:
                     raise ValueError("2D image can not be tracked.")
                 position = tuple(int(round(p)) for p in event.position[-ndim:])
@@ -580,16 +565,9 @@ class TrackingWindow(QWidget):
                     labels=frame_data,
                     index=selected_id,
                 )
-                # Ensure centroid elements are converted to Python scalars
-                # Convert to numpy array first to handle both tuple and array returns
-                centroid = [int(np.rint(c.item())) for c in np.asarray(centroid)]
+                centroid = _centroid_yx_as_ints(centroid)
                 cell = [z, centroid[0], centroid[1]]
-                # For multiscale, need to check against first level
-                if isinstance(label_layer.data, (list, tuple)):
-                    check_data = label_layer.data[0]
-                else:
-                    check_data = label_layer.data
-                if check_data[*cell] != selected_id:
+                if data_array[*cell] != selected_id:
                     # centroid outside of the cell, calculate medoid instead
                     coords = np.argwhere(frame_data == selected_id)
                     medoid = [z, *calculate_medoid(coords)]
@@ -753,14 +731,8 @@ class TrackingWindow(QWidget):
                 )
 
                 # Extract position based on segmentation layer dimensionality
-                # For multiscale layers, data is a list/tuple, so get ndim from first level
-                if isinstance(label_layer.data, (list, tuple)):
-                    ndim = label_layer.data[0].ndim
-                    # Get the actual data array (first level for multiscale)
-                    data_array = label_layer.data[0]
-                else:
-                    ndim = label_layer.data.ndim
-                    data_array = label_layer.data
+                data_array = layer_as_numpy(label_layer)
+                ndim = data_array.ndim
                 if ndim == 2:
                     raise ValueError("2D image can not be tracked.")
                 position = tuple(int(round(p)) for p in event.position[-ndim:])
@@ -776,9 +748,7 @@ class TrackingWindow(QWidget):
                     labels=frame_data,
                     index=selected_id,
                 )
-                # Ensure centroid elements are converted to Python scalars
-                # Convert to numpy array first to handle both tuple and array returns
-                centroid = [int(np.rint(c.item())) for c in np.asarray(centroid)]
+                centroid = _centroid_yx_as_ints(centroid)
                 cell = [z, centroid[0], centroid[1]]
                 if cell not in self.selected_cells:
                     self.selected_cells.append(cell)
@@ -1383,7 +1353,7 @@ class TrackingWindow(QWidget):
             filter_values = np.unique(self.cached_tracks[:, 0])
             tracks = self.cached_tracks
 
-        updated_entry = update_centroid(track_entry, label_layer.data[frame], tracks)
+        updated_entry = update_centroid(label_layer.data, tracks, track_entry)
         if updated_entry is None:
             tracks = processing.remove_frame_from_track(tracks, track_entry)
         else:
@@ -1467,6 +1437,14 @@ def func(label_data, start_slice, id):
     if len(track_cells) < MIN_TRACK_LENGTH:
         return
     return track_cells
+
+
+def _centroid_yx_as_ints(centroid) -> list:
+    """Convert ``center_of_mass`` output to ``[y, x]`` Python ints."""
+    coords = np.asarray(centroid, dtype=float).ravel()
+    if coords.size < 2:
+        raise ValueError("Could not compute cell centroid.")
+    return [int(np.rint(coords[0])), int(np.rint(coords[1]))]
 
 
 def update_centroid(labels: np.ndarray, tracks: np.ndarray, track_entry: np.ndarray):

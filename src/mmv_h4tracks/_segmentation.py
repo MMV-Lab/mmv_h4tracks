@@ -19,7 +19,6 @@ from qtpy.QtWidgets import (
 from qtpy.QtCore import Qt, QRegularExpression
 from qtpy.QtGui import QRegularExpressionValidator
 from scipy import ndimage
-import napari
 import pandas as pd
 
 from ._constants import CUSTOM_MODEL_PREFIX
@@ -35,6 +34,7 @@ from pathlib import Path
 import shutil
 
 from ._utils import preserve_and_filter_graph
+from ._qt_utils import apply_napari_dark_theme
 import mmv_h4tracks._processing as processing
 from .add_models import ModelWindow
 
@@ -63,10 +63,7 @@ class SegmentationWindow(QWidget):
         self.setLayout(QVBoxLayout())
         self.parent = parent
         self.viewer = parent.viewer
-        try:
-            self.setStyleSheet(napari.qt.get_stylesheet(theme="dark"))
-        except TypeError:
-            self.setStyleSheet(napari.qt.get_stylesheet(theme_id="dark"))
+        apply_napari_dark_theme(self)
 
         self.custom_models = processing.read_custom_model_dict()
 

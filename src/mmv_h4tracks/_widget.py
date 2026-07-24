@@ -657,15 +657,15 @@ class MMVH4TRACKS(QWidget):
                 msg.addButton(QMessageBox.Yes)
                 msg.addButton(QMessageBox.YesToAll)
                 msg.addButton(QMessageBox.Cancel)
-                ret = msg.exec()  # Yes -> 16384, YesToAll -> 32768, Cancel -> 4194304
+                ret = msg.exec()
 
                 # Cancel
-                if ret == 4194304:
+                if ret == QMessageBox.Cancel:
                     QApplication.restoreOverrideCursor()
                     return False
 
                 # YesToAll -> Remove all layers with names in the file
-                if ret == 32768:
+                if ret == QMessageBox.YesToAll:
                     for name in layer_names:
                         try:
                             self.viewer.layers.remove(name)

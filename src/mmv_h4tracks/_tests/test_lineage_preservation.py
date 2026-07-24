@@ -9,12 +9,6 @@ from mmv_h4tracks import MMVH4TRACKS
 
 
 @pytest.fixture
-def create_widget(make_napari_viewer):
-    """Fixture to create a widget instance."""
-    yield MMVH4TRACKS(make_napari_viewer())
-
-
-@pytest.fixture
 def widget_with_tracks_and_lineage(create_widget):
     """Fixture to create a widget with tracks layer containing lineage graph.
     

@@ -13,11 +13,11 @@ from qtpy.QtWidgets import (
 )
 from qtpy.QtCore import Qt, QRegularExpression
 from qtpy.QtGui import QRegularExpressionValidator
-import napari
 
 import mmv_h4tracks._processing as processing
 from mmv_h4tracks._constants import CUSTOM_MODEL_PREFIX
 from mmv_h4tracks._logger import notify
+from mmv_h4tracks._qt_utils import apply_napari_dark_theme
 
 SHOW_OPTIONS_TEXT = "Show advanced options"
 HIDE_OPTIONS_TEXT = "Hide advanced options"
@@ -32,10 +32,7 @@ class ModelWindow(QWidget):
         self.parent = parent
         self.mode_path: str
         self.advanced_options = []
-        try:
-            self.setStyleSheet(napari.qt.get_stylesheet(theme="dark"))
-        except TypeError:
-            self.setStyleSheet(napari.qt.get_stylesheet(theme_id="dark"))
+        apply_napari_dark_theme(self)
 
         ## QObjects
         # Labels

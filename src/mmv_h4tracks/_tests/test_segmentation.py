@@ -1,46 +1,63 @@
 """Module providing tests for the segmentation widget"""
 
 import pytest
-from pathlib import Path
-from bioio import BioImage
 import numpy as np
 from unittest.mock import Mock
 
 from mmv_h4tracks import MMVH4TRACKS
 from mmv_h4tracks._reader import build_multiscale
+from mmv_h4tracks._tests.data_loading import DATA_ROOT, load_image_zyx
+from mmv_h4tracks._tests.fixture_helpers import (
+    clear_viewer_layers,
+    reset_plugin_state,
+    reset_widget,
+)
 
-PATH = Path(__file__).parent / "data"
-IMAGE_EXTENSIONS = {".tif", ".tiff"}
-TRACK_EXTENSIONS = {".npy"}
+PATH = DATA_ROOT
+REMOVE_CELL_SEG = "test_seg"
+REMOVE_CELL_TRK = "test_trk"
+
+
+@pytest.fixture(scope="module")
+def remove_cell_testdata():
+    """Only the labels + tracks pair needed by remove_cell_from_tracks."""
+    seg = load_image_zyx(PATH / "segmentation" / f"{REMOVE_CELL_SEG}.tiff")
+    trk = np.load(PATH / "tracks" / f"{REMOVE_CELL_TRK}.npy")
+    return seg, trk
+
+
+@pytest.fixture(scope="module")
+def remove_cell_widget_loaded(module_widget, remove_cell_testdata):
+    """Attach the slim remove-cell layers once per module."""
+    seg, trk = remove_cell_testdata
+    reset_widget(module_widget)
+    module_widget.viewer.add_labels(np.array(seg, copy=True), name=REMOVE_CELL_SEG)
+    module_widget.viewer.add_tracks(np.array(trk, copy=True), name=REMOVE_CELL_TRK)
+    yield module_widget
 
 
 @pytest.fixture
-def create_widget(make_napari_viewer):
-    yield MMVH4TRACKS(make_napari_viewer())
+def viewer_with_data(remove_cell_widget_loaded, remove_cell_testdata):
+    """
+    Soft-reset + restore slim layers for remove_cell_from_tracks.
 
+    Avoids reloading every image/segmentation/tracks file each parametrized case.
+    """
+    widget = remove_cell_widget_loaded
+    seg, trk = remove_cell_testdata
 
-@pytest.fixture
-def viewer_with_data(create_widget):
-    widget = create_widget
-    viewer = widget.viewer
-    for file in Path(PATH / "images").iterdir():
-        if not file.is_file() or file.suffix.lower() not in IMAGE_EXTENSIONS:
-            continue
-        image = BioImage(file).get_image_data("ZYX")
-        name = file.stem
-        viewer.add_image(image, name=name)
-    for file in Path(PATH / "segmentation").iterdir():
-        if not file.is_file() or file.suffix.lower() not in IMAGE_EXTENSIONS:
-            continue
-        image = BioImage(file).get_image_data("ZYX")
-        name = file.stem
-        viewer.add_labels(image, name=name)
-    for file in Path(PATH / "tracks").iterdir():
-        if not file.is_file() or file.suffix.lower() not in TRACK_EXTENSIONS:
-            continue
-        tracks = np.load(file)
-        name = file.stem
-        viewer.add_tracks(tracks, name=name)
+    reset_plugin_state(widget)
+    present = {layer.name for layer in widget.viewer.layers}
+    if {REMOVE_CELL_SEG, REMOVE_CELL_TRK} - present:
+        clear_viewer_layers(widget.viewer)
+        widget.viewer.add_labels(np.array(seg, copy=True), name=REMOVE_CELL_SEG)
+        widget.viewer.add_tracks(np.array(trk, copy=True), name=REMOVE_CELL_TRK)
+    else:
+        widget.viewer.layers[REMOVE_CELL_SEG].data = np.array(seg, copy=True)
+        widget.viewer.layers[REMOVE_CELL_TRK].data = np.array(trk, copy=True)
+
+    widget.combobox_segmentation.setCurrentText(REMOVE_CELL_SEG)
+    widget.combobox_tracks.setCurrentText(REMOVE_CELL_TRK)
     yield widget
 
 

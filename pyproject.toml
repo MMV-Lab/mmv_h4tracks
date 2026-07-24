@@ -29,7 +29,6 @@ classifiers = [
 dependencies = [
     "numpy",
     "npe2",
-    "napari-plugin-engine>=0.1.4",
     "napari",
     "zarr>=3.0.8",
     "cellpose<4",
@@ -45,12 +44,17 @@ dependencies = [
     "opencv-python-headless",
 ]
 [project.optional-dependencies]
-all = [
-    "napari[all]",
+dev = [
     "pytest",
     "pytest-qt",
+    "pytest-cov",
     "pre-commit",
     "bioio-tifffile",
+]
+all = [
+    "napari[all]",
+    "bioio-tifffile",
+    "mmv_h4tracks[dev]",
 ]
 
 [project.urls]

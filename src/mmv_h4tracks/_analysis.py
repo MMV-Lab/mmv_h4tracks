@@ -20,11 +20,11 @@ from qtpy.QtCore import Qt
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from napari.qt.threading import thread_worker
-import napari
 from skimage import measure
 import math
 
 from ._grabber import grab_layer
+from ._qt_utils import apply_napari_dark_theme
 
 from mmv_h4tracks._logger import handle_exception
 from ._selector import Selector
@@ -51,10 +51,7 @@ class AnalysisWindow(QWidget):
         self.parent = parent
         self.viewer = parent.viewer
         self.setLayout(QVBoxLayout())
-        try:
-            self.setStyleSheet(napari.qt.get_stylesheet(theme="dark"))
-        except TypeError:
-            self.setStyleSheet(napari.qt.get_stylesheet(theme_id="dark"))
+        apply_napari_dark_theme(self)
 
         ### QObjects
 
@@ -557,14 +554,7 @@ class AnalysisWindow(QWidget):
 
         canvas = FigureCanvas(fig)
         self.parent.plot_window = QWidget()
-        try:
-            self.parent.plot_window.setStyleSheet(
-                napari.qt.get_stylesheet(theme="dark")
-            )
-        except TypeError:
-            self.parent.plot_window.setStyleSheet(
-                napari.qt.get_stylesheet(theme_id="dark")
-            )
+        apply_napari_dark_theme(self.parent.plot_window)
         self.parent.plot_window.setLayout(QVBoxLayout())
         self.parent.plot_window.setWindowTitle(plot_dict["Description"])
         self.selector = Selector(self, axes, results)

@@ -12,7 +12,6 @@ from qtpy.QtWidgets import (
 )
 from qtpy.QtGui import QDoubleValidator
 
-import napari
 from collections import defaultdict
 
 from scipy.ndimage import label, center_of_mass
@@ -20,6 +19,7 @@ from tqdm import tqdm
 
 from ._grabber import grab_layer
 from ._logger import notify
+from ._qt_utils import apply_napari_dark_theme
 from ._constants import (
     DEFAULT_SPEED_THRESHOLD,
     DEFAULT_SIZE_THRESHOLD,
@@ -37,10 +37,7 @@ class AssistantWindow(QWidget):
 
     def setup_ui(self):
         self.setLayout(QVBoxLayout())
-        try:
-            self.setStyleSheet(napari.qt.get_stylesheet(theme="dark"))
-        except TypeError:
-            self.setStyleSheet(napari.qt.get_stylesheet(theme_id="dark"))
+        apply_napari_dark_theme(self)
 
         ### QObjects
 

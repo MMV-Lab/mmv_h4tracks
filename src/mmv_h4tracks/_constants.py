@@ -1,6 +1,7 @@
 """Constants for the mmv_h4tracks module."""
-# Evaluation threshold
+# Evaluation thresholds
 IOU_THRESHOLD = 0.4
+IOU_LOW_THRESHOLD = 0.2
 
 # Tracking parameters
 APPROX_INF = 65535

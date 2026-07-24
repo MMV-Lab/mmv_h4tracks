@@ -11,12 +11,6 @@ from mmv_h4tracks import MMVH4TRACKS
 
 
 @pytest.fixture
-def create_widget(make_napari_viewer):
-    """Fixture to create a widget instance."""
-    yield MMVH4TRACKS(make_napari_viewer())
-
-
-@pytest.fixture
 def widget_with_tracks(create_widget):
     """Fixture to create a widget with tracks layer containing known track_ids (1, 2, 3, 4)."""
     widget = create_widget

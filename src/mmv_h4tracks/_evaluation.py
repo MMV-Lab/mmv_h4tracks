@@ -1,7 +1,8 @@
-import numpy as np
+import logging
 import math
 from multiprocessing import Pool
 
+import numpy as np
 from qtpy.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -21,11 +22,24 @@ from scipy import ndimage
 from scipy.optimize import linear_sum_assignment
 from numba import jit
 
-from ._constants import IOU_THRESHOLD
+from ._constants import IOU_THRESHOLD, IOU_LOW_THRESHOLD
 from ._logger import notify
 from ._grabber import grab_layer
 from ._utils import preserve_and_filter_graph
 from mmv_h4tracks._logger import handle_exception
+
+logger = logging.getLogger(__name__)
+
+
+@jit(nopython=True)
+def _label_overlap(x, y):
+    x = x.ravel()
+    y = y.ravel()
+
+    overlap = np.zeros((1 + x.max(), 1 + y.max()), dtype=np.uint)
+    for i in range(len(x)):
+        overlap[x[i], y[i]] += 1
+    return overlap
 
 
 class EvaluationWindow(QWidget):
@@ -61,42 +75,42 @@ class EvaluationWindow(QWidget):
         self.evaluation_limit_upper.setValidator(QIntValidator(0, 9999))
 
         # Table
-        segmentation_table = QTableWidget(2, 3)
-        segmentation_table.setSizeAdjustPolicy(QAbstractScrollArea.AdjustToContents)
-        segmentation_table.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Minimum)
-        segmentation_table.setHorizontalHeaderLabels(
+        self.segmentation_table = QTableWidget(2, 3)
+        self.segmentation_table.setSizeAdjustPolicy(QAbstractScrollArea.AdjustToContents)
+        self.segmentation_table.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Minimum)
+        self.segmentation_table.setHorizontalHeaderLabels(
             ["IoU Score", "DICE Score", "AP at 0.5"]
         )
-        segmentation_table.setVerticalHeaderLabels(["Range", "All"])
-        segmentation_table.setItem(0, 0, QTableWidgetItem())
-        segmentation_table.setItem(0, 1, QTableWidgetItem())
-        segmentation_table.setItem(0, 2, QTableWidgetItem())
-        segmentation_table.setItem(1, 0, QTableWidgetItem())
-        segmentation_table.setItem(1, 1, QTableWidgetItem())
-        segmentation_table.setItem(1, 2, QTableWidgetItem())
+        self.segmentation_table.setVerticalHeaderLabels(["Range", "All"])
+        self.segmentation_table.setItem(0, 0, QTableWidgetItem())
+        self.segmentation_table.setItem(0, 1, QTableWidgetItem())
+        self.segmentation_table.setItem(0, 2, QTableWidgetItem())
+        self.segmentation_table.setItem(1, 0, QTableWidgetItem())
+        self.segmentation_table.setItem(1, 1, QTableWidgetItem())
+        self.segmentation_table.setItem(1, 2, QTableWidgetItem())
 
-        tracking_table = QTableWidget(5, 5)
-        tracking_table.setSizeAdjustPolicy(QAbstractScrollArea.AdjustToContents)
-        tracking_table.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Minimum)
-        height = tracking_table.rowHeight(0)
-        tracking_table.setColumnWidth(0, 125)
-        tracking_table.setColumnWidth(1, 40)
-        tracking_table.setColumnWidth(2, height)
-        tracking_table.setColumnWidth(3, 115)
-        tracking_table.setColumnWidth(4, 45)
-        tracking_table.setCellWidget(0, 0, QLabel("False Positives"))
-        tracking_table.setCellWidget(1, 0, QLabel("False Negatives"))
-        tracking_table.setCellWidget(2, 0, QLabel("Split Cells"))
-        tracking_table.setCellWidget(0, 3, QLabel("Added Edges"))
-        tracking_table.setCellWidget(1, 3, QLabel("Removed Edges"))
-        tracking_table.setCellWidget(4, 0, QLabel("<b>Total Fault Value</b>"))
-        tracking_table.setItem(0, 1, QTableWidgetItem())
-        tracking_table.setItem(1, 1, QTableWidgetItem())
-        tracking_table.setItem(2, 1, QTableWidgetItem())
-        tracking_table.setItem(0, 4, QTableWidgetItem())
-        tracking_table.setItem(1, 4, QTableWidgetItem())
-        tracking_table.setItem(4, 1, QTableWidgetItem())
-        tracking_table.setItem(4, 3, QTableWidgetItem())
+        self.tracking_table = QTableWidget(5, 5)
+        self.tracking_table.setSizeAdjustPolicy(QAbstractScrollArea.AdjustToContents)
+        self.tracking_table.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Minimum)
+        height = self.tracking_table.rowHeight(0)
+        self.tracking_table.setColumnWidth(0, 125)
+        self.tracking_table.setColumnWidth(1, 40)
+        self.tracking_table.setColumnWidth(2, height)
+        self.tracking_table.setColumnWidth(3, 115)
+        self.tracking_table.setColumnWidth(4, 45)
+        self.tracking_table.setCellWidget(0, 0, QLabel("False Positives"))
+        self.tracking_table.setCellWidget(1, 0, QLabel("False Negatives"))
+        self.tracking_table.setCellWidget(2, 0, QLabel("Split Cells"))
+        self.tracking_table.setCellWidget(0, 3, QLabel("Added Edges"))
+        self.tracking_table.setCellWidget(1, 3, QLabel("Removed Edges"))
+        self.tracking_table.setCellWidget(4, 0, QLabel("<b>Total Fault Value</b>"))
+        self.tracking_table.setItem(0, 1, QTableWidgetItem())
+        self.tracking_table.setItem(1, 1, QTableWidgetItem())
+        self.tracking_table.setItem(2, 1, QTableWidgetItem())
+        self.tracking_table.setItem(0, 4, QTableWidgetItem())
+        self.tracking_table.setItem(1, 4, QTableWidgetItem())
+        self.tracking_table.setItem(4, 1, QTableWidgetItem())
+        self.tracking_table.setItem(4, 3, QTableWidgetItem())
 
         # Spacer
         self.v_spacer = QWidget()
@@ -129,7 +143,7 @@ class EvaluationWindow(QWidget):
         self.segmentation_results.hide()
         segmentation_results_layout = QGridLayout()
         segmentation_results_layout.addWidget(h_spacer_2, 0, 0)
-        segmentation_results_layout.addWidget(segmentation_table, 1, 0)
+        segmentation_results_layout.addWidget(self.segmentation_table, 1, 0)
 
         self.segmentation_results.setLayout(segmentation_results_layout)
 
@@ -137,7 +151,7 @@ class EvaluationWindow(QWidget):
         self.tracking_results.hide()
         tracking_results_layout = QGridLayout()
         tracking_results_layout.addWidget(h_spacer_3, 0, 0)
-        tracking_results_layout.addWidget(tracking_table, 1, 0)
+        tracking_results_layout.addWidget(self.tracking_table, 1, 0)
 
         self.tracking_results.setLayout(tracking_results_layout)
 
@@ -168,10 +182,10 @@ class EvaluationWindow(QWidget):
         Start the evaluate segmentation worker to keep UI responsive
         """
         self.parent.callback_handler.remove_callback_viewer()
-        print("Segmentation evaluation started…")
+        logger.info("Segmentation evaluation started…")
         worker = self.evaluate_segmentation()
         worker.finished.connect(
-            lambda: print("Segmentation evaluation finished.")
+            lambda: logger.info("Segmentation evaluation finished.")
         )
         worker.start()
 
@@ -245,7 +259,7 @@ class EvaluationWindow(QWidget):
         # all_ap50 = self._calculate_ap50(gt_seg, eval_seg)
 
         ### Update the table
-        table = self.segmentation_results.layout().itemAt(1).widget()
+        table = self.segmentation_table
         table.setVerticalHeaderItem(
             0, QTableWidgetItem(f"{lower_bound} - {upper_bound}")
         )
@@ -315,16 +329,6 @@ class EvaluationWindow(QWidget):
         return tp
 
     def _intersection_over_union(self, gt_seg, eval_seg):
-        @jit(nopython=True)
-        def _label_overlap(x, y):
-            x = x.ravel()
-            y = y.ravel()
-
-            overlap = np.zeros((1 + x.max(), 1 + y.max()), dtype=np.uint)
-            for i in range(len(x)):
-                overlap[x[i], y[i]] += 1
-            return overlap
-
         overlap = _label_overlap(gt_seg, eval_seg)
         n_pixels_pred = np.sum(overlap, axis=0, keepdims=True)
         n_pixels_gt = np.sum(overlap, axis=1, keepdims=True)
@@ -337,10 +341,10 @@ class EvaluationWindow(QWidget):
         Start the evaluate tracking worker to keep UI responsive
         """
         self.parent.callback_handler.remove_callback_viewer()
-        print("Tracking evaluation started…")
+        logger.info("Tracking evaluation started…")
         worker = self.evaluate_tracking()
         worker.finished.connect(
-            lambda: print("Tracking evaluation finished.")
+            lambda: logger.info("Tracking evaluation finished.")
         )
         worker.start()
 
@@ -413,7 +417,7 @@ class EvaluationWindow(QWidget):
         fv = fp + fn * 10 + sc * 5 + de + ae * 1.5
 
         ### Update the table
-        table = self.tracking_results.layout().itemAt(1).widget()
+        table = self.tracking_table
         table.item(0, 1).setText(str(fp))
         table.item(1, 1).setText(str(fn))
         table.item(2, 1).setText(str(sc))
@@ -451,12 +455,17 @@ class EvaluationWindow(QWidget):
         faults = 0
         if np.array_equal(gt_seg, eval_seg):
             return faults
-        AMOUNT_OF_PROCESSES = self.parent.get_process_limit()
+        amount_of_processes = self.parent.get_process_limit()
 
-        slice_pairs = []
-        for i in range(len(gt_seg)):
-            slice_pairs.append((gt_seg[i], eval_seg[i]))
-        with Pool(AMOUNT_OF_PROCESSES) as p:
+        slice_pairs = [(gt_seg[i], eval_seg[i]) for i in range(len(gt_seg))]
+        # Avoid Pool spawn overhead for single-process / tiny stacks (esp. Windows).
+        if amount_of_processes <= 1 or len(slice_pairs) <= 2:
+            return sum(
+                evaluation_function(gt_slice, eval_slice)
+                for gt_slice, eval_slice in slice_pairs
+            )
+
+        with Pool(amount_of_processes) as p:
             faults = sum(p.starmap(evaluation_function, slice_pairs))
 
         return faults
@@ -551,8 +560,8 @@ def get_false_positives(gt_slice, eval_slice):
     """Calculate the number of false positives in a given slice.
     Counts as false positive if:
     - A cell is present in the evaluated slice but not in the ground truth slice.
-    - The highest IoU score of a cell in the evaluated slice is below 0.2.
-    - The highest IoU score of a cell in the evaluated slice is below 0.4 and there are multiple candidate cells.
+    - The highest IoU score of a cell in the evaluated slice is below IOU_LOW_THRESHOLD.
+    - The highest IoU score of a cell in the evaluated slice is below IOU_THRESHOLD and there are multiple candidate cells.
     """
     fp = 0
     if np.array_equal(gt_slice, eval_slice):
@@ -577,8 +586,8 @@ def get_false_positives(gt_slice, eval_slice):
         iou_scores.sort(reverse=True)
         if (
             len(iou_scores) < 1
-            or iou_scores[0] < 0.4
-            and not (len(iou_scores) > 1 and iou_scores[1] < 0.2)
+            or iou_scores[0] < IOU_THRESHOLD
+            and not (len(iou_scores) > 1 and iou_scores[1] < IOU_LOW_THRESHOLD)
         ):
             fp += 1
     return fp
@@ -588,7 +597,7 @@ def get_false_negatives(ground_truth_slice, evaluated_slice):
     """Calculate the number of false negatives in a given slice.
     Counts as false negative if:
     - A cell is present in the ground truth slice but not in the evaluated slice.
-    - The highest IoU score of a cell in the ground truth slice is below 0.4.
+    - The highest IoU score of a cell in the ground truth slice is below IOU_THRESHOLD.
     - The cell in the evaluation slice with the hightest IoU with the ground truth cell has a higher IoU with a different ground truth cell.
     Counts as half a false negative if:
     - The cell in the evaluation slice with the hightest IoU with the ground truth cell has an equal IoU with a different ground truth cell.
@@ -632,7 +641,7 @@ def get_false_negatives(ground_truth_slice, evaluated_slice):
                 max_intersection_over_union = intersection_over_union
                 best_match_evaluated_id = evaluated_id
 
-        if not max_intersection_over_union > 0.4:
+        if not max_intersection_over_union > IOU_THRESHOLD:
             false_negatives += 1
             # Largest IoU too small
             continue
@@ -685,7 +694,7 @@ def get_false_negatives(ground_truth_slice, evaluated_slice):
 def get_split_cells(gt_slice, eval_slice):
     """Calculate the number of split cells in a given slice.
     Counts as split cell if:
-    - A cell in the ground truth slice has two or more cells in the evaluated slice with an IoU score above 0.2.
+    - A cell in the ground truth slice has two or more cells in the evaluated slice with an IoU score above IOU_LOW_THRESHOLD.
     """
     sc = 0
     if np.array_equal(gt_slice, eval_slice):
@@ -708,7 +717,7 @@ def get_split_cells(gt_slice, eval_slice):
             union = np.sum(np.logical_or(eval_slice == cell, gt_slice == gt_cell).flat)
             iou_scores.append(intersection / union)
         iou_scores.sort(reverse=True)
-        if len(iou_scores) > 1 and iou_scores[1] > 0.2:
+        if len(iou_scores) > 1 and iou_scores[1] > IOU_LOW_THRESHOLD:
             sc += 1
     return sc
 

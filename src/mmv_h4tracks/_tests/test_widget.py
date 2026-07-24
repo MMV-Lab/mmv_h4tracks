@@ -9,13 +9,6 @@ from mmv_h4tracks import MMVH4TRACKS
 
 AMOUNT_OF_COMBOBOXES = 3
 
-# make_napari_viewer is a pytest fixture that returns a napari viewer object
-
-
-@pytest.fixture
-def create_widget(make_napari_viewer):
-    yield MMVH4TRACKS(make_napari_viewer())
-
 
 @pytest.fixture
 def viewer_with_widget(create_widget):

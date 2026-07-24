@@ -18,7 +18,7 @@ from ._constants import APPROX_INF, MAX_MATCHING_DIST, CUSTOM_MODEL_PREFIX
 from ._grabber import grab_layer
 from ._session_trained_models import overlap_training_frames_with_stack
 from ._logger import handle_exception, notify
-from ._utils import preserve_and_filter_graph
+from ._qt_utils import layer_as_numpy
 from ._train import CELLPOSE_TRAIN_N_EPOCHS_DEFAULT, _sanitize_model_name_fragment
 
 logger = logging.getLogger(__name__)
@@ -269,17 +269,8 @@ def _load_segmentation_image_data(widget, demo: bool):
     viewer = widget.viewer
     layer = grab_layer(viewer, widget.parent.combobox_image.currentText())
 
-    if isinstance(layer.data, (list, tuple)) and len(layer.data) > 0:
-        data = layer.data[0]
-    elif isinstance(layer.data, np.ndarray):
-        data = layer.data
-    else:
-        try:
-            data = layer.data[0] if hasattr(layer.data, "__getitem__") else layer.data
-        except (TypeError, IndexError, AttributeError):
-            data = layer.data
+    data = layer_as_numpy(layer)
 
-    data = np.asarray(data)
     original_shape = data.shape
     data_squeezed = np.squeeze(data)
     if data_squeezed.ndim not in (2, 3):
@@ -646,37 +637,39 @@ def _get_parameters(widget, model: str):
     -------
     dict
         a dictionary of all the parameters based on selected model
+
+    Raises
+    ------
+    ValueError
+        If ``model`` is not a known hardcoded or registered custom model.
     """
-    # Hardcoded models
+    models_root = Path(__file__).parent.absolute() / "models"
+
     if model == "Neutrophil_granulocytes":
-        params = {
-            "model_path": str(Path(__file__).parent.absolute() / "models" / model),
+        return {
+            "model_path": str(models_root / model),
             "diameter": 15,
             "channels": [0, 0],
             "flow_threshold": 0.4,
             "cellprob_threshold": 0,
         }
     if model == "cpsam":
-        params = {
-            "model_path": str(Path(__file__).parent.absolute() / "models" / model),
-            # "diameter": 15,
-            # "channels": [0, 0],
+        return {
+            "model_path": str(models_root / model),
             "flow_threshold": 0.4,
             "cellprob_threshold": 0,
         }
+    if model.startswith(CUSTOM_MODEL_PREFIX):
+        key = model[len(CUSTOM_MODEL_PREFIX) :]
+        if key in widget.custom_models:
+            entry = widget.custom_models[key]
+            params = dict(entry["params"])
+            params["model_path"] = str(
+                models_root / "custom_models" / entry["filename"]
+            )
+            return params
 
-    model = model[len(CUSTOM_MODEL_PREFIX) :]
-    # Custom models
-    if model in widget.custom_models:
-        params = widget.custom_models[model]["params"]
-        params["model_path"] = str(
-            Path(__file__).parent.absolute()
-            / "models"
-            / "custom_models"
-            / widget.custom_models[model]["filename"]
-        )
-
-    return params
+    raise ValueError(f"Unknown model: {model!r}")
 
 
 @thread_worker(connect={"errored": handle_exception})
@@ -710,7 +703,7 @@ def _track_segmentation(widget):
         QApplication.setOverrideCursor(Qt.WaitCursor)
         ret = widget.ret
         del widget.ret
-        if ret == 65536:
+        if ret == QMessageBox.No:
             QApplication.restoreOverrideCursor()
             return
         
@@ -752,50 +745,8 @@ def _get_segmentation_data(widget):
         )
     except ValueError as exc:
         raise ValueError("Segmentation layer not found in viewer") from exc
-    
-    # Get the actual data array, handling both multiscale and dask arrays
-    if isinstance(label_layer.data, (list, tuple)):
-        # Multiscale: use first level
-        segmentation = np.asarray(label_layer.data[0])
-    else:
-        # Single resolution: convert to numpy to handle dask arrays
-        segmentation = np.asarray(label_layer.data)
-    
-    return segmentation
 
-
-def _add_tracks_to_viewer(params):
-    """
-    Adds the tracks as a layer to the viewer with a specified name
-
-    Parameters
-    ----------
-    tracks : array
-        the tracks data to add to the viewer
-    """
-    # check if tracks are usable
-    if params is None:
-        return
-    widget, tracks, layername = params
-    try:
-        tracks_layer = grab_layer(
-            widget.viewer, widget.parent.combobox_tracks.currentText()
-        )
-    except ValueError as exc:
-        if str(exc) == "Layer name can not be blank":
-            widget.viewer.add_tracks(tracks, name=layername)
-        else:
-            handle_exception(exc)
-            return
-    else:
-        # Preserve and filter graph from existing layer
-        filtered_graph = preserve_and_filter_graph(tracks_layer, tracks)
-        tracks_layer.data = tracks
-        if filtered_graph:
-            tracks_layer.graph = filtered_graph
-    widget.parent.tracks = tracks
-    widget.parent.eval_cache[1] = tracks
-    widget.parent.combobox_tracks.setCurrentText(layername)
+    return layer_as_numpy(label_layer)
 
 
 def _check_for_tracks_layer(widget):
