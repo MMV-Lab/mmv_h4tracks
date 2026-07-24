@@ -20,9 +20,14 @@ from qtpy.QtWidgets import (
 )
 from scipy import ndimage, stats
 
-from ._constants import LINK_TEXT, UNLINK_TEXT, CONFIRM_TEXT, MIN_TRACK_LENGTH
+from ._constants import (
+    LINK_TEXT,
+    UNLINK_TEXT,
+    CONFIRM_TEXT,
+    MIN_TRACK_LENGTH,
+    MIN_OVERLAP,
+)
 from ._logger import notify, choice_dialog, handle_exception
-from ._grabber import grab_layer
 from ._utils import preserve_and_filter_graph
 from ._qt_utils import apply_napari_dark_theme, layer_as_numpy
 import mmv_h4tracks._processing as processing
@@ -213,9 +218,7 @@ class TrackingWindow(QWidget):
     def worker_overlap_tracking(self):
         QApplication.setOverrideCursor(Qt.WaitCursor)
         self.reset_button_labels()
-        label_layer = grab_layer(
-            self.viewer, self.parent.combobox_segmentation.currentText()
-        )
+        label_layer = self.parent.selected_labels_layer()
         if label_layer is None:
             raise ValueError("No segmentation layer to track")
 
@@ -254,7 +257,7 @@ class TrackingWindow(QWidget):
                 threads_input.append([segmentation, start_slice, label_id])
 
             with Pool(AMOUNT_OF_PROCESSES) as pool:
-                track_cells = pool.starmap(func, threads_input)
+                track_cells = pool.starmap(track_by_overlap, threads_input)
 
             for entry in track_cells:
                 if entry is None:
@@ -280,7 +283,7 @@ class TrackingWindow(QWidget):
         Adds a callback to the viewer to track cells on click
         """
         try:
-            _ = grab_layer(self.viewer, self.parent.combobox_segmentation.currentText())
+            _ = self.parent.selected_labels_layer()
         except ValueError as exc:
             handle_exception(exc)
             return
@@ -302,15 +305,13 @@ class TrackingWindow(QWidget):
             self.parent.callback_handler.remove_callback_viewer()
 
             try:
-                label_layer = grab_layer(
-                    self.viewer, self.parent.combobox_segmentation.currentText()
-                )
+                label_layer = self.parent.selected_labels_layer()
             except ValueError as exc:
                 handle_exception(exc)
                 return
 
-            # Extract position based on segmentation layer dimensionality
-            ndim = label_layer.data.ndim
+            segmentation = layer_as_numpy(label_layer)
+            ndim = segmentation.ndim
             if ndim == 2:
                 raise ValueError("2D image can not be tracked.")
             position = tuple(int(round(p)) for p in event.position[-ndim:])
@@ -321,7 +322,7 @@ class TrackingWindow(QWidget):
                 return
 
             worker = self.worker_single_overlap_tracking(
-                label_layer.data, int(position[0]), selected_cell
+                segmentation, int(position[0]), selected_cell
             )
             worker.returned.connect(self.evaluate_proposed_track)
 
@@ -337,60 +338,25 @@ class TrackingWindow(QWidget):
 
         Parameters
         ----------
-        label_layer : napari layer
-            The label layer
-        slice : int
+        segmentation : np.ndarray
+            Label volume (ZYX)
+        slice_id : int
             The slice to track the cell from
         selected_cell : int
             The selected cell
 
         Returns
         -------
-        track: np.ndarray
-            The proposed track
+        track: list
+            The proposed track as ``[z, y, x]`` rows (may be short / empty;
+            ``evaluate_proposed_track`` enforces ``MIN_TRACK_LENGTH``).
         """
-        start_slice = slice_id
-        track = []
-        MIN_OVERLAP = 0.7
-        if segmentation.shape[0] - slice_id < MIN_TRACK_LENGTH:
-            # Cell is too close to the end to have a track long enough
-            return track
-        cell_indices = np.where(segmentation[slice_id] == selected_cell)
-        while slice_id + 1 < segmentation.shape[0]:
-            matched_ids = segmentation[slice_id + 1][cell_indices]
-            matched_ids_counted = np.unique(matched_ids, return_counts=True)
-            index_highest_overlap = np.argmax(matched_ids_counted[1])
-            if (
-                matched_ids_counted[1][index_highest_overlap]
-                <= MIN_OVERLAP * np.sum(matched_ids_counted[1])
-                or matched_ids_counted[0][index_highest_overlap] == 0
-            ):
-                # No cell with big enough overlap found
-                return track
-
-            if slice_id == start_slice:
-                centroid = ndimage.center_of_mass(
-                    segmentation[slice_id],
-                    labels=segmentation[slice_id],
-                    index=selected_cell,
-                )
-                track.append(
-                    [slice_id, int(np.rint(centroid[0])), int(np.rint(centroid[1]))]
-                )
-            centroid = ndimage.center_of_mass(
-                segmentation[slice_id + 1],
-                labels=segmentation[slice_id + 1],
-                index=matched_ids_counted[0][index_highest_overlap],
-            )
-            track.append(
-                [slice_id + 1, int(np.rint(centroid[0])), int(np.rint(centroid[1]))]
-            )
-
-            selected_cell = matched_ids_counted[0][index_highest_overlap]
-            slice_id += 1
-            cell_indices = np.where(segmentation[slice_id] == selected_cell)
-
-        return track
+        return track_by_overlap(
+            segmentation,
+            slice_id,
+            selected_cell,
+            discard_short=False,
+        )
 
     def evaluate_proposed_track(self, proposed_track: list):
         """
@@ -543,9 +509,7 @@ class TrackingWindow(QWidget):
             Callback for the unlink function to store the selected cells
             """
             try:
-                label_layer = grab_layer(
-                    self.viewer, self.parent.combobox_segmentation.currentText()
-                )
+                label_layer = self.parent.selected_labels_layer()
 
                 # Extract position based on segmentation layer dimensionality
                 data_array = layer_as_numpy(label_layer)
@@ -726,9 +690,7 @@ class TrackingWindow(QWidget):
             Callback for the unlink function to store the selected cells
             """
             try:
-                label_layer = grab_layer(
-                    self.viewer, self.parent.combobox_segmentation.currentText()
-                )
+                label_layer = self.parent.selected_labels_layer()
 
                 # Extract position based on segmentation layer dimensionality
                 data_array = layer_as_numpy(label_layer)
@@ -1265,9 +1227,8 @@ class TrackingWindow(QWidget):
         tracks_layer : napari layer
             The tracks layer
         """
-        tracks_name = self.parent.combobox_tracks.currentText()
         try:
-            return grab_layer(self.viewer, tracks_name)
+            return self.parent.selected_tracks_layer()
         except ValueError:
             return None
 
@@ -1283,9 +1244,7 @@ class TrackingWindow(QWidget):
         Updates all centroids to account for changed segmentation
         """
         self.parent.callback_handler.remove_callback_viewer()
-        label_layer = grab_layer(
-            self.viewer, self.parent.combobox_segmentation.currentText()
-        )
+        label_layer = self.parent.selected_labels_layer()
         if label_layer is None:
             return
         tracks_layer = self.get_tracks_layer()
@@ -1335,9 +1294,7 @@ class TrackingWindow(QWidget):
         """
         Updates a single centroid to account for changed segmentation
         """
-        label_layer = grab_layer(
-            self.viewer, self.parent.combobox_segmentation.currentText()
-        )
+        label_layer = self.parent.selected_labels_layer()
         if label_layer is None:
             return
         tracks_layer = self.get_tracks_layer()
@@ -1375,67 +1332,84 @@ class TrackingWindow(QWidget):
                 tracks_layer.graph = filtered_graph
 
 
-def func(label_data, start_slice, id):
+def track_by_overlap(
+    label_data,
+    start_slice: int,
+    label_id: int,
+    discard_short: bool = True,
+    min_overlap: float = MIN_OVERLAP,
+):
     """
-    Performs the proximity tracking for a single cell
+    Follow one cell forward in time by maximum label overlap.
 
     Parameters
     ----------
-    label_data : np.ndarray
-        The label data
+    label_data :
+        3D label volume (ZYX); converted with ``np.asarray``.
     start_slice : int
-        The slice to start the tracking
-    id : int
-        The id of the cell to track
+        Frame index to start from.
+    label_id : int
+        Label value of the seed cell on ``start_slice``.
+    discard_short : bool
+        If True (batch / Pool path), return ``None`` when the track is shorter
+        than ``MIN_TRACK_LENGTH``. If False (interactive single-cell path),
+        return the (possibly short) list for the caller to evaluate.
+    min_overlap : float
+        Minimum fraction of seed pixels that must map to the next label.
 
     Returns
     -------
-    track_cells : list
-        The tracked cells
+    list or None
+        Rows ``[z, y, x]`` for each frame in the track, or ``None`` when
+        ``discard_short`` and the track is too short / empty.
     """
-    MIN_OVERLAP = 0.7
-
-    # Convert to numpy array to handle dask arrays
     label_data = np.asarray(label_data)
+    n_frames = len(label_data)
+    empty = None if discard_short else []
+
+    if n_frames - start_slice < MIN_TRACK_LENGTH:
+        return empty
 
     slice_id = start_slice
-
+    current_id = label_id
     track_cells = []
-    cell = np.where(label_data[start_slice] == id)
-    while slice_id + 1 < len(label_data):
+    cell = np.where(label_data[start_slice] == current_id)
+
+    while slice_id + 1 < n_frames:
         matching = label_data[slice_id + 1][cell]
         matches = np.unique(matching, return_counts=True)
         maximum = np.argmax(matches[1])
         if (
-            matches[1][maximum] <= MIN_OVERLAP * np.sum(matches[1])
+            matches[1][maximum] <= min_overlap * np.sum(matches[1])
             or matches[0][maximum] == 0
         ):
-            if len(track_cells) < MIN_TRACK_LENGTH:
-                return
-            return track_cells
+            break
 
         if slice_id == start_slice:
             centroid = ndimage.center_of_mass(
-                label_data[slice_id], labels=label_data[slice_id], index=id
+                label_data[slice_id],
+                labels=label_data[slice_id],
+                index=current_id,
             )
             track_cells.append(
                 [slice_id, int(np.rint(centroid[0])), int(np.rint(centroid[1]))]
             )
+        next_id = matches[0][maximum]
         centroid = ndimage.center_of_mass(
             label_data[slice_id + 1],
             labels=label_data[slice_id + 1],
-            index=matches[0][maximum],
+            index=next_id,
         )
-
         track_cells.append(
             [slice_id + 1, int(np.rint(centroid[0])), int(np.rint(centroid[1]))]
         )
 
-        id = matches[0][maximum]
+        current_id = next_id
         slice_id += 1
-        cell = np.where(label_data[slice_id] == id)
-    if len(track_cells) < MIN_TRACK_LENGTH:
-        return
+        cell = np.where(label_data[slice_id] == current_id)
+
+    if discard_short and len(track_cells) < MIN_TRACK_LENGTH:
+        return None
     return track_cells
 
 

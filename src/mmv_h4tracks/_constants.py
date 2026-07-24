@@ -21,5 +21,8 @@ CONFIRM_TEXT = "Confirm"
 # Minimum acceptable track length
 MIN_TRACK_LENGTH = 5
 
+# Fraction of overlapping label pixels required to continue an overlap track
+MIN_OVERLAP = 0.7
+
 # Prefix for custom cellpose models
 CUSTOM_MODEL_PREFIX = "custom_"

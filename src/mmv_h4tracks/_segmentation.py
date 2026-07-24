@@ -23,7 +23,6 @@ import pandas as pd
 
 from ._constants import CUSTOM_MODEL_PREFIX
 from ._logger import notify, handle_exception
-from ._grabber import grab_layer
 from ._train import (
     CELLPOSE_TRAIN_N_EPOCHS_LONG,
     export_cellpose_training_pairs,
@@ -361,7 +360,7 @@ class SegmentationWindow(QWidget):
         Adds the callback to remove the label at the given position from the segmentation layer
         """
         try:
-            grab_layer(self.viewer, self.parent.combobox_segmentation.currentText())
+            self.parent.selected_labels_layer()
         except ValueError as exc:
             handle_exception(exc)
             return
@@ -391,9 +390,7 @@ class SegmentationWindow(QWidget):
         event : Event
             the event that triggered the callback
         """
-        label_layer = grab_layer(
-            self.viewer, self.parent.combobox_segmentation.currentText()
-        )
+        label_layer = self.parent.selected_labels_layer()
         if label_layer is None:
             return
         
@@ -416,9 +413,7 @@ class SegmentationWindow(QWidget):
         """
         if len(position) < 2:
             return
-        label_layer = grab_layer(
-            self.viewer, self.parent.combobox_segmentation.currentText()
-        )
+        label_layer = self.parent.selected_labels_layer()
 
         if label_layer is None:
             QApplication.restoreOverrideCursor()
@@ -453,7 +448,7 @@ class SegmentationWindow(QWidget):
         if tracks_name == "":
             print("no tracks")
             return
-        tracks_layer = grab_layer(self.viewer, tracks_name)
+        tracks_layer = self.parent.selected_tracks_layer()
 
         tracks = tracks_layer.data
         filter_values = None
@@ -493,9 +488,9 @@ class SegmentationWindow(QWidget):
         bool
             whether the track is displayed or not
         """
-        tracks_name = self.parent.combobox_tracks.currentText()
-        tracks_layer = grab_layer(self.viewer, tracks_name)
-        if tracks_layer is None:
+        try:
+            tracks_layer = self.parent.selected_tracks_layer()
+        except ValueError:
             return
         tracks = tracks_layer.data
 
@@ -513,7 +508,7 @@ class SegmentationWindow(QWidget):
         Adds the callback to select the label at the given position
         """
         try:
-            _ = grab_layer(self.viewer, self.parent.combobox_segmentation.currentText())
+            _ = self.parent.selected_labels_layer()
         except ValueError as exc:
             handle_exception(exc)
             return
@@ -548,9 +543,7 @@ class SegmentationWindow(QWidget):
         if id == 0:
             self.parent.callback_handler.remove_callback_viewer()
             QApplication.restoreOverrideCursor()
-        label_layer = grab_layer(
-            self.viewer, self.parent.combobox_segmentation.currentText()
-        )
+        label_layer = self.parent.selected_labels_layer()
         if label_layer is None:
             notify("Please make sure the label layer exists!")
             return
@@ -587,7 +580,7 @@ class SegmentationWindow(QWidget):
         Adds the callback to replace the label at the given position with the currently selected one
         """
         try:
-            grab_layer(self.viewer, self.parent.combobox_segmentation.currentText())
+            self.parent.selected_labels_layer()
         except ValueError as exc:
             handle_exception(exc)
             return
@@ -620,7 +613,7 @@ class SegmentationWindow(QWidget):
         Adds the callback to merge the label at the given position with the currently selected one
         """
         try:
-            grab_layer(self.viewer, self.parent.combobox_segmentation.currentText())
+            self.parent.selected_labels_layer()
         except ValueError as exc:
             handle_exception(exc)
             return
@@ -669,9 +662,7 @@ class SegmentationWindow(QWidget):
         id : int
             the id to set for the given position
         """
-        label_layer = grab_layer(
-            self.viewer, self.parent.combobox_segmentation.currentText()
-        )
+        label_layer = self.parent.selected_labels_layer()
         if label_layer is None:
             notify("Please make sure the label layer exists!")
             return
@@ -704,9 +695,7 @@ class SegmentationWindow(QWidget):
         int
             id at the given position in the segmentation layer
         """
-        label_layer = grab_layer(
-            self.viewer, self.parent.combobox_segmentation.currentText()
-        )
+        label_layer = self.parent.selected_labels_layer()
         if label_layer is None:
             notify("Please make sure the label layer exists!")
             return

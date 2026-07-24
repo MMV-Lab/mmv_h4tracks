@@ -318,11 +318,23 @@ class MMVH4TRACKS(QWidget):
             lambda: mmv_processing.scan_mmvh4tracks_training_temp_on_startup(self),
         )
 
+    def selected_image_layer(self):
+        """Return the Image layer named in combobox_image. Raises ValueError if blank/missing."""
+        return grab_layer(self.viewer, self.combobox_image.currentText())
+
+    def selected_labels_layer(self):
+        """Return the Labels layer named in combobox_segmentation. Raises ValueError if blank/missing."""
+        return grab_layer(self.viewer, self.combobox_segmentation.currentText())
+
+    def selected_tracks_layer(self):
+        """Return the Tracks layer named in combobox_tracks. Raises ValueError if blank/missing."""
+        return grab_layer(self.viewer, self.combobox_tracks.currentText())
+
     def hotkey_next_free(self, _):
         """
         Hotkey for the next free label id
         """
-        label_layer = grab_layer(self.viewer, self.combobox_segmentation.currentText())
+        label_layer = self.selected_labels_layer()
         self.segmentation_window._set_label_id()
         label_layer.mode = "paint"
 
@@ -365,7 +377,7 @@ class MMVH4TRACKS(QWidget):
         
         # Get tracks layer
         try:
-            tracks_layer = grab_layer(self.viewer, tracks_name)
+            tracks_layer = self.selected_tracks_layer()
         except ValueError:
             print(f"Error: Tracks layer '{tracks_name}' not found.")
             return
@@ -780,8 +792,7 @@ class MMVH4TRACKS(QWidget):
             Array of filtered tracks with shape (n_tracks, 4) where columns are
             [track_id, time, y, x]. Tracks that only exist in a single frame are filtered out.
         """
-        segmentation_name = self.combobox_segmentation.currentText()
-        seg_layer = grab_layer(self.viewer, segmentation_name)
+        seg_layer = self.selected_labels_layer()
         seg_data = seg_layer.data
 
         tracks = []
@@ -845,8 +856,7 @@ class MMVH4TRACKS(QWidget):
         # Check if raw image layer has a scale attribute and pass it to add_tracks
         scale = None
         try:
-            raw_name = self.combobox_image.currentText()
-            raw_layer = grab_layer(self.viewer, raw_name)
+            raw_layer = self.selected_image_layer()
             if raw_layer is not None and hasattr(raw_layer, 'scale'):
                 scale_attr = raw_layer.scale
                 if isinstance(scale_attr, np.ndarray):
@@ -917,15 +927,11 @@ class MMVH4TRACKS(QWidget):
         self.callback_handler.remove_callback_viewer()
         QApplication.setOverrideCursor(Qt.WaitCursor)
         # self.tracking_window.update_all_centroids()
-        raw_name = self.combobox_image.currentText()
-        raw_layer = grab_layer(self.viewer, raw_name)
-        segmentation_name = self.combobox_segmentation.currentText()
-        segmentation_layer = grab_layer(self.viewer, segmentation_name)
-
-        # layers = [raw_layer, segmentation_layer]
-        tracks_name = self.combobox_tracks.currentText()
-        tracks_layer = grab_layer(self.viewer, tracks_name)
-        layers = [raw_layer, segmentation_layer, tracks_layer]
+        layers = [
+            self.selected_image_layer(),
+            self.selected_labels_layer(),
+            self.selected_tracks_layer(),
+        ]
 
         # self.assistant_window.align_ids_on_click(saving=True)
         save_zarr(self.zarr, layers)
@@ -959,12 +965,9 @@ class MMVH4TRACKS(QWidget):
 
         self.callback_handler.remove_callback_viewer()
         # self.tracking_window.update_all_centroids()
-        raw_name = self.combobox_image.currentText()
-        raw_layer = grab_layer(self.viewer, raw_name)
-        segmentation_name = self.combobox_segmentation.currentText()
-        segmentation_layer = grab_layer(self.viewer, segmentation_name)
-        tracks_name = self.combobox_tracks.currentText()
-        tracks_layer = grab_layer(self.viewer, tracks_name)
+        raw_layer = self.selected_image_layer()
+        segmentation_layer = self.selected_labels_layer()
+        tracks_layer = self.selected_tracks_layer()
 
         # layers = [raw_layer, segmentation_layer]
         layers = [raw_layer, segmentation_layer, tracks_layer]

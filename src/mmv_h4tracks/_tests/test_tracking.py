@@ -6,12 +6,51 @@ import numpy as np
 from scipy.ndimage import center_of_mass
 
 from mmv_h4tracks import MMVH4TRACKS
-from mmv_h4tracks._constants import LINK_TEXT, UNLINK_TEXT
+from mmv_h4tracks._constants import LINK_TEXT, UNLINK_TEXT, MIN_TRACK_LENGTH
 from mmv_h4tracks._reader import build_multiscale
 import mmv_h4tracks._tracking as tracking
 from mmv_h4tracks._tests.data_loading import DATA_ROOT, load_image_zyx, load_named_tracks, load_named_volumes
 
 PATH = DATA_ROOT
+
+
+def _synthetic_overlap_volume(n_frames: int = 6, size: int = 4) -> np.ndarray:
+    """Stationary blob (label 1) across ``n_frames`` for overlap-track unit tests."""
+    seg = np.zeros((n_frames, 32, 32), dtype=np.int32)
+    for z in range(n_frames):
+        seg[z, 10 : 10 + size, 10 : 10 + size] = 1
+    return seg
+
+
+@pytest.mark.unit
+def test_track_by_overlap_follows_stationary_cell():
+    seg = _synthetic_overlap_volume(n_frames=MIN_TRACK_LENGTH + 1)
+    track = tracking.track_by_overlap(seg, 0, 1, discard_short=True)
+    assert track is not None
+    assert len(track) == seg.shape[0]
+    assert track[0][0] == 0 and track[-1][0] == seg.shape[0] - 1
+    # Centroids stay near the blob center.
+    for row in track:
+        assert 10 <= row[1] <= 13
+        assert 10 <= row[2] <= 13
+
+
+@pytest.mark.unit
+def test_track_by_overlap_discards_short_when_requested():
+    seg = _synthetic_overlap_volume(n_frames=MIN_TRACK_LENGTH - 1)
+    assert tracking.track_by_overlap(seg, 0, 1, discard_short=True) is None
+    assert tracking.track_by_overlap(seg, 0, 1, discard_short=False) == []
+
+
+@pytest.mark.unit
+def test_track_by_overlap_breaks_on_disappearance():
+    seg = _synthetic_overlap_volume(n_frames=8)
+    seg[3:] = 0  # cell vanishes from frame 3 onward
+    track = tracking.track_by_overlap(seg, 0, 1, discard_short=False)
+    # Frames 0-1-2 linked (start + two successful steps into frames 1 and 2), then stop.
+    assert track is not None
+    assert len(track) == 3
+    assert track[-1][0] == 2
 
 
 # segmentation and tracking used from a changed version of

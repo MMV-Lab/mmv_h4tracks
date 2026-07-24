@@ -266,8 +266,7 @@ def _load_segmentation_image_data(widget, demo: bool):
     Load the selected image layer as a squeezed numpy volume (same as segmentation worker).
     Returns (data_squeezed, removed_dims).
     """
-    viewer = widget.viewer
-    layer = grab_layer(viewer, widget.parent.combobox_image.currentText())
+    layer = widget.parent.selected_image_layer()
 
     data = layer_as_numpy(layer)
 
@@ -740,9 +739,7 @@ def _get_segmentation_data(widget):
         the segmentation data as a numpy array
     """
     try:
-        label_layer = grab_layer(
-            widget.viewer, widget.parent.combobox_segmentation.currentText()
-        )
+        label_layer = widget.parent.selected_labels_layer()
     except ValueError as exc:
         raise ValueError("Segmentation layer not found in viewer") from exc
 
@@ -768,9 +765,7 @@ def _check_for_tracks_layer(widget):
     tracks_name = "Tracks"
     collision = True
     try:
-        tracks_layer = grab_layer(
-            widget.viewer, widget.parent.combobox_tracks.currentText()
-        )
+        tracks_layer = widget.parent.selected_tracks_layer()
     except ValueError:
         collision = False
     else:

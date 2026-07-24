@@ -23,7 +23,6 @@ from napari.qt.threading import thread_worker
 from skimage import measure
 import math
 
-from ._grabber import grab_layer
 from ._qt_utils import apply_napari_dark_theme
 
 from mmv_h4tracks._logger import handle_exception
@@ -580,9 +579,7 @@ class AnalysisWindow(QWidget):
         retval: dict
             dictionary containing the metric data and results
         """
-        tracks_layer = grab_layer(
-            self.parent.viewer, self.parent.combobox_tracks.currentText()
-        )
+        tracks_layer = self.parent.selected_tracks_layer()
         retval = {}
         if metric == "Speed":
             retval.update({"Name": "Speed [px/frame]"})
@@ -594,9 +591,7 @@ class AnalysisWindow(QWidget):
 
         elif metric == "Size":
             retval.update({"Name": "Size [pixels]"})
-            segmentation_layer = grab_layer(
-                self.viewer, self.parent.combobox_segmentation.currentText()
-            )
+            segmentation_layer = self.parent.selected_labels_layer()
             retval.update(
                 {"Description": "Scatterplot Standard Deviation vs Average: Size"}
             )
@@ -653,9 +648,7 @@ class AnalysisWindow(QWidget):
 
         elif metric == "Eccentricity":
             retval.update({"Name": "Eccentricity [a.u.]"})
-            segmentation_layer = grab_layer(
-                self.viewer, self.parent.combobox_segmentation.currentText()
-            )
+            segmentation_layer = self.parent.selected_labels_layer()
             retval.update(
                 {
                     "Description": "Scatterplot Standard Deviation vs Average: Eccentricity"
@@ -672,9 +665,7 @@ class AnalysisWindow(QWidget):
 
         elif metric == "Perimeter":
             retval.update({"Name": "Perimeter [pixels]"})
-            segmentation_layer = grab_layer(
-                self.viewer, self.parent.combobox_segmentation.currentText()
-            )
+            segmentation_layer = self.parent.selected_labels_layer()
             retval.update(
                 {"Description": "Scatterplot Standard Deviation vs Average: Perimeter"}
             )
@@ -763,9 +754,7 @@ class AnalysisWindow(QWidget):
             list of metrics to export
         """
         QApplication.setOverrideCursor(Qt.WaitCursor)
-        tracks = grab_layer(
-            self.parent.viewer, self.parent.combobox_tracks.currentText()
-        ).data
+        tracks = self.parent.selected_tracks_layer().data
         direction = self._calculate_direction(tracks)
         self.direction = direction
 
@@ -985,9 +974,7 @@ class AnalysisWindow(QWidget):
             metrics_dict.update({"Speed": speed})
 
         if "Size" in selected_metrics:
-            segmentation = grab_layer(
-                self.viewer, self.parent.combobox_segmentation.currentText()
-            ).data
+            segmentation = self.parent.selected_labels_layer().data
             size = self._calculate_size(tracks, segmentation)
             metrics.extend(
                 ["Average size [# pixels]", "Standard deviation of size [# pixels]"]
@@ -1183,9 +1170,7 @@ class AnalysisWindow(QWidget):
                 metrics_dict.update({"Directness": directness})
 
         if "Perimeter" in selected_metrics:
-            segmentation = grab_layer(
-                self.viewer, self.parent.combobox_segmentation.currentText()
-            ).data
+            segmentation = self.parent.selected_labels_layer().data
             perimeter = self.calculate_cell_perimeter(tracks, segmentation)
             metrics.extend(
                 [
@@ -1232,9 +1217,7 @@ class AnalysisWindow(QWidget):
             metrics_dict.update({"Perimeter": perimeter})
 
         if "Eccentricity" in selected_metrics:
-            segmentation = grab_layer(
-                self.viewer, self.parent.combobox_segmentation.currentText()
-            ).data
+            segmentation = self.parent.selected_labels_layer().data
             eccentricity = self.calculate_cell_eccentricity(tracks, segmentation)
             metrics.extend(
                 [

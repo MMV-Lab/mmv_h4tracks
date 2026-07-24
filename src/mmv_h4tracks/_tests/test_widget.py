@@ -75,6 +75,30 @@ def test_widget_creation(create_widget):
     assert isinstance(create_widget, MMVH4TRACKS)
 
 
+@pytest.mark.unit
+def test_selected_labels_layer(create_widget):
+    """Selected layer helpers resolve combobox selection and reject blank/missing names."""
+    widget = create_widget
+    viewer = widget.viewer
+    combo = widget.combobox_segmentation
+    name = "MyLabels"
+    labels = viewer.add_labels(np.zeros((1, 5, 5), dtype=int), name=name)
+    combo.setCurrentText(name)
+    assert widget.selected_labels_layer().name == name
+
+    # Removing the last Labels layer restores the empty combobox entry.
+    viewer.layers.remove(labels)
+    assert combo.currentText() == ""
+    with pytest.raises(ValueError, match="blank"):
+        widget.selected_labels_layer()
+
+    # Select a combobox entry that does not exist as a viewer layer.
+    combo.addItem("MissingLayer")
+    combo.setCurrentText("MissingLayer")
+    with pytest.raises(ValueError, match="does not exist"):
+        widget.selected_labels_layer()
+
+
 @pytest.mark.combobox
 @pytest.mark.unit
 @pytest.mark.parametrize("index", range(AMOUNT_OF_COMBOBOXES))

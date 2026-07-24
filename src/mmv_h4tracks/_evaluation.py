@@ -195,9 +195,7 @@ class EvaluationWindow(QWidget):
         Evaluate the segmentation results against the curated segmentation.
         """
         try:
-            gt_seg = grab_layer(
-                self.viewer, self.parent.combobox_segmentation.currentText()
-            ).data
+            gt_seg = self.parent.selected_labels_layer().data
         except ValueError as exc:
             handle_exception(exc)
             return
@@ -352,12 +350,8 @@ class EvaluationWindow(QWidget):
     def evaluate_tracking(self):
         """Evaluate the tracking results against the curated tracks."""
         try:
-            gt_tracks_layer = grab_layer(
-                self.viewer, self.parent.combobox_tracks.currentText()
-            )
-            gt_seg = grab_layer(
-                self.viewer, self.parent.combobox_segmentation.currentText()
-            ).data
+            gt_tracks_layer = self.parent.selected_tracks_layer()
+            gt_seg = self.parent.selected_labels_layer().data
 
         except ValueError as exc:
             handle_exception(exc)
