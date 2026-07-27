@@ -6,6 +6,7 @@ from unittest.mock import patch, Mock
 from qtpy.QtWidgets import QMessageBox
 
 from mmv_h4tracks import MMVH4TRACKS
+from mmv_h4tracks._constants import DEFAULT_TRACKS_LAYER_NAME
 
 
 @pytest.fixture
@@ -129,8 +130,8 @@ def test_display_cached_tracks_creates_new_layer_with_graph(widget_with_tracks_a
     # Restore cached tracks (should create new layer)
     tracking_window.display_cached_tracks()
     
-    # Get the new layer (display_cached_tracks creates layer named "Tracks")
-    new_tracks_layer = widget.viewer.layers["Tracks"]
+    # Get the new layer (display_cached_tracks uses DEFAULT_TRACKS_LAYER_NAME)
+    new_tracks_layer = widget.viewer.layers[DEFAULT_TRACKS_LAYER_NAME]
     
     # Check that all tracks are restored
     displayed_track_ids = set(np.unique(new_tracks_layer.data[:, 0]).astype(int))
@@ -167,7 +168,7 @@ def test_create_implicit_tracks_preserves_lineage(widget_with_tracks_and_lineage
         widget.create_implicit_tracks_wrapper(None)
     
     # Get the new tracks layer
-    new_tracks_layer = widget.viewer.layers["Tracks"]
+    new_tracks_layer = widget.viewer.layers[DEFAULT_TRACKS_LAYER_NAME]
     
     # Check that graph is preserved (filtered to only include valid track IDs)
     # Since create_implicit_tracks creates new tracks from segmentation,
@@ -232,7 +233,7 @@ def test_process_new_tracks_creates_new_layer_without_graph(widget_with_tracks_a
     tracking_window.process_new_tracks(new_tracks)
     
     # Get the new layer
-    new_tracks_layer = widget.viewer.layers["Tracks"]
+    new_tracks_layer = widget.viewer.layers[DEFAULT_TRACKS_LAYER_NAME]
     
     # New layer should have no graph (since there was no previous layer)
     assert not new_tracks_layer.graph or new_tracks_layer.graph == {}
@@ -382,7 +383,7 @@ def test_add_entries_to_tracks_creates_new_layer_without_graph(widget_with_track
     tracking_window.add_entries_to_tracks(new_cells, track_id=1)
     
     # Get the new layer
-    new_tracks_layer = widget.viewer.layers["Tracks"]
+    new_tracks_layer = widget.viewer.layers[DEFAULT_TRACKS_LAYER_NAME]
     
     # New layer should have no graph (since there was no previous layer)
     assert not new_tracks_layer.graph or new_tracks_layer.graph == {}

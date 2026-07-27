@@ -37,9 +37,6 @@ def reset_plugin_state(widget: MMVH4TRACKS) -> None:
     tracking.cached_graph = None
     tracking.selected_cells = []
     tracking.reset_button_labels()
-    tracking.choice_event.clear()
-    if hasattr(tracking, "ret"):
-        delattr(tracking, "ret")
 
     handler = widget.callback_handler
     handler._added_callback = None

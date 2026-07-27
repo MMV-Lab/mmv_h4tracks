@@ -337,7 +337,7 @@ def test_added_edges(set_widget_up, layername, expected_value):
     gt_tracks = viewer.layers[viewer.layers.index("GT_tracks")].data
     eval_tracks_layer = viewer.layers[viewer.layers.index(layername)]
     widget.combobox_tracks.setCurrentIndex(widget.combobox_tracks.findText(layername))
-    bounds = (0, gt_seg.shape[0])
+    bounds = (0, gt_seg.shape[0] - 1)
     window.adjust_centroids(gt_seg, eval_tracks_layer, bounds)
     eval_tracks = eval_tracks_layer.data
     _, ae = window.get_track_fault(gt_seg, gt_tracks, eval_seg, eval_tracks)
@@ -378,7 +378,7 @@ def test_added_edges_changed_seg(set_widget_up, layername, expected_value):
     gt_tracks = viewer.layers[viewer.layers.index("GT_tracks")].data
     eval_tracks_layer = viewer.layers[viewer.layers.index(layername)]
     widget.combobox_tracks.setCurrentIndex(widget.combobox_tracks.findText(layername))
-    bounds = (0, gt_seg.shape[0])
+    bounds = (0, gt_seg.shape[0] - 1)
     window.adjust_centroids(eval_seg, eval_tracks_layer, bounds)
     eval_tracks = eval_tracks_layer.data
     _, ae = window.get_track_fault(gt_seg, gt_tracks, eval_seg, eval_tracks)
@@ -418,7 +418,7 @@ def test_deleted_edges_identical_segmentation(set_widget_up, layername, expected
     gt_tracks = viewer.layers[viewer.layers.index("GT_tracks")].data
     eval_tracks_layer = viewer.layers[viewer.layers.index(layername)]
     widget.combobox_tracks.setCurrentIndex(widget.combobox_tracks.findText(layername))
-    bounds = (0, gt_seg.shape[0])
+    bounds = (0, gt_seg.shape[0] - 1)
     window.adjust_centroids(gt_seg, eval_tracks_layer, bounds)
     eval_tracks = eval_tracks_layer.data
     de, _ = window.get_track_fault(gt_seg, gt_tracks, eval_seg, eval_tracks)
@@ -459,7 +459,7 @@ def test_deleted_edges(set_widget_up, layername, expected_value):
     gt_tracks = viewer.layers[viewer.layers.index("GT_tracks")].data
     eval_tracks_layer = viewer.layers[viewer.layers.index(layername)]
     widget.combobox_tracks.setCurrentIndex(widget.combobox_tracks.findText(layername))
-    bounds = (0, gt_seg.shape[0])
+    bounds = (0, gt_seg.shape[0] - 1)
     window.adjust_centroids(gt_seg, eval_tracks_layer, bounds)
     eval_tracks = eval_tracks_layer.data
     de, _ = window.get_track_fault(gt_seg, gt_tracks, eval_seg, eval_tracks)

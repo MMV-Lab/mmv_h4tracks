@@ -394,12 +394,15 @@ class EvaluationWindow(QWidget):
 
         self.adjust_centroids(gt_seg, gt_tracks_layer, (lower_bound, upper_bound))
 
+        # Inclusive frame range [lower_bound, upper_bound]: seg slices and track
+        # points must share the same frames so the last edge (upper-1 → upper)
+        # can be evaluated.
         gt_tracks = gt_tracks_layer.data
-        mask = (gt_tracks[:, 1] >= lower_bound) & (gt_tracks[:, 1] < upper_bound)
+        mask = (gt_tracks[:, 1] >= lower_bound) & (gt_tracks[:, 1] <= upper_bound)
         gt_tracks = gt_tracks[mask]
         gt_tracks[:, 1] -= lower_bound
         gt_seg = gt_seg[lower_bound : upper_bound + 1]
-        mask = (eval_tracks[:, 1] >= lower_bound) & (eval_tracks[:, 1] < upper_bound)
+        mask = (eval_tracks[:, 1] >= lower_bound) & (eval_tracks[:, 1] <= upper_bound)
         eval_tracks = eval_tracks[mask]
         eval_tracks[:, 1] -= lower_bound
         eval_seg = eval_seg[lower_bound : upper_bound + 1]
@@ -422,11 +425,11 @@ class EvaluationWindow(QWidget):
         table.item(4, 3).setText(f"for slices {lower_bound} - {upper_bound}")
 
     def adjust_centroids(self, segmentation, tracks_layer, bounds):
-        """Adjust the centroids of the tracks to the current segmentation."""
+        """Adjust centroids in the inclusive frame range [bounds[0], bounds[1]]."""
         tracks = tracks_layer.data
         for row in tracks:
             _, z, y, x = row
-            if z < bounds[0] or z >= bounds[1]:
+            if z < bounds[0] or z > bounds[1]:
                 continue
             segmentation_id = segmentation[z, y, x]
             if segmentation_id == 0:

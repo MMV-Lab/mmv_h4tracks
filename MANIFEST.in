@@ -4,7 +4,7 @@ include README.md
 include src/mmv_h4tracks/napari.yaml
 include src/mmv_h4tracks/models/Neutrophil_granulocytes
 include src/mmv_h4tracks/models/custom_models/.gitkeep
-include src/mmv_h4tracks/ressources/*.jpg
+include src/mmv_h4tracks/resources/*.jpg
 include src/mmv_h4tracks/custom_models.json
 
 recursive-exclude * __pycache__

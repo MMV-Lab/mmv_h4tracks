@@ -1,5 +1,3 @@
-from threading import Event
-
 from tqdm import tqdm
 import numpy as np
 import pandas as pd
@@ -26,6 +24,7 @@ from ._constants import (
     CONFIRM_TEXT,
     MIN_TRACK_LENGTH,
     MIN_OVERLAP,
+    DEFAULT_TRACKS_LAYER_NAME,
 )
 from ._logger import notify, choice_dialog, handle_exception
 from ._utils import preserve_and_filter_graph
@@ -55,7 +54,6 @@ class TrackingWindow(QWidget):
         self.setLayout(QVBoxLayout())
         self.parent = parent
         self.viewer = parent.viewer
-        self.choice_event = Event()
         apply_napari_dark_theme(self)
 
         self.cached_tracks = None
@@ -89,7 +87,7 @@ class TrackingWindow(QWidget):
         btn_auto_track_all.setToolTip(btn_auto_track_all_tooltip)
         btn_auto_track = QPushButton(
             "Overlap-based tracking (single cell)"
-        )  # TODO: clicking an already tracked cell breaks the onclicks/cursor
+        )
         btn_auto_track.setToolTip(
             "Click on a cell to track based on overlap \n\n" "Hotkey: G"
         )
@@ -182,35 +180,36 @@ class TrackingWindow(QWidget):
 
         self.layout().addWidget(content)
 
+    def _confirm_replace_tracks_if_needed(self) -> bool:
+        """Ask to replace an existing tracks layer. Return False if the user declines."""
+        _, collision = processing._check_for_tracks_layer(self)
+        if not collision:
+            return True
+        ret = choice_dialog(
+            "Tracks layer found. Do you want to replace it?",
+            [QMessageBox.Yes, QMessageBox.No],
+        )
+        return ret != QMessageBox.No
+
     def coordinate_tracking_on_click(self):
         """
         Runs the coordinate based tracking
         """
         self.parent.callback_handler.remove_callback_viewer()
 
-        def on_yielded(value):
-            """
-            Prompts the user to replace the tracks layer if it already exists
-            """
-            if value == "Replace tracks layer":
-                ret = choice_dialog(
-                    "Tracks layer found. Do you want to replace it?",
-                    [QMessageBox.Yes, QMessageBox.No],
-                )
-                self.ret = ret
-                if ret == QMessageBox.No:
-                    worker.quit()
-                self.choice_event.set()
+        if not self._confirm_replace_tracks_if_needed():
+            return
 
         worker = processing._track_segmentation(self)
         worker.returned.connect(self.process_new_tracks)
-        worker.yielded.connect(on_yielded)
 
     def overlap_tracking_on_click(self):
         """
         Runs the overlap based tracking
         """
         self.parent.callback_handler.remove_callback_viewer()
+        if not self._confirm_replace_tracks_if_needed():
+            return
         worker = self.worker_overlap_tracking()
         worker.returned.connect(self.process_new_tracks)
 
@@ -219,9 +218,6 @@ class TrackingWindow(QWidget):
         QApplication.setOverrideCursor(Qt.WaitCursor)
         self.reset_button_labels()
         label_layer = self.parent.selected_labels_layer()
-        if label_layer is None:
-            raise ValueError("No segmentation layer to track")
-
         segmentation = layer_as_numpy(label_layer)
 
         n_workers = self.parent.get_process_limit()
@@ -281,7 +277,7 @@ class TrackingWindow(QWidget):
 
     def _add_auto_track_callback(self):
         """
-        Adds a callback to the viewer to track cells on click
+        Arm single-cell overlap tracking for the next viewer click (hotkey path).
         """
         try:
             _ = self.parent.selected_labels_layer()
@@ -289,28 +285,37 @@ class TrackingWindow(QWidget):
             handle_exception(exc)
             return
 
-        self.parent.callback_handler.add_callback_viewer(
-            self.single_overlap_tracking_on_click
-        )
-        QApplication.setOverrideCursor(Qt.CrossCursor)
-
-    def single_overlap_tracking_on_click(self, *_):
         if self.cached_tracks is not None:
             notify("New tracks can only be added if all tracks are displayed.")
             return
 
-        def overlap_tracking_callback(_, event):
-            """
-            Callback for the overlap based tracking
-            """
-            self.parent.callback_handler.remove_callback_viewer()
+        self.parent.callback_handler.add_callback_viewer(
+            self._overlap_tracking_click_callback
+        )
+        QApplication.setOverrideCursor(Qt.CrossCursor)
 
-            try:
-                label_layer = self.parent.selected_labels_layer()
-            except ValueError as exc:
-                handle_exception(exc)
-                return
+    def single_overlap_tracking_on_click(self, *_):
+        """Button path: wait for the next click on a cell to track."""
+        if self.cached_tracks is not None:
+            notify("New tracks can only be added if all tracks are displayed.")
+            return
 
+        try:
+            _ = self.parent.selected_labels_layer()
+        except ValueError as exc:
+            handle_exception(exc)
+            return
+
+        self.parent.callback_handler.add_callback_viewer(
+            self._overlap_tracking_click_callback
+        )
+        QApplication.setOverrideCursor(Qt.CrossCursor)
+
+    def _overlap_tracking_click_callback(self, _, event):
+        """One-shot mouse callback: overlap-track the clicked label."""
+        self.parent.callback_handler.remove_callback_viewer()
+        try:
+            label_layer = self.parent.selected_labels_layer()
             segmentation = layer_as_numpy(label_layer)
             ndim = segmentation.ndim
             if ndim == 2:
@@ -318,17 +323,16 @@ class TrackingWindow(QWidget):
             position = tuple(int(round(p)) for p in event.position[-ndim:])
 
             selected_cell = label_layer.get_value(position)
-            if selected_cell == 0:
+            if selected_cell is None or selected_cell == 0:
                 notify("The background can not be tracked.")
                 return
 
             worker = self.worker_single_overlap_tracking(
-                segmentation, int(position[0]), selected_cell
+                segmentation, int(position[0]), int(selected_cell)
             )
             worker.returned.connect(self.evaluate_proposed_track)
-
-        self.parent.callback_handler.add_callback_viewer(overlap_tracking_callback)
-        QApplication.setOverrideCursor(Qt.CrossCursor)
+        except ValueError as exc:
+            handle_exception(exc)
 
     @thread_worker(connect={"errored": handle_exception})
     def worker_single_overlap_tracking(
@@ -368,92 +372,99 @@ class TrackingWindow(QWidget):
         proposed_track : list
             The proposed track
         """
-        if len(proposed_track) < MIN_TRACK_LENGTH:
-            QApplication.restoreOverrideCursor()
-            notify("Could not find a track of sufficient length.")
-            return
-        # Check if any of the cells are already tracked
-        tracks_layer = self.get_tracks_layer()
-        if tracks_layer is None:
-            self.viewer.add_tracks(
-                np.insert(np.array(proposed_track), 0, 1, axis=1), name="Tracks"
-            )
-            QApplication.restoreOverrideCursor()
-            return
-        entries_to_add = []
-        ids_to_change = []
+        try:
+            if len(proposed_track) < MIN_TRACK_LENGTH:
+                notify("Could not find a track of sufficient length.")
+                return
+            # Check if any of the cells are already tracked
+            tracks_layer = self.get_tracks_layer()
+            if tracks_layer is None:
+                self.viewer.add_tracks(
+                    np.insert(np.array(proposed_track), 0, 1, axis=1),
+                    name=DEFAULT_TRACKS_LAYER_NAME,
+                )
+                return
+            entries_to_add = []
+            ids_to_change = []
 
-        track_id: int = None
-        for entry in proposed_track:
-            # Check if the entry exists in the tracks layer
-            existing_entry = [
-                track for track in tracks_layer.data if np.all(track[1:4] == entry)
-            ]
-            # If there are multiple existing entries, select the smallest track_id
-            # to ensure consistency and avoid conflicts.
-            if len(existing_entry) > 1 and (track_id is None or track_id > existing_entry[0][0]):
-                track_id = existing_entry[0][0]
-            diverging_entries = [
-                track
-                for track in tracks_layer.data
-                if (track[0] in ids_to_change or track[0] == track_id)
-                and track[1] == entry[0]
-                and len(existing_entry) == 0
-            ]
-
-            if diverging_entries:
-                # Diverging tracks
-                break
-
-            # If the entry does not exist it can be staged for addition
-            if not existing_entry:
-                entries_to_add.append(entry)
-            else:
-                if track_id is None or track_id > existing_entry[0][0]:
-                    track_id = existing_entry[0][0]
-                    existing_track = np.array(
-                        [track for track in tracks_layer.data if track[0] == track_id]
-                    )
-                    if np.min(existing_track[:, 1]) < existing_entry[0][1]:
-                        # Converging tracks
-                        track_id = None
-                        break
-
-                elif (
-                    existing_entry[0][0] != track_id
-                    and existing_entry[0][0] not in ids_to_change
+            track_id: int = None
+            for entry in proposed_track:
+                # Check if the entry exists in the tracks layer
+                existing_entry = [
+                    track for track in tracks_layer.data if np.all(track[1:4] == entry)
+                ]
+                # If there are multiple existing entries, select the smallest track_id
+                # to ensure consistency and avoid conflicts.
+                if len(existing_entry) > 1 and (
+                    track_id is None or track_id > existing_entry[0][0]
                 ):
-                    existing_track = np.array(
-                        [
-                            track
-                            for track in tracks_layer.data
-                            if track[0] == existing_entry[0][0]
-                        ]
-                    )
-                    if np.min(existing_track[:, 1]) < existing_entry[0][1]:
-                        # Converging tracks
-                        break
-                    else:
-                        ids_to_change.append(existing_entry[0][0])
+                    track_id = existing_entry[0][0]
+                diverging_entries = [
+                    track
+                    for track in tracks_layer.data
+                    if (track[0] in ids_to_change or track[0] == track_id)
+                    and track[1] == entry[0]
+                    and len(existing_entry) == 0
+                ]
 
-        if track_id is None:
-            track_id = np.amax(tracks_layer.data[:, 0]) + 1
+                if diverging_entries:
+                    # Diverging tracks
+                    break
 
-        for old_id in ids_to_change:
-            self.assign_new_track_id(tracks_layer, old_id, track_id)
+                # If the entry does not exist it can be staged for addition
+                if not existing_entry:
+                    entries_to_add.append(entry)
+                else:
+                    if track_id is None or track_id > existing_entry[0][0]:
+                        track_id = existing_entry[0][0]
+                        existing_track = np.array(
+                            [
+                                track
+                                for track in tracks_layer.data
+                                if track[0] == track_id
+                            ]
+                        )
+                        if np.min(existing_track[:, 1]) < existing_entry[0][1]:
+                            # Converging tracks
+                            track_id = None
+                            break
 
-        if entries_to_add:
-            if len(entries_to_add) < MIN_TRACK_LENGTH and track_id == np.amax(
-                tracks_layer.data[:, 0] + 1
-            ):
-                QApplication.restoreOverrideCursor()
-                raise ValueError("Could not find a track of sufficient length.")
-            if entries_to_add == proposed_track:
-                self.add_track_to_tracks(np.array(proposed_track))
-            else:
-                self.add_entries_to_tracks(entries_to_add, track_id)
+                    elif (
+                        existing_entry[0][0] != track_id
+                        and existing_entry[0][0] not in ids_to_change
+                    ):
+                        existing_track = np.array(
+                            [
+                                track
+                                for track in tracks_layer.data
+                                if track[0] == existing_entry[0][0]
+                            ]
+                        )
+                        if np.min(existing_track[:, 1]) < existing_entry[0][1]:
+                            # Converging tracks
+                            break
+                        else:
+                            ids_to_change.append(existing_entry[0][0])
 
-        QApplication.restoreOverrideCursor()
+            if track_id is None:
+                track_id = np.amax(tracks_layer.data[:, 0]) + 1
+
+            for old_id in ids_to_change:
+                self.assign_new_track_id(tracks_layer, old_id, track_id)
+
+            if entries_to_add:
+                if len(entries_to_add) < MIN_TRACK_LENGTH and track_id == np.amax(
+                    tracks_layer.data[:, 0] + 1
+                ):
+                    raise ValueError("Could not find a track of sufficient length.")
+                if entries_to_add == proposed_track:
+                    self.add_track_to_tracks(np.array(proposed_track))
+                else:
+                    self.add_entries_to_tracks(entries_to_add, track_id)
+            elif not ids_to_change:
+                notify("Selected cell is already tracked.")
+        finally:
+            QApplication.restoreOverrideCursor()
 
     def assign_new_track_id(self, tracks_layer, old_id: int, new_id: int):
         """
@@ -1041,7 +1052,7 @@ class TrackingWindow(QWidget):
         self.cached_graph = None
         tracks_layer = self.get_tracks_layer()
         if tracks_layer is None:
-            self.viewer.add_tracks(tracks, name="Tracks")
+            self.viewer.add_tracks(tracks, name=DEFAULT_TRACKS_LAYER_NAME)
         else:
             # Preserve and filter graph from existing layer
             filtered_graph = preserve_and_filter_graph(tracks_layer, tracks)
@@ -1105,7 +1116,7 @@ class TrackingWindow(QWidget):
         """
         tracks_layer = self.get_tracks_layer()
         if tracks_layer is None:
-            new_layer = self.viewer.add_tracks(self.cached_tracks, name="Tracks")
+            new_layer = self.viewer.add_tracks(self.cached_tracks, name=DEFAULT_TRACKS_LAYER_NAME)
             # Restore cached graph if it exists
             if self.cached_graph:
                 new_layer.graph = self.cached_graph
@@ -1172,7 +1183,7 @@ class TrackingWindow(QWidget):
         tracks_layer = self.get_tracks_layer()
         if tracks_layer is None:
             new_tracks = [np.insert(cell, 0, track_id) for cell in cells]
-            tracks_layer = self.viewer.add_tracks(new_tracks, name="Tracks")
+            tracks_layer = self.viewer.add_tracks(new_tracks, name=DEFAULT_TRACKS_LAYER_NAME)
             return
         tracks_objects = [tracks_layer.data]
         results_tracks = []
@@ -1207,7 +1218,7 @@ class TrackingWindow(QWidget):
         tracks_layer = self.get_tracks_layer()
         if tracks_layer is None:
             track = np.insert(track, 0, 1, axis=1)
-            self.viewer.add_tracks(track, name="Tracks")
+            self.viewer.add_tracks(track, name=DEFAULT_TRACKS_LAYER_NAME)
             return
         tracks = tracks_layer.data
         track_id = np.amax(tracks[:, 0]) + 1
@@ -1246,8 +1257,6 @@ class TrackingWindow(QWidget):
         """
         self.parent.callback_handler.remove_callback_viewer()
         label_layer = self.parent.selected_labels_layer()
-        if label_layer is None:
-            return
         tracks_layer = self.get_tracks_layer()
         if tracks_layer is None:
             return
@@ -1296,8 +1305,6 @@ class TrackingWindow(QWidget):
         Updates a single centroid to account for changed segmentation
         """
         label_layer = self.parent.selected_labels_layer()
-        if label_layer is None:
-            return
         tracks_layer = self.get_tracks_layer()
         if tracks_layer is None:
             return

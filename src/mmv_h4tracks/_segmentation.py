@@ -375,8 +375,12 @@ class SegmentationWindow(QWidget):
                 the layer that triggered the callback
             event : Event
                 the event that triggered the callback"""
-            self._remove_label(event)
-            self.parent.callback_handler.remove_callback_viewer()
+            try:
+                self._remove_label(event)
+            except ValueError as exc:
+                handle_exception(exc)
+            finally:
+                self.parent.callback_handler.remove_callback_viewer()
 
         self.parent.callback_handler.add_callback_viewer(_remove_label)
         QApplication.setOverrideCursor(Qt.CrossCursor)
@@ -391,9 +395,7 @@ class SegmentationWindow(QWidget):
             the event that triggered the callback
         """
         label_layer = self.parent.selected_labels_layer()
-        if label_layer is None:
-            return
-        
+
         # Extract position based on segmentation layer dimensionality
         ndim = label_layer.data.ndim
         position = [int(round(p)) for p in event.position[-ndim:]]
@@ -414,11 +416,6 @@ class SegmentationWindow(QWidget):
         if len(position) < 2:
             return
         label_layer = self.parent.selected_labels_layer()
-
-        if label_layer is None:
-            QApplication.restoreOverrideCursor()
-            notify("No segmentation layer found")
-            return
 
         position = [int(round(p)) for p in position]
         # Use position matching the segmentation layer dimensionality
@@ -524,9 +521,13 @@ class SegmentationWindow(QWidget):
             event : Event
                 the event that triggered the callback
             """
-            id = self._read_label_id(event)
-            self._set_label_id(id)
-            self.parent.callback_handler.remove_callback_viewer()
+            try:
+                id = self._read_label_id(event)
+                self._set_label_id(id)
+            except ValueError as exc:
+                handle_exception(exc)
+            finally:
+                self.parent.callback_handler.remove_callback_viewer()
 
         self.parent.callback_handler.add_callback_viewer(_select_label)
         QApplication.setOverrideCursor(Qt.CrossCursor)
@@ -544,9 +545,6 @@ class SegmentationWindow(QWidget):
             self.parent.callback_handler.remove_callback_viewer()
             QApplication.restoreOverrideCursor()
         label_layer = self.parent.selected_labels_layer()
-        if label_layer is None:
-            notify("Please make sure the label layer exists!")
-            return
 
         if id == 0:
             id = self._get_free_label_id(label_layer)
@@ -596,8 +594,12 @@ class SegmentationWindow(QWidget):
             event : Event
                 the event that triggered the callback
             """
-            self._replace_label(event)
-            self.parent.callback_handler.remove_callback_viewer()
+            try:
+                self._replace_label(event)
+            except ValueError as exc:
+                handle_exception(exc)
+            finally:
+                self.parent.callback_handler.remove_callback_viewer()
 
         self.parent.callback_handler.add_callback_viewer(_replace_label)
         QApplication.setOverrideCursor(Qt.CrossCursor)
@@ -629,7 +631,12 @@ class SegmentationWindow(QWidget):
             event : Event
                 the event that triggered the callback
             """
-            id = self._read_label_id(event)
+            try:
+                id = self._read_label_id(event)
+            except ValueError as exc:
+                handle_exception(exc)
+                self.parent.callback_handler.remove_callback_viewer()
+                return
 
             def _assimilate_label(_, event):
                 """
@@ -642,8 +649,12 @@ class SegmentationWindow(QWidget):
                 event : Event
                     the event that triggered the callback
                 """
-                self._replace_label(event, id)
-                self.parent.callback_handler.remove_callback_viewer()
+                try:
+                    self._replace_label(event, id)
+                except ValueError as exc:
+                    handle_exception(exc)
+                finally:
+                    self.parent.callback_handler.remove_callback_viewer()
 
             self.parent.callback_handler.add_callback_viewer(_assimilate_label)
             QApplication.setOverrideCursor(Qt.CrossCursor)
@@ -663,9 +674,6 @@ class SegmentationWindow(QWidget):
             the id to set for the given position
         """
         label_layer = self.parent.selected_labels_layer()
-        if label_layer is None:
-            notify("Please make sure the label layer exists!")
-            return
 
         # Extract position based on segmentation layer dimensionality
         ndim = label_layer.data.ndim
@@ -696,9 +704,6 @@ class SegmentationWindow(QWidget):
             id at the given position in the segmentation layer
         """
         label_layer = self.parent.selected_labels_layer()
-        if label_layer is None:
-            notify("Please make sure the label layer exists!")
-            return
 
         # Extract position based on segmentation layer dimensionality
         ndim = label_layer.data.ndim

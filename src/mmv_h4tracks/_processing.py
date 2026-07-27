@@ -11,7 +11,12 @@ from qtpy.QtCore import Qt
 from qtpy.QtWidgets import QApplication, QMessageBox
 from scipy import ndimage, optimize, spatial
 
-from ._constants import APPROX_INF, MAX_MATCHING_DIST, CUSTOM_MODEL_PREFIX
+from ._constants import (
+    APPROX_INF,
+    MAX_MATCHING_DIST,
+    CUSTOM_MODEL_PREFIX,
+    DEFAULT_TRACKS_LAYER_NAME,
+)
 from ._concurrency import map_parallel, starmap_parallel
 from ._custom_models import (
     get_custom_model_store,
@@ -691,27 +696,10 @@ def _track_segmentation(widget):
     time1 = time.time()
     logger.info(f"getting segmentation data took {time1 - starttime} seconds")
 
-    # check for tracks layer
-    _, collision = _check_for_tracks_layer(widget)
-    if collision:
-        QApplication.restoreOverrideCursor()
-        yield "Replace tracks layer"
-        widget.choice_event.wait()
-        widget.choice_event.clear()
-        QApplication.setOverrideCursor(Qt.WaitCursor)
-        ret = widget.ret
-        del widget.ret
-        if ret == QMessageBox.No:
-            QApplication.restoreOverrideCursor()
-            return
-        
-    time2 = time.time()
-    logger.info(f"checking for tracks layer took {time2 - time1} seconds")
-
     # these two calls are slow (30-40 seconds each)
     extended_centroids = _calculate_centroids_parallel(widget, data)
     time3 = time.time()
-    logger.info(f"calculating centroids took {time3 - time2} seconds")
+    logger.info(f"calculating centroids took {time3 - time1} seconds")
     matches = _match_centroids_parallel(widget, extended_centroids)
     time4 = time.time()
     logger.info(f"matching centroids took {time4 - time3} seconds")
@@ -761,7 +749,7 @@ def _check_for_tracks_layer(widget):
     collision : Boolean
         whether or not there is a tracks layer in the viewer
     """
-    tracks_name = "Tracks"
+    tracks_name = DEFAULT_TRACKS_LAYER_NAME
     collision = True
     try:
         tracks_layer = widget.parent.selected_tracks_layer()
@@ -989,7 +977,7 @@ def remove_frame_from_track(tracks, track_entry):
 
 
 def lowest_missing_int(arr):
-    num_set = set(arr)
+    num_set = set(arr) if not isinstance(arr, set) else arr
     i = 1
     while i in num_set:
         i += 1
@@ -997,39 +985,34 @@ def lowest_missing_int(arr):
 
 
 def split_noncontinuous_tracks(tracks):
-    """Splits noncontinuous tracks into separate tracks."""
-    # get unique track ids
-    unique_track_ids = np.unique(tracks[:, 0])
+    """Split tracks that have frame gaps into separate track IDs.
 
-    # iterate through all unique track ids
-    for track_id in unique_track_ids:
-        # get all entries with the current track id
-        current_track = tracks[tracks[:, 0] == track_id]
+    For each track ID, rows are ordered by frame. Contiguous frame runs keep the
+    original ID for the first run; each later run gets a new ID. Indexing uses
+    the actual row positions in ``tracks`` (not an assumed contiguous block).
+    """
+    if tracks is None or len(tracks) == 0:
+        return tracks
 
-        # if the track is not continuous, split it
-        if not np.all(np.diff(current_track[:, 1]) == 1):
-            # get the indices of the noncontinuous entries
-            jumped_indices = np.where(np.diff(current_track[:, 1]) != 1)[0] + 1
-            # get lists of indices to update
-            # each list starts at the first entry and goes to the
-            # end of the track
-            indices_to_update = []
-            # TODO: indices are not assigned correctly
-            for index in jumped_indices:
-                index_in_tracks = np.where(
-                    np.all(tracks == current_track[index], axis=1)
-                )[0][0]
-                indices_to_update.append(
-                    np.arange(len(current_track) - index) + index_in_tracks
-                )
+    tracks = np.asarray(tracks)
+    for track_id in np.unique(tracks[:, 0]):
+        idxs = np.where(tracks[:, 0] == track_id)[0]
+        if len(idxs) <= 1:
+            continue
 
-            for index_list in indices_to_update:
-                # get the new track id
-                new_track_id = lowest_missing_int(unique_track_ids)
+        idxs = idxs[np.argsort(tracks[idxs, 1], kind="stable")]
+        frames = tracks[idxs, 1]
+        gap_starts = np.where(np.diff(frames) != 1)[0] + 1
+        if gap_starts.size == 0:
+            continue
 
-                # set the new track id for the split entries
-                tracks[index_list, 0] = new_track_id
-                unique_track_ids = np.unique(tracks[:, 0])
+        boundaries = np.concatenate(([0], gap_starts, [len(idxs)]))
+        used_ids = set(np.unique(tracks[:, 0]).tolist())
+        for seg in range(1, len(boundaries) - 1):
+            seg_idxs = idxs[boundaries[seg] : boundaries[seg + 1]]
+            new_id = lowest_missing_int(used_ids)
+            tracks[seg_idxs, 0] = new_id
+            used_ids.add(new_id)
 
     return tracks
 

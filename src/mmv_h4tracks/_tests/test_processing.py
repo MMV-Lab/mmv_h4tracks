@@ -167,3 +167,59 @@ def test_track_segmentation_schema(widget_with_segmentation, qtbot, monkeypatch)
         assert all(frames <= high_frame)
         assert len(set(frames)) == len(frames)
         assert len(frames) == high_frame - low_frame + 1
+
+
+@pytest.mark.unit
+def test_split_noncontinuous_tracks_single_gap():
+    # Contiguous rows for track 1 with a frame gap 0,1 then 4,5
+    tracks = np.array(
+        [
+            [1, 0, 0, 0],
+            [1, 1, 0, 0],
+            [1, 4, 1, 1],
+            [1, 5, 1, 1],
+            [2, 0, 2, 2],
+        ]
+    )
+    out = processing.split_noncontinuous_tracks(tracks.copy())
+    assert np.array_equal(out[out[:, 0] == 1][:, 1], [0, 1])
+    other = out[(out[:, 0] != 1) & (out[:, 0] != 2)]
+    assert len(other) == 2
+    assert np.array_equal(other[:, 1], [4, 5])
+    assert len(np.unique(other[:, 0])) == 1
+
+
+@pytest.mark.unit
+def test_split_noncontinuous_tracks_multiple_gaps_interleaved():
+    # Track 1 rows are not a single contiguous block in the array.
+    tracks = np.array(
+        [
+            [1, 0, 0, 0],
+            [2, 0, 9, 9],
+            [1, 1, 0, 0],
+            [2, 1, 9, 9],
+            [1, 5, 1, 1],
+            [1, 6, 1, 1],
+            [1, 10, 2, 2],
+        ]
+    )
+    out = processing.split_noncontinuous_tracks(tracks.copy())
+    by_id = {tid: out[out[:, 0] == tid] for tid in np.unique(out[:, 0])}
+    # Original id 1 keeps the first contiguous run (frames 0-1)
+    assert np.array_equal(by_id[1][:, 1], [0, 1])
+    # Track 2 unchanged
+    assert np.array_equal(by_id[2][:, 1], [0, 1])
+    # Two additional runs from the gaps
+    extra_frames = sorted(
+        tuple(by_id[tid][:, 1].tolist())
+        for tid in by_id
+        if tid not in (1, 2)
+    )
+    assert extra_frames == [(5, 6), (10,)]
+
+
+@pytest.mark.unit
+def test_split_noncontinuous_tracks_already_continuous():
+    tracks = np.array([[1, 0, 0, 0], [1, 1, 0, 0], [1, 2, 0, 0]])
+    out = processing.split_noncontinuous_tracks(tracks.copy())
+    assert np.array_equal(out, tracks)

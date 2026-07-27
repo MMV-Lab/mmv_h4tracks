@@ -32,6 +32,7 @@ from napari.layers.tracks.tracks import Tracks
 from ._assistant import AssistantWindow
 from ._analysis import AnalysisWindow
 from ._evaluation import EvaluationWindow
+from ._constants import DEFAULT_TRACKS_LAYER_NAME
 from ._logger import choice_dialog, notify
 
 from ._reader import (
@@ -107,7 +108,7 @@ class MMVH4TRACKS(QWidget):
 
         # Logo
         filename = "celltracking_logo.jpg"
-        path = Path(__file__).parent / "ressources" / filename
+        path = Path(__file__).parent / "resources" / filename
         image = cv2.imread(str(path))
         height, width, _ = image.shape
         logo = QPixmap(
@@ -711,7 +712,7 @@ class MMVH4TRACKS(QWidget):
             contrast_limits=contrast_limits,
         )
         self.viewer.add_labels(segmentation, name="Segmentation Data")
-        self.viewer.add_tracks(filtered_tracks, name="Tracks")
+        self.viewer.add_tracks(filtered_tracks, name=DEFAULT_TRACKS_LAYER_NAME)
 
         # Set widget state
         self.align_cache = copy.deepcopy(segmentation)
@@ -721,7 +722,7 @@ class MMVH4TRACKS(QWidget):
         ]
         self.combobox_image.setCurrentText("Raw Image")
         self.combobox_segmentation.setCurrentText("Segmentation Data")
-        self.combobox_tracks.setCurrentText("Tracks")
+        self.combobox_tracks.setCurrentText(DEFAULT_TRACKS_LAYER_NAME)
 
     def _load_ome_zarr(self, zarr_file, zarr_path=None):
         # Load data from OME-Zarr file
@@ -753,9 +754,9 @@ class MMVH4TRACKS(QWidget):
         # Load tracks from file if it exists, otherwise create implicit tracks if needed
         if tracks is not None:
             # Load tracks from tracks.npy file (without scale)
-            self.viewer.add_tracks(tracks, name="Tracks")
+            self.viewer.add_tracks(tracks, name=DEFAULT_TRACKS_LAYER_NAME)
             self.eval_cache[1] = copy.deepcopy(tracks)
-            self.combobox_tracks.setCurrentText("Tracks")
+            self.combobox_tracks.setCurrentText(DEFAULT_TRACKS_LAYER_NAME)
         elif metadata.get("implied_tracks", False):
             # Only create implicit tracks if no tracks.npy exists
             filtered_tracks = self.create_implicit_tracks()
@@ -769,9 +770,9 @@ class MMVH4TRACKS(QWidget):
                 pass
             
             if scale is not None:
-                self.viewer.add_tracks(filtered_tracks, name="Tracks", scale=scale)
+                self.viewer.add_tracks(filtered_tracks, name=DEFAULT_TRACKS_LAYER_NAME, scale=scale)
             else:
-                self.viewer.add_tracks(filtered_tracks, name="Tracks")
+                self.viewer.add_tracks(filtered_tracks, name=DEFAULT_TRACKS_LAYER_NAME)
             self.eval_cache[1] = copy.deepcopy(filtered_tracks)
         
         # Add metadata to layers
@@ -847,7 +848,7 @@ class MMVH4TRACKS(QWidget):
         """
         if _ is not None:
             print("Secret unlocked!")
-        if not self._clear_layers(["Tracks"]):
+        if not self._clear_layers([DEFAULT_TRACKS_LAYER_NAME]):
             # user canceled the operation
             return
         filtered_tracks = self.create_implicit_tracks()
@@ -856,7 +857,7 @@ class MMVH4TRACKS(QWidget):
         scale = None
         try:
             raw_layer = self.selected_image_layer()
-            if raw_layer is not None and hasattr(raw_layer, 'scale'):
+            if hasattr(raw_layer, "scale"):
                 scale_attr = raw_layer.scale
                 if isinstance(scale_attr, np.ndarray):
                     scale = scale_attr
@@ -865,9 +866,9 @@ class MMVH4TRACKS(QWidget):
             pass
         
         if scale is not None:
-            self.viewer.add_tracks(filtered_tracks, name="Tracks", scale=scale)
+            self.viewer.add_tracks(filtered_tracks, name=DEFAULT_TRACKS_LAYER_NAME, scale=scale)
         else:
-            self.viewer.add_tracks(filtered_tracks, name="Tracks")
+            self.viewer.add_tracks(filtered_tracks, name=DEFAULT_TRACKS_LAYER_NAME)
         self.eval_cache[1] = copy.deepcopy(filtered_tracks)
 
     def _load(self):

@@ -6,7 +6,12 @@ import numpy as np
 from scipy.ndimage import center_of_mass
 
 from mmv_h4tracks import MMVH4TRACKS
-from mmv_h4tracks._constants import LINK_TEXT, UNLINK_TEXT, MIN_TRACK_LENGTH
+from mmv_h4tracks._constants import (
+    LINK_TEXT,
+    UNLINK_TEXT,
+    MIN_TRACK_LENGTH,
+    DEFAULT_TRACKS_LAYER_NAME,
+)
 from mmv_h4tracks._reader import build_multiscale
 import mmv_h4tracks._tracking as tracking
 from mmv_h4tracks._tests.data_loading import DATA_ROOT, load_image_zyx, load_named_tracks, load_named_volumes
@@ -129,9 +134,9 @@ def test_assign_new_track_id(create_widget):
     window = widget.tracking_window
     window.viewer = widget.viewer
     initial_tracks = np.array([[0, 0, 1, 1], [0, 1, 1, 1], [0, 2, 1, 1]])
-    tracks_layer = widget.viewer.add_tracks(initial_tracks, name="Tracks")
+    tracks_layer = widget.viewer.add_tracks(initial_tracks, name=DEFAULT_TRACKS_LAYER_NAME)
     window.assign_new_track_id(tracks_layer, 0, 1)
-    post_tracks = widget.viewer.layers["Tracks"].data
+    post_tracks = widget.viewer.layers[DEFAULT_TRACKS_LAYER_NAME].data
     expected_result = np.array([[1, 0, 1, 1], [1, 1, 1, 1], [1, 2, 1, 1]])
     assert np.array_equal(post_tracks, expected_result)
 
@@ -141,11 +146,11 @@ def test_assign_new_track_id(create_widget):
 def test_link_stored_cells_append(create_widget):
     widget = create_widget
     initial_tracks = np.array([[0, 0, 1, 1], [0, 1, 1, 1], [0, 2, 1, 1]])
-    widget.viewer.add_tracks(initial_tracks, name="Tracks")
+    widget.viewer.add_tracks(initial_tracks, name=DEFAULT_TRACKS_LAYER_NAME)
     window = widget.tracking_window
     window.selected_cells = [[2, 1, 1], [3, 1, 1]]
     window.link_stored_cells()
-    post_tracks = widget.viewer.layers["Tracks"].data
+    post_tracks = widget.viewer.layers[DEFAULT_TRACKS_LAYER_NAME].data
     expected_result = np.array([[0, 0, 1, 1], [0, 1, 1, 1], [0, 2, 1, 1], [0, 3, 1, 1]])
     assert np.array_equal(post_tracks, expected_result)
 
@@ -157,7 +162,7 @@ def test_link_stored_cells_no_layer(create_widget):
     window = widget.tracking_window
     window.selected_cells = [[0, 1, 1], [1, 1, 1]]
     window.link_stored_cells()
-    post_tracks = widget.viewer.layers["Tracks"].data
+    post_tracks = widget.viewer.layers[DEFAULT_TRACKS_LAYER_NAME].data
     expected_result = np.array([[1, 0, 1, 1], [1, 1, 1, 1]])
     assert np.array_equal(post_tracks, expected_result)
 
@@ -167,11 +172,11 @@ def test_link_stored_cells_no_layer(create_widget):
 def test_link_stored_cells_connect(create_widget):
     widget = create_widget
     initial_tracks = np.array([[0, 0, 1, 1], [0, 1, 1, 1], [1, 2, 1, 1], [1, 3, 1, 1]])
-    widget.viewer.add_tracks(initial_tracks, name="Tracks")
+    widget.viewer.add_tracks(initial_tracks, name=DEFAULT_TRACKS_LAYER_NAME)
     window = widget.tracking_window
     window.selected_cells = [[1, 1, 1], [2, 1, 1]]
     window.link_stored_cells()
-    post_tracks = widget.viewer.layers["Tracks"].data
+    post_tracks = widget.viewer.layers[DEFAULT_TRACKS_LAYER_NAME].data
     expected_result = np.array([[0, 0, 1, 1], [0, 1, 1, 1], [0, 2, 1, 1], [0, 3, 1, 1]])
     assert np.array_equal(post_tracks, expected_result)
 
@@ -195,11 +200,11 @@ def test_link_stored_cells_connect(create_widget):
 def test_link_stored_cells_enclosed(create_widget):
     widget = create_widget
     initial_tracks = np.array([[0, 1, 1, 1], [0, 2, 1, 1]])
-    widget.viewer.add_tracks(initial_tracks, name="Tracks")
+    widget.viewer.add_tracks(initial_tracks, name=DEFAULT_TRACKS_LAYER_NAME)
     window = widget.tracking_window
     window.selected_cells = [[0, 1, 1], [1, 1, 1], [2, 1, 1], [3, 1, 1]]
     window.link_stored_cells()
-    post_tracks = widget.viewer.layers["Tracks"].data
+    post_tracks = widget.viewer.layers[DEFAULT_TRACKS_LAYER_NAME].data
     expected_result = np.array([[0, 0, 1, 1], [0, 1, 1, 1], [0, 2, 1, 1], [0, 3, 1, 1]])
     print(post_tracks)
     assert np.array_equal(post_tracks, expected_result)
@@ -210,11 +215,11 @@ def test_link_stored_cells_enclosed(create_widget):
 # def test_link_stored_cells_existing(create_widget):
 #     widget = create_widget
 #     initial_tracks = np.array([[0,1,1,1], [0,2,1,1], [0,3,1,1], [0,4,1,1]])
-#     widget.viewer.add_tracks(initial_tracks, name="Tracks")
+#     widget.viewer.add_tracks(initial_tracks, name=DEFAULT_TRACKS_LAYER_NAME)
 #     window = widget.tracking_window
 #     window.selected_cells = [[1,1,1], [2,1,1]]
 #     window.link_stored_cells()
-#     post_tracks = widget.viewer.layers["Tracks"].data
+#     post_tracks = widget.viewer.layers[DEFAULT_TRACKS_LAYER_NAME].data
 #     expected_result = np.array([[0,1,1,1], [0,2,1,1], [0,3,1,1], [0,4,1,1]])
 #     assert np.array_equal(post_tracks, expected_result)
 
@@ -227,7 +232,7 @@ def test_evaluate_proposed_track_no_layer(create_widget):
     window.viewer = widget.viewer
     proposed_track = [[0, 1, 1], [1, 1, 1], [2, 1, 1], [3, 1, 1], [4, 1, 1]]
     window.evaluate_proposed_track(proposed_track)
-    post_tracks = widget.viewer.layers["Tracks"].data
+    post_tracks = widget.viewer.layers[DEFAULT_TRACKS_LAYER_NAME].data
     expected_result = np.array(
         [[1, 0, 1, 1], [1, 1, 1, 1], [1, 2, 1, 1], [1, 3, 1, 1], [1, 4, 1, 1]]
     )
@@ -239,12 +244,12 @@ def test_evaluate_proposed_track_no_layer(create_widget):
 def test_evaluate_proposed_track_existing_layer(create_widget):
     widget = create_widget
     initial_tracks = np.array([[0, 0, 1, 1], [0, 1, 1, 1], [0, 2, 1, 1]])
-    widget.viewer.add_tracks(initial_tracks, name="Tracks")
+    widget.viewer.add_tracks(initial_tracks, name=DEFAULT_TRACKS_LAYER_NAME)
     window = widget.tracking_window
     window.viewer = widget.viewer
     proposed_track = [[0, 2, 2], [1, 2, 2], [2, 2, 2], [3, 2, 2], [4, 2, 2]]
     window.evaluate_proposed_track(proposed_track)
-    post_tracks = widget.viewer.layers["Tracks"].data
+    post_tracks = widget.viewer.layers[DEFAULT_TRACKS_LAYER_NAME].data
     expected_result = np.array(
         [
             [0, 0, 1, 1],
@@ -265,12 +270,12 @@ def test_evaluate_proposed_track_existing_layer(create_widget):
 def test_evaluate_proposed_track_contained_track(create_widget):
     widget = create_widget
     initial_tracks = np.array([[0, 1, 1, 1], [0, 2, 1, 1], [0, 3, 1, 1]])
-    widget.viewer.add_tracks(initial_tracks, name="Tracks")
+    widget.viewer.add_tracks(initial_tracks, name=DEFAULT_TRACKS_LAYER_NAME)
     window = widget.tracking_window
     window.viewer = widget.viewer
     proposed_track = [[0, 1, 1], [1, 1, 1], [2, 1, 1], [3, 1, 1], [4, 1, 1]]
     window.evaluate_proposed_track(proposed_track)
-    post_tracks = widget.viewer.layers["Tracks"].data
+    post_tracks = widget.viewer.layers[DEFAULT_TRACKS_LAYER_NAME].data
     expected_result = np.array(
         [[0, 0, 1, 1], [0, 1, 1, 1], [0, 2, 1, 1], [0, 3, 1, 1], [0, 4, 1, 1]]
     )
@@ -284,7 +289,7 @@ def test_evaluate_proposed_track_contained_track_multiple(create_widget):
     initial_tracks = np.array(
         [[0, 1, 1, 1], [0, 2, 1, 1], [0, 3, 1, 1], [1, 4, 1, 1], [1, 5, 1, 1]]
     )
-    widget.viewer.add_tracks(initial_tracks, name="Tracks")
+    widget.viewer.add_tracks(initial_tracks, name=DEFAULT_TRACKS_LAYER_NAME)
     window = widget.tracking_window
     window.viewer = widget.viewer
     proposed_track = [
@@ -297,7 +302,7 @@ def test_evaluate_proposed_track_contained_track_multiple(create_widget):
         [6, 1, 1],
     ]
     window.evaluate_proposed_track(proposed_track)
-    post_tracks = widget.viewer.layers["Tracks"].data
+    post_tracks = widget.viewer.layers[DEFAULT_TRACKS_LAYER_NAME].data
     expected_result = np.array(
         [
             [0, 0, 1, 1],
@@ -317,12 +322,12 @@ def test_evaluate_proposed_track_contained_track_multiple(create_widget):
 def test_evaluate_proposed_track_extend_low(create_widget):
     widget = create_widget
     initial_tracks = np.array([[0, 1, 1, 1], [0, 2, 1, 1], [0, 3, 1, 1], [0, 4, 1, 1]])
-    widget.viewer.add_tracks(initial_tracks, name="Tracks")
+    widget.viewer.add_tracks(initial_tracks, name=DEFAULT_TRACKS_LAYER_NAME)
     window = widget.tracking_window
     window.viewer = widget.viewer
     proposed_track = [[0, 1, 1], [1, 1, 1], [2, 1, 1], [3, 1, 1], [4, 1, 1]]
     window.evaluate_proposed_track(proposed_track)
-    post_tracks = widget.viewer.layers["Tracks"].data
+    post_tracks = widget.viewer.layers[DEFAULT_TRACKS_LAYER_NAME].data
     expected_result = np.array(
         [[0, 0, 1, 1], [0, 1, 1, 1], [0, 2, 1, 1], [0, 3, 1, 1], [0, 4, 1, 1]]
     )
@@ -334,12 +339,12 @@ def test_evaluate_proposed_track_extend_low(create_widget):
 def test_evaluate_proposed_track_extend_high(create_widget):
     widget = create_widget
     initial_tracks = np.array([[0, 0, 1, 1], [0, 1, 1, 1], [0, 2, 1, 1], [0, 3, 1, 1]])
-    widget.viewer.add_tracks(initial_tracks, name="Tracks")
+    widget.viewer.add_tracks(initial_tracks, name=DEFAULT_TRACKS_LAYER_NAME)
     window = widget.tracking_window
     window.viewer = widget.viewer
     proposed_track = [[0, 1, 1], [1, 1, 1], [2, 1, 1], [3, 1, 1], [4, 1, 1]]
     window.evaluate_proposed_track(proposed_track)
-    post_tracks = widget.viewer.layers["Tracks"].data
+    post_tracks = widget.viewer.layers[DEFAULT_TRACKS_LAYER_NAME].data
     expected_result = np.array(
         [[0, 0, 1, 1], [0, 1, 1, 1], [0, 2, 1, 1], [0, 3, 1, 1], [0, 4, 1, 1]]
     )
@@ -351,12 +356,12 @@ def test_evaluate_proposed_track_extend_high(create_widget):
 def test_evaluate_proposed_track_diverge(create_widget):
     widget = create_widget
     initial_tracks = np.array([[0, 1, 1, 1], [0, 2, 1, 1], [0, 3, 1, 1]])
-    widget.viewer.add_tracks(initial_tracks, name="Tracks")
+    widget.viewer.add_tracks(initial_tracks, name=DEFAULT_TRACKS_LAYER_NAME)
     window = widget.tracking_window
     window.viewer = widget.viewer
     proposed_track = [[0, 1, 1], [1, 1, 1], [2, 1, 1], [3, 2, 2], [4, 2, 2]]
     window.evaluate_proposed_track(proposed_track)
-    post_tracks = widget.viewer.layers["Tracks"].data
+    post_tracks = widget.viewer.layers[DEFAULT_TRACKS_LAYER_NAME].data
     expected_result = np.array([[0, 0, 1, 1], [0, 1, 1, 1], [0, 2, 1, 1], [0, 3, 1, 1]])
     assert np.array_equal(post_tracks, expected_result)
 
@@ -366,12 +371,12 @@ def test_evaluate_proposed_track_diverge(create_widget):
 def test_evaluate_proposed_track_converge(create_widget):
     widget = create_widget
     initial_tracks = np.array([[0, 4, 1, 1], [0, 5, 1, 1], [0, 6, 1, 1]])
-    widget.viewer.add_tracks(initial_tracks, name="Tracks")
+    widget.viewer.add_tracks(initial_tracks, name=DEFAULT_TRACKS_LAYER_NAME)
     window = widget.tracking_window
     window.viewer = widget.viewer
     proposed_track = [[0, 2, 2], [1, 2, 2], [2, 2, 2], [3, 2, 2], [4, 2, 2], [5, 1, 1]]
     window.evaluate_proposed_track(proposed_track)
-    post_tracks = widget.viewer.layers["Tracks"].data
+    post_tracks = widget.viewer.layers[DEFAULT_TRACKS_LAYER_NAME].data
     expected_result = np.array(
         [
             [0, 4, 1, 1],
@@ -1124,12 +1129,12 @@ def test_update_all_centroids_manual(widget_with_seg_trk):
 # def test_evaluate_proposed_track_(create_widget):
 #     widget = create_widget
 #     initial_tracks = np.array([[0,0,1,1], [0,1,1,1], [0,2,1,1]])
-#     widget.viewer.add_tracks(initial_tracks, name="Tracks")
+#     widget.viewer.add_tracks(initial_tracks, name=DEFAULT_TRACKS_LAYER_NAME)
 #     window = widget.tracking_window
 #     window.viewer = widget.viewer
 #     proposed_track = [[0,1,1], [1,1,1]]
 #     window.evaluate_proposed_track(proposed_track)
-#     post_tracks = widget.viewer.layers["Tracks"].data
+#     post_tracks = widget.viewer.layers[DEFAULT_TRACKS_LAYER_NAME].data
 #     expected_result = np.array([[0,0,1,1], [0,1,1,1], [0,2,1,1], [0,3,1,1]])
 #     assert np.array_equal(post_tracks, expected_result)
 

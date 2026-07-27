@@ -18,6 +18,9 @@ LINK_TEXT = "Link tracks"
 UNLINK_TEXT = "Unlink tracks"
 CONFIRM_TEXT = "Confirm"
 
+# Default napari Tracks layer name when creating/replacing tracks
+DEFAULT_TRACKS_LAYER_NAME = "Tracks"
+
 # Minimum acceptable track length
 MIN_TRACK_LENGTH = 5
 

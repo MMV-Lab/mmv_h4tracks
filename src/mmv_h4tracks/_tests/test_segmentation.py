@@ -3,6 +3,7 @@
 import pytest
 import numpy as np
 from unittest.mock import Mock
+from scipy import ndimage
 
 from mmv_h4tracks import MMVH4TRACKS
 from mmv_h4tracks._reader import build_multiscale
@@ -71,9 +72,96 @@ def test_remove_cell_from_tracks(viewer_with_data, position):
         pytest.fail(f"An error occurred: {e}")
 
 
-# TODO: test for track layer schema when
-# cell at start/end of track is removed
-# especially when track is only 2 cells long
+def _assert_tracks_schema(tracks: np.ndarray) -> None:
+    """Each track ID must have unique, contiguous frames (sorted)."""
+    assert tracks.ndim == 2 and tracks.shape[1] == 4
+    for trk_id in np.unique(tracks[:, 0]):
+        trk = tracks[tracks[:, 0] == trk_id]
+        trk = trk[np.argsort(trk[:, 1])]
+        frames = trk[:, 1]
+        assert len(set(frames.tolist())) == len(frames)
+        assert len(frames) == frames[-1] - frames[0] + 1
+
+
+def _centroid_of_label(seg_frame: np.ndarray, label_id: int) -> list:
+    y, x = ndimage.center_of_mass(seg_frame, labels=seg_frame, index=label_id)
+    return [int(np.rint(y)), int(np.rint(x))]
+
+
+@pytest.fixture
+def widget_with_short_tracks(create_widget):
+    """Labels + tracks for schema checks when removing start/end of short tracks."""
+    widget = create_widget
+    # 3 frames; label 1 is a small blob at the same place each frame.
+    seg = np.zeros((3, 20, 20), dtype=np.int32)
+    for z in range(3):
+        seg[z, 5:8, 5:8] = 1
+    cy, cx = _centroid_of_label(seg[0], 1)
+    # Track length 3 and a separate length-2 track (label 2 on frames 0-1).
+    seg[:, 12:15, 12:15] = 0
+    for z in range(2):
+        seg[z, 12:15, 12:15] = 2
+    cy2, cx2 = _centroid_of_label(seg[0], 2)
+
+    tracks = np.array(
+        [
+            [1, 0, cy, cx],
+            [1, 1, cy, cx],
+            [1, 2, cy, cx],
+            [2, 0, cy2, cx2],
+            [2, 1, cy2, cx2],
+        ],
+        dtype=np.int64,
+    )
+    widget.viewer.add_labels(seg, name="schema_seg")
+    widget.viewer.add_tracks(tracks, name="schema_trk")
+    widget.combobox_segmentation.setCurrentText("schema_seg")
+    widget.combobox_tracks.setCurrentText("schema_trk")
+    return widget, (cy, cx), (cy2, cx2)
+
+
+@pytest.mark.integration
+@pytest.mark.schema
+@pytest.mark.parametrize(
+    "which, end",
+    [
+        ("long", "start"),
+        ("long", "end"),
+        ("short", "start"),
+        ("short", "end"),
+    ],
+)
+def test_remove_cell_preserves_track_schema(widget_with_short_tracks, which, end):
+    """Removing a cell at the start/end of a track keeps remaining tracks valid."""
+    widget, (cy, cx), (cy2, cx2) = widget_with_short_tracks
+    if which == "long":
+        frame = 0 if end == "start" else 2
+        position = (frame, cy, cx)
+        removed_id = 1
+    else:
+        frame = 0 if end == "start" else 1
+        position = (frame, cy2, cx2)
+        removed_id = 2
+
+    before = widget.viewer.layers["schema_trk"].data.copy()
+    widget.segmentation_window.remove_cell_from_tracks(position)
+    after = widget.viewer.layers["schema_trk"].data
+
+    # Removed centroid should no longer appear for that track id at that frame.
+    remaining_same = after[
+        (after[:, 0] == removed_id) & (after[:, 1] == frame)
+    ]
+    assert len(remaining_same) == 0
+
+    if len(after):
+        _assert_tracks_schema(after)
+    # Length-2 track: removing either end deletes the whole track (both ends).
+    if which == "short":
+        if len(after):
+            assert removed_id not in np.unique(after[:, 0])
+    else:
+        # Length-3: one end removed → remaining run still present or renumbered.
+        assert before.shape[0] > after.shape[0]
 
 
 def create_mock_event(position):
