@@ -19,12 +19,10 @@ from qtpy.QtWidgets import (
 from qtpy.QtCore import Qt, QRegularExpression
 from qtpy.QtGui import QRegularExpressionValidator
 from scipy import ndimage
-import napari
 import pandas as pd
 
 from ._constants import CUSTOM_MODEL_PREFIX
 from ._logger import notify, handle_exception
-from ._grabber import grab_layer
 from ._train import (
     CELLPOSE_TRAIN_N_EPOCHS_LONG,
     export_cellpose_training_pairs,
@@ -35,6 +33,7 @@ from pathlib import Path
 import shutil
 
 from ._utils import preserve_and_filter_graph
+from ._qt_utils import apply_napari_dark_theme
 import mmv_h4tracks._processing as processing
 from .add_models import ModelWindow
 
@@ -63,10 +62,7 @@ class SegmentationWindow(QWidget):
         self.setLayout(QVBoxLayout())
         self.parent = parent
         self.viewer = parent.viewer
-        try:
-            self.setStyleSheet(napari.qt.get_stylesheet(theme="dark"))
-        except TypeError:
-            self.setStyleSheet(napari.qt.get_stylesheet(theme_id="dark"))
+        apply_napari_dark_theme(self)
 
         self.custom_models = processing.read_custom_model_dict()
 
@@ -117,11 +113,11 @@ class SegmentationWindow(QWidget):
         btn_grab_label.clicked.connect(self._add_select_callback)
 
         # QComboBoxes
-        self.combobox_segmentation = QComboBox()
-        self.combobox_segmentation.setToolTip("select model")
+        self.combobox_cellpose_model = QComboBox()
+        self.combobox_cellpose_model.setToolTip("select model")
         hardcoded_models, custom_models = processing.read_models(self)
         processing.display_models(self, hardcoded_models, custom_models)
-        self.combobox_segmentation.currentTextChanged.connect(
+        self.combobox_cellpose_model.currentTextChanged.connect(
             self.toggle_segmentation_button
         )
 
@@ -144,7 +140,7 @@ class SegmentationWindow(QWidget):
         automatic_segmentation.setLayout(QGridLayout())
         automatic_segmentation.layout().addWidget(h_spacer_1, 0, 0, 1, -1)
         automatic_segmentation.layout().addWidget(
-            self.combobox_segmentation, 1, 0, 1, 1
+            self.combobox_cellpose_model, 1, 0, 1, 1
         )
         automatic_segmentation.layout().addWidget(self.btn_segment, 1, 1, 1, 1)
         automatic_segmentation.layout().addWidget(self.checkbox_preview, 1, 2, 1, 1)
@@ -338,8 +334,9 @@ class SegmentationWindow(QWidget):
                 layer_prefix,
                 train_frames,
             )
-            combo_name = CUSTOM_MODEL_PREFIX + model_name
-            self.combobox_segmentation.setCurrentText(combo_name)
+            canonical = processing.custom_model_weights_basename(model_name)
+            combo_name = CUSTOM_MODEL_PREFIX + canonical
+            self.combobox_cellpose_model.setCurrentText(combo_name)
             notify(f"Registered custom model: {combo_name}")
         except Exception as exc:
             notify(str(exc))
@@ -363,7 +360,7 @@ class SegmentationWindow(QWidget):
         Adds the callback to remove the label at the given position from the segmentation layer
         """
         try:
-            grab_layer(self.viewer, self.parent.combobox_segmentation.currentText())
+            self.parent.selected_labels_layer()
         except ValueError as exc:
             handle_exception(exc)
             return
@@ -378,8 +375,12 @@ class SegmentationWindow(QWidget):
                 the layer that triggered the callback
             event : Event
                 the event that triggered the callback"""
-            self._remove_label(event)
-            self.parent.callback_handler.remove_callback_viewer()
+            try:
+                self._remove_label(event)
+            except ValueError as exc:
+                handle_exception(exc)
+            finally:
+                self.parent.callback_handler.remove_callback_viewer()
 
         self.parent.callback_handler.add_callback_viewer(_remove_label)
         QApplication.setOverrideCursor(Qt.CrossCursor)
@@ -393,12 +394,8 @@ class SegmentationWindow(QWidget):
         event : Event
             the event that triggered the callback
         """
-        label_layer = grab_layer(
-            self.viewer, self.parent.combobox_segmentation.currentText()
-        )
-        if label_layer is None:
-            return
-        
+        label_layer = self.parent.selected_labels_layer()
+
         # Extract position based on segmentation layer dimensionality
         ndim = label_layer.data.ndim
         position = [int(round(p)) for p in event.position[-ndim:]]
@@ -418,14 +415,7 @@ class SegmentationWindow(QWidget):
         """
         if len(position) < 2:
             return
-        label_layer = grab_layer(
-            self.viewer, self.parent.combobox_segmentation.currentText()
-        )
-
-        if label_layer is None:
-            QApplication.restoreOverrideCursor()
-            notify("No segmentation layer found")
-            return
+        label_layer = self.parent.selected_labels_layer()
 
         position = [int(round(p)) for p in position]
         # Use position matching the segmentation layer dimensionality
@@ -455,7 +445,7 @@ class SegmentationWindow(QWidget):
         if tracks_name == "":
             print("no tracks")
             return
-        tracks_layer = grab_layer(self.viewer, tracks_name)
+        tracks_layer = self.parent.selected_tracks_layer()
 
         tracks = tracks_layer.data
         filter_values = None
@@ -495,9 +485,9 @@ class SegmentationWindow(QWidget):
         bool
             whether the track is displayed or not
         """
-        tracks_name = self.parent.combobox_tracks.currentText()
-        tracks_layer = grab_layer(self.viewer, tracks_name)
-        if tracks_layer is None:
+        try:
+            tracks_layer = self.parent.selected_tracks_layer()
+        except ValueError:
             return
         tracks = tracks_layer.data
 
@@ -515,7 +505,7 @@ class SegmentationWindow(QWidget):
         Adds the callback to select the label at the given position
         """
         try:
-            _ = grab_layer(self.viewer, self.parent.combobox_segmentation.currentText())
+            _ = self.parent.selected_labels_layer()
         except ValueError as exc:
             handle_exception(exc)
             return
@@ -531,9 +521,13 @@ class SegmentationWindow(QWidget):
             event : Event
                 the event that triggered the callback
             """
-            id = self._read_label_id(event)
-            self._set_label_id(id)
-            self.parent.callback_handler.remove_callback_viewer()
+            try:
+                id = self._read_label_id(event)
+                self._set_label_id(id)
+            except ValueError as exc:
+                handle_exception(exc)
+            finally:
+                self.parent.callback_handler.remove_callback_viewer()
 
         self.parent.callback_handler.add_callback_viewer(_select_label)
         QApplication.setOverrideCursor(Qt.CrossCursor)
@@ -550,12 +544,7 @@ class SegmentationWindow(QWidget):
         if id == 0:
             self.parent.callback_handler.remove_callback_viewer()
             QApplication.restoreOverrideCursor()
-        label_layer = grab_layer(
-            self.viewer, self.parent.combobox_segmentation.currentText()
-        )
-        if label_layer is None:
-            notify("Please make sure the label layer exists!")
-            return
+        label_layer = self.parent.selected_labels_layer()
 
         if id == 0:
             id = self._get_free_label_id(label_layer)
@@ -589,7 +578,7 @@ class SegmentationWindow(QWidget):
         Adds the callback to replace the label at the given position with the currently selected one
         """
         try:
-            grab_layer(self.viewer, self.parent.combobox_segmentation.currentText())
+            self.parent.selected_labels_layer()
         except ValueError as exc:
             handle_exception(exc)
             return
@@ -605,8 +594,12 @@ class SegmentationWindow(QWidget):
             event : Event
                 the event that triggered the callback
             """
-            self._replace_label(event)
-            self.parent.callback_handler.remove_callback_viewer()
+            try:
+                self._replace_label(event)
+            except ValueError as exc:
+                handle_exception(exc)
+            finally:
+                self.parent.callback_handler.remove_callback_viewer()
 
         self.parent.callback_handler.add_callback_viewer(_replace_label)
         QApplication.setOverrideCursor(Qt.CrossCursor)
@@ -622,7 +615,7 @@ class SegmentationWindow(QWidget):
         Adds the callback to merge the label at the given position with the currently selected one
         """
         try:
-            grab_layer(self.viewer, self.parent.combobox_segmentation.currentText())
+            self.parent.selected_labels_layer()
         except ValueError as exc:
             handle_exception(exc)
             return
@@ -638,7 +631,12 @@ class SegmentationWindow(QWidget):
             event : Event
                 the event that triggered the callback
             """
-            id = self._read_label_id(event)
+            try:
+                id = self._read_label_id(event)
+            except ValueError as exc:
+                handle_exception(exc)
+                self.parent.callback_handler.remove_callback_viewer()
+                return
 
             def _assimilate_label(_, event):
                 """
@@ -651,8 +649,12 @@ class SegmentationWindow(QWidget):
                 event : Event
                     the event that triggered the callback
                 """
-                self._replace_label(event, id)
-                self.parent.callback_handler.remove_callback_viewer()
+                try:
+                    self._replace_label(event, id)
+                except ValueError as exc:
+                    handle_exception(exc)
+                finally:
+                    self.parent.callback_handler.remove_callback_viewer()
 
             self.parent.callback_handler.add_callback_viewer(_assimilate_label)
             QApplication.setOverrideCursor(Qt.CrossCursor)
@@ -671,12 +673,7 @@ class SegmentationWindow(QWidget):
         id : int
             the id to set for the given position
         """
-        label_layer = grab_layer(
-            self.viewer, self.parent.combobox_segmentation.currentText()
-        )
-        if label_layer is None:
-            notify("Please make sure the label layer exists!")
-            return
+        label_layer = self.parent.selected_labels_layer()
 
         # Extract position based on segmentation layer dimensionality
         ndim = label_layer.data.ndim
@@ -706,12 +703,7 @@ class SegmentationWindow(QWidget):
         int
             id at the given position in the segmentation layer
         """
-        label_layer = grab_layer(
-            self.viewer, self.parent.combobox_segmentation.currentText()
-        )
-        if label_layer is None:
-            notify("Please make sure the label layer exists!")
-            return
+        label_layer = self.parent.selected_labels_layer()
 
         # Extract position based on segmentation layer dimensionality
         ndim = label_layer.data.ndim

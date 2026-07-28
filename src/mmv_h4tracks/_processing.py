@@ -1,8 +1,5 @@
 import multiprocessing
-from multiprocessing import Pool
-import json
 import logging
-import shutil
 from datetime import datetime
 from pathlib import Path
 import time
@@ -14,11 +11,21 @@ from qtpy.QtCore import Qt
 from qtpy.QtWidgets import QApplication, QMessageBox
 from scipy import ndimage, optimize, spatial
 
-from ._constants import APPROX_INF, MAX_MATCHING_DIST, CUSTOM_MODEL_PREFIX
+from ._constants import (
+    APPROX_INF,
+    MAX_MATCHING_DIST,
+    CUSTOM_MODEL_PREFIX,
+    DEFAULT_TRACKS_LAYER_NAME,
+)
+from ._concurrency import map_parallel, starmap_parallel
+from ._custom_models import (
+    get_custom_model_store,
+    package_models_dir,
+)
 from ._grabber import grab_layer
 from ._session_trained_models import overlap_training_frames_with_stack
 from ._logger import handle_exception, notify
-from ._utils import preserve_and_filter_graph
+from ._qt_utils import layer_as_numpy
 from ._train import CELLPOSE_TRAIN_N_EPOCHS_DEFAULT, _sanitize_model_name_fragment
 
 logger = logging.getLogger(__name__)
@@ -75,8 +82,7 @@ def segment_slice_cpu(layer_slice, parameters):
     )
     logger.info("Segmentation process started")
     model = models.CellposeModel(gpu=False, pretrained_model=parameters["model_path"])
-    eval_params = parameters
-    eval_params.pop("model_path", None)
+    eval_params = {k: v for k, v in parameters.items() if k != "model_path"}
     mask, _, _ = model.eval(layer_slice, **eval_params)
     endtime = time.time()
     logger.debug(
@@ -180,26 +186,24 @@ def match_centroids(
 
 def read_custom_model_dict():
     """
-    Reads the parameters of the custom models from the 'custom_models.json' file and returns them
+    Read custom model parameters from the user data store
+    (``~/.mmv_h4tracks`` or ``MMV_H4TRACKS_USER_DATA``).
     """
-    try:
-        with open(Path(__file__).parent / "custom_models.json", "r") as file:
-            return json.load(file)
-    except FileNotFoundError:
-        return {}
+    return get_custom_model_store().load()
 
 
 def read_models(widget):
     """
-    Reads the available models from the 'models' and 'custom models' directory and returns them
+    Reads the available models from the package ``models/`` dir and the user
+    custom-model store and returns them.
     """
-    path = Path(__file__).parent / "models"
+    path = package_models_dir()
 
     hardcoded_models = [file.name for file in path.iterdir() if not file.is_dir()]
     custom_models = []
 
-    p = Path(__file__).parent / "models" / "custom_models"
-    custom_model_filenames = [file.name for file in p.glob("*") if file.is_file()]
+    store = get_custom_model_store()
+    custom_model_filenames = store.list_weight_filenames()
     for custom_model in widget.custom_models:
         if widget.custom_models[custom_model]["filename"] in custom_model_filenames:
             custom_models.append(CUSTOM_MODEL_PREFIX + custom_model)
@@ -208,19 +212,19 @@ def read_models(widget):
 
 def display_models(widget, hardcoded_models, custom_models):
     """
-    Adds the passed models to the segmentation combobox.
+    Adds the passed models to the Cellpose model combobox.
     """
     hardcoded_models.sort()
     custom_models.sort()
-    widget.combobox_segmentation.clear()
-    widget.combobox_segmentation.addItems(hardcoded_models)
-    widget.combobox_segmentation.addItems(custom_models)
+    widget.combobox_cellpose_model.clear()
+    widget.combobox_cellpose_model.addItems(hardcoded_models)
+    widget.combobox_cellpose_model.addItems(custom_models)
 
 
 def custom_model_weights_basename(display_name: str) -> str:
     """
     Canonical custom model name: used as ``custom_models.json`` key and as the weights
-    filename (no extension) under ``models/custom_models/``.
+    filename (no extension) under the user custom-models directory.
     """
     stem = _sanitize_model_name_fragment(display_name)
     return stem if stem else "model"
@@ -231,26 +235,24 @@ def is_custom_model_display_name_taken(widget, display_name: str) -> bool:
     canonical = custom_model_weights_basename(display_name)
     if canonical in widget.custom_models:
         return True
-    dest = Path(__file__).parent / "models" / "custom_models" / canonical
-    return dest.is_file()
+    return get_custom_model_store().weights_path(canonical).is_file()
 
 
 def persist_custom_model_entry(widget, display_name: str, source_weights: Path, params: dict) -> Path:
     """
-    Copy Cellpose weights into ``models/custom_models/`` (no file extension) and update ``custom_models.json``.
+    Copy Cellpose weights into the user custom-model store and update the registry JSON.
 
     The JSON key and on-disk basename are always ``custom_model_weights_basename(display_name)``.
     """
-    package_root = Path(__file__).parent
-    dest_dir = package_root / "models" / "custom_models"
-    dest_dir.mkdir(parents=True, exist_ok=True)
+    store = get_custom_model_store()
     canonical = custom_model_weights_basename(display_name)
-    dest_path = dest_dir / canonical
-    shutil.copy2(source_weights, dest_path)
-    widget.custom_models[canonical] = {"filename": canonical, "params": params}
-    with open(package_root / "custom_models.json", "w") as file:
-        json.dump(widget.custom_models, file)
-    return dest_path
+    return store.persist(
+        display_name,
+        source_weights,
+        params,
+        widget.custom_models,
+        canonical=canonical,
+    )
 
 
 @thread_worker(connect={"errored": handle_exception})
@@ -282,20 +284,10 @@ def _load_segmentation_image_data(widget, demo: bool):
     Load the selected image layer as a squeezed numpy volume (same as segmentation worker).
     Returns (data_squeezed, removed_dims).
     """
-    viewer = widget.viewer
-    layer = grab_layer(viewer, widget.parent.combobox_image.currentText())
+    layer = widget.parent.selected_image_layer()
 
-    if isinstance(layer.data, (list, tuple)) and len(layer.data) > 0:
-        data = layer.data[0]
-    elif isinstance(layer.data, np.ndarray):
-        data = layer.data
-    else:
-        try:
-            data = layer.data[0] if hasattr(layer.data, "__getitem__") else layer.data
-        except (TypeError, IndexError, AttributeError):
-            data = layer.data
+    data = layer_as_numpy(layer)
 
-    data = np.asarray(data)
     original_shape = data.shape
     data_squeezed = np.squeeze(data)
     if data_squeezed.ndim not in (2, 3):
@@ -431,7 +423,7 @@ def _prompt_exclude_training_frames_if_applicable(
     (frozenset[int], Path | None, str | None)
         Excluded frame indices, training masks directory, layer prefix for mask filenames.
     """
-    selected = widget.combobox_segmentation.currentText()
+    selected = widget.combobox_cellpose_model.currentText()
     if not selected.startswith(CUSTOM_MODEL_PREFIX):
         return None
     display_name = selected[len(CUSTOM_MODEL_PREFIX) :]
@@ -550,7 +542,7 @@ def _segment_image(
     data_squeezed, removed_dims = _load_segmentation_image_data(widget, demo)
     exclude_set = exclude_frame_indices or frozenset()
 
-    selected_model = widget.combobox_segmentation.currentText()
+    selected_model = widget.combobox_cellpose_model.currentText()
     parameters = _get_parameters(widget, selected_model)
 
     if core.use_gpu():
@@ -589,8 +581,9 @@ def _segment_image(
                 data_with_parameters = [
                     (data_squeezed[i], parameters) for i in indices_to_run
                 ]
-                with Pool(AMOUNT_OF_PROCESSES) as p:
-                    parts = p.starmap(segment_slice_cpu, data_with_parameters)
+                parts = starmap_parallel(
+                    segment_slice_cpu, data_with_parameters, AMOUNT_OF_PROCESSES
+                )
                 for idx, layer_mask in zip(indices_to_run, parts):
                     mask[idx] = layer_mask
 
@@ -662,37 +655,39 @@ def _get_parameters(widget, model: str):
     -------
     dict
         a dictionary of all the parameters based on selected model
+
+    Raises
+    ------
+    ValueError
+        If ``model`` is not a known hardcoded or registered custom model.
     """
-    # Hardcoded models
+    models_root = package_models_dir()
+
     if model == "Neutrophil_granulocytes":
-        params = {
-            "model_path": str(Path(__file__).parent.absolute() / "models" / model),
+        return {
+            "model_path": str(models_root / model),
             "diameter": 15,
             "channels": [0, 0],
             "flow_threshold": 0.4,
             "cellprob_threshold": 0,
         }
     if model == "cpsam":
-        params = {
-            "model_path": str(Path(__file__).parent.absolute() / "models" / model),
-            # "diameter": 15,
-            # "channels": [0, 0],
+        return {
+            "model_path": str(models_root / model),
             "flow_threshold": 0.4,
             "cellprob_threshold": 0,
         }
+    if model.startswith(CUSTOM_MODEL_PREFIX):
+        key = model[len(CUSTOM_MODEL_PREFIX) :]
+        if key in widget.custom_models:
+            entry = widget.custom_models[key]
+            params = dict(entry["params"])
+            params["model_path"] = str(
+                get_custom_model_store().weights_path(entry["filename"])
+            )
+            return params
 
-    model = model[len(CUSTOM_MODEL_PREFIX) :]
-    # Custom models
-    if model in widget.custom_models:
-        params = widget.custom_models[model]["params"]
-        params["model_path"] = str(
-            Path(__file__).parent.absolute()
-            / "models"
-            / "custom_models"
-            / widget.custom_models[model]["filename"]
-        )
-
-    return params
+    raise ValueError(f"Unknown model: {model!r}")
 
 
 @thread_worker(connect={"errored": handle_exception})
@@ -716,27 +711,10 @@ def _track_segmentation(widget):
     time1 = time.time()
     logger.info(f"getting segmentation data took {time1 - starttime} seconds")
 
-    # check for tracks layer
-    _, collision = _check_for_tracks_layer(widget)
-    if collision:
-        QApplication.restoreOverrideCursor()
-        yield "Replace tracks layer"
-        widget.choice_event.wait()
-        widget.choice_event.clear()
-        QApplication.setOverrideCursor(Qt.WaitCursor)
-        ret = widget.ret
-        del widget.ret
-        if ret == 65536:
-            QApplication.restoreOverrideCursor()
-            return
-        
-    time2 = time.time()
-    logger.info(f"checking for tracks layer took {time2 - time1} seconds")
-
     # these two calls are slow (30-40 seconds each)
     extended_centroids = _calculate_centroids_parallel(widget, data)
     time3 = time.time()
-    logger.info(f"calculating centroids took {time3 - time2} seconds")
+    logger.info(f"calculating centroids took {time3 - time1} seconds")
     matches = _match_centroids_parallel(widget, extended_centroids)
     time4 = time.time()
     logger.info(f"matching centroids took {time4 - time3} seconds")
@@ -763,55 +741,11 @@ def _get_segmentation_data(widget):
         the segmentation data as a numpy array
     """
     try:
-        label_layer = grab_layer(
-            widget.viewer, widget.parent.combobox_segmentation.currentText()
-        )
+        label_layer = widget.parent.selected_labels_layer()
     except ValueError as exc:
         raise ValueError("Segmentation layer not found in viewer") from exc
-    
-    # Get the actual data array, handling both multiscale and dask arrays
-    if isinstance(label_layer.data, (list, tuple)):
-        # Multiscale: use first level
-        segmentation = np.asarray(label_layer.data[0])
-    else:
-        # Single resolution: convert to numpy to handle dask arrays
-        segmentation = np.asarray(label_layer.data)
-    
-    return segmentation
 
-
-def _add_tracks_to_viewer(params):
-    """
-    Adds the tracks as a layer to the viewer with a specified name
-
-    Parameters
-    ----------
-    tracks : array
-        the tracks data to add to the viewer
-    """
-    # check if tracks are usable
-    if params is None:
-        return
-    widget, tracks, layername = params
-    try:
-        tracks_layer = grab_layer(
-            widget.viewer, widget.parent.combobox_tracks.currentText()
-        )
-    except ValueError as exc:
-        if str(exc) == "Layer name can not be blank":
-            widget.viewer.add_tracks(tracks, name=layername)
-        else:
-            handle_exception(exc)
-            return
-    else:
-        # Preserve and filter graph from existing layer
-        filtered_graph = preserve_and_filter_graph(tracks_layer, tracks)
-        tracks_layer.data = tracks
-        if filtered_graph:
-            tracks_layer.graph = filtered_graph
-    widget.parent.tracks = tracks
-    widget.parent.eval_cache[1] = tracks
-    widget.parent.combobox_tracks.setCurrentText(layername)
+    return layer_as_numpy(label_layer)
 
 
 def _check_for_tracks_layer(widget):
@@ -830,12 +764,10 @@ def _check_for_tracks_layer(widget):
     collision : Boolean
         whether or not there is a tracks layer in the viewer
     """
-    tracks_name = "Tracks"
+    tracks_name = DEFAULT_TRACKS_LAYER_NAME
     collision = True
     try:
-        tracks_layer = grab_layer(
-            widget.viewer, widget.parent.combobox_tracks.currentText()
-        )
+        tracks_layer = widget.parent.selected_tracks_layer()
     except ValueError:
         collision = False
     else:
@@ -843,32 +775,13 @@ def _check_for_tracks_layer(widget):
     return tracks_name, collision
 
 
-def _calculate_processes_limit(widget):
-    """
-    Calculate the amount of processes to use for multiprocessing
-
-    Parameters
-    ----------
-    widget : QWidget
-        the widget containing the viewer and the comboboxes
-
-    Returns
-    -------
-    int
-        the amount of processes to use
-    """
-    if widget.parent.rb_eco.isChecked():
-        return max(1, int(multiprocessing.cpu_count() * 0.4))
-    else:
-        return max(1, int(multiprocessing.cpu_count() * 0.8))
-
-
 def _calculate_centroids_parallel(widget, data):
     """
     Calculate the centroids of objects in a 2D slice.
     """
-    with Pool(_calculate_processes_limit(widget)) as p:
-        return p.map(calculate_centroids, data)
+    return map_parallel(
+        calculate_centroids, data, widget.parent.get_process_limit()
+    )
 
 
 def _match_centroids_parallel(widget, extended_centroids):
@@ -879,8 +792,9 @@ def _match_centroids_parallel(widget, extended_centroids):
         (extended_centroids[i - 1], extended_centroids[i])
         for i in range(1, len(extended_centroids))
     ]
-    with Pool(_calculate_processes_limit(widget)) as p:
-        return p.map(match_centroids, (slice_pairs))
+    return map_parallel(
+        match_centroids, slice_pairs, widget.parent.get_process_limit()
+    )
 
 
 def _process_matches(matches):
@@ -1078,7 +992,7 @@ def remove_frame_from_track(tracks, track_entry):
 
 
 def lowest_missing_int(arr):
-    num_set = set(arr)
+    num_set = set(arr) if not isinstance(arr, set) else arr
     i = 1
     while i in num_set:
         i += 1
@@ -1086,39 +1000,34 @@ def lowest_missing_int(arr):
 
 
 def split_noncontinuous_tracks(tracks):
-    """Splits noncontinuous tracks into separate tracks."""
-    # get unique track ids
-    unique_track_ids = np.unique(tracks[:, 0])
+    """Split tracks that have frame gaps into separate track IDs.
 
-    # iterate through all unique track ids
-    for track_id in unique_track_ids:
-        # get all entries with the current track id
-        current_track = tracks[tracks[:, 0] == track_id]
+    For each track ID, rows are ordered by frame. Contiguous frame runs keep the
+    original ID for the first run; each later run gets a new ID. Indexing uses
+    the actual row positions in ``tracks`` (not an assumed contiguous block).
+    """
+    if tracks is None or len(tracks) == 0:
+        return tracks
 
-        # if the track is not continuous, split it
-        if not np.all(np.diff(current_track[:, 1]) == 1):
-            # get the indices of the noncontinuous entries
-            jumped_indices = np.where(np.diff(current_track[:, 1]) != 1)[0] + 1
-            # get lists of indices to update
-            # each list starts at the first entry and goes to the
-            # end of the track
-            indices_to_update = []
-            # TODO: indices are not assigned correctly
-            for index in jumped_indices:
-                index_in_tracks = np.where(
-                    np.all(tracks == current_track[index], axis=1)
-                )[0][0]
-                indices_to_update.append(
-                    np.arange(len(current_track) - index) + index_in_tracks
-                )
+    tracks = np.asarray(tracks)
+    for track_id in np.unique(tracks[:, 0]):
+        idxs = np.where(tracks[:, 0] == track_id)[0]
+        if len(idxs) <= 1:
+            continue
 
-            for index_list in indices_to_update:
-                # get the new track id
-                new_track_id = lowest_missing_int(unique_track_ids)
+        idxs = idxs[np.argsort(tracks[idxs, 1], kind="stable")]
+        frames = tracks[idxs, 1]
+        gap_starts = np.where(np.diff(frames) != 1)[0] + 1
+        if gap_starts.size == 0:
+            continue
 
-                # set the new track id for the split entries
-                tracks[index_list, 0] = new_track_id
-                unique_track_ids = np.unique(tracks[:, 0])
+        boundaries = np.concatenate(([0], gap_starts, [len(idxs)]))
+        used_ids = set(np.unique(tracks[:, 0]).tolist())
+        for seg in range(1, len(boundaries) - 1):
+            seg_idxs = idxs[boundaries[seg] : boundaries[seg + 1]]
+            new_id = lowest_missing_int(used_ids)
+            tracks[seg_idxs, 0] = new_id
+            used_ids.add(new_id)
 
     return tracks
 

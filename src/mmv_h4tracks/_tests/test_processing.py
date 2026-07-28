@@ -5,16 +5,9 @@ import pytest
 from pathlib import Path
 
 import napari
-from bioio import BioImage
 
-from mmv_h4tracks import _processing as processing, MMVH4TRACKS
+from mmv_h4tracks import _processing as processing
 from mmv_h4tracks._segmentation import SegmentationWindow
-from mmv_h4tracks._tracking import TrackingWindow
-
-
-@pytest.fixture
-def create_widget(make_napari_viewer):
-    return MMVH4TRACKS(make_napari_viewer())
 
 
 pytestmark = pytest.mark.processing
@@ -22,10 +15,15 @@ pytestmark = pytest.mark.processing
 
 @pytest.fixture
 def widget_with_segmentation(create_widget):
+    """Tiny synthetic labels stack for fast proximity-tracking schema checks."""
     widget = create_widget
-    path = Path(__file__).parent / "data" / "segmentation" / "test_seg.tiff"
-    segmentation = BioImage(path).get_image_data("ZYX")
-    widget.viewer.add_labels(segmentation, name="segmentation")
+    # 5 frames, two stationary blobs well within MAX_MATCHING_DIST.
+    seg = np.zeros((5, 40, 40), dtype=np.int32)
+    for z in range(seg.shape[0]):
+        seg[z, 8:12, 8:12] = 1
+        seg[z, 25:29, 25:29] = 2
+    widget.viewer.add_labels(seg, name="segmentation")
+    widget.combobox_segmentation.setCurrentText("segmentation")
     return widget
 
 
@@ -58,59 +56,88 @@ def test_calculate_centroid():
 
 
 @pytest.mark.unit
-def test_read_custom_model_dict(create_widget):
-    create_widget
-    model_dict = processing.read_custom_model_dict()
-    assert model_dict == {}
+def test_read_custom_model_dict(tmp_path):
+    from mmv_h4tracks._custom_models import CustomModelStore, set_custom_model_store
+
+    set_custom_model_store(CustomModelStore(tmp_path / "empty_store"))
+    try:
+        model_dict = processing.read_custom_model_dict()
+        assert model_dict == {}
+    finally:
+        set_custom_model_store(None)
 
 
 @pytest.mark.unit
-@pytest.mark.skip(reason="Added additional model for testing purposes")
+def test_get_parameters_hardcoded(create_widget):
+    widget = SegmentationWindow(create_widget)
+    params = processing._get_parameters(widget, "Neutrophil_granulocytes")
+    assert params["diameter"] == 15
+    assert params["model_path"].endswith("Neutrophil_granulocytes")
+
+
+@pytest.mark.unit
+def test_get_parameters_custom(create_widget):
+    widget = SegmentationWindow(create_widget)
+    widget.custom_models = {
+        "demo": {
+            "filename": "demo_weights",
+            "params": {"diameter": 20, "flow_threshold": 0.3, "cellprob_threshold": 0},
+        }
+    }
+    params = processing._get_parameters(widget, "custom_demo")
+    assert params["diameter"] == 20
+    assert params["model_path"].endswith("demo_weights")
+    # Stored dict must not be mutated by path injection.
+    assert "model_path" not in widget.custom_models["demo"]["params"]
+
+
+@pytest.mark.unit
+def test_get_parameters_unknown_raises(create_widget):
+    widget = SegmentationWindow(create_widget)
+    with pytest.raises(ValueError, match="Unknown model"):
+        processing._get_parameters(widget, "not_a_real_model")
+
+
+@pytest.mark.unit
 def test_read_models(create_widget):
     widget = create_widget
     segmentation_widget = SegmentationWindow(widget)
-    hardcoded_models, custom_models = processing.read_models(segmentation_widget)
+    hardcoded_models, _custom_models = processing.read_models(segmentation_widget)
 
-    assert hardcoded_models == ["Neutrophil_granulocytes"]
-    assert custom_models == []
+    assert "Neutrophil_granulocytes" in hardcoded_models
 
 
 @pytest.mark.unit
-@pytest.mark.skip(reason="Added additional model for testing purposes")
 def test_display_models(create_widget):
     widget = create_widget
     segmentation_widget = SegmentationWindow(widget)
     hardcoded_models, custom_models = processing.read_models(segmentation_widget)
+    assert "Neutrophil_granulocytes" in hardcoded_models
     processing.display_models(segmentation_widget, hardcoded_models, custom_models)
-    assert segmentation_widget.combobox_segmentation.count() == 1
-    assert (
-        segmentation_widget.combobox_segmentation.currentText()
-        == "Neutrophil_granulocytes"
-    )
+    combo = segmentation_widget.combobox_cellpose_model
+    assert combo.findText("Neutrophil_granulocytes") >= 0
+    assert combo.count() == len(hardcoded_models) + len(custom_models)
 
-# TODO: ~45 second call, even timed out at some point (60s)
+
 @pytest.mark.integration
 @pytest.mark.schema
-@pytest.mark.skip(reason="Skipping test due to timeout")
-def test_track_segmentation_schema(widget_with_segmentation, qtbot):
-    # TODO:
-    # test:
-    # - _get_segmentation_data
-    # - _check_for_tracks_layer
-    # - _calculate_centroids_parallel
-    # - _match_centroids_parallel
-    # - _process_matches
+def test_track_segmentation_schema(widget_with_segmentation, qtbot, monkeypatch):
+    """Schema-check proximity tracking on a tiny synthetic stack."""
+    # Force serial map/starmap (no Pool spawn) via the shared concurrency policy.
+    monkeypatch.setattr(
+        widget_with_segmentation,
+        "get_process_limit",
+        lambda: 1,
+    )
+
     widget = widget_with_segmentation
-    # add segmentation layer to widget
-    tracking_widget = TrackingWindow(widget)
-    # check:
-    # - segmentation layer exists
-    # - tracking layer does not exist
+    tracking_widget = widget.tracking_window
     viewer = widget.viewer
     assert len(viewer.layers) == 1
     layer = viewer.layers[0]
     assert layer.name == "segmentation"
     assert isinstance(layer, napari.layers.Labels)
+
     worker = processing._track_segmentation(tracking_widget)
     trk_data = None
 
@@ -119,47 +146,80 @@ def test_track_segmentation_schema(widget_with_segmentation, qtbot):
         trk_data = result
 
     worker.returned.connect(capture_result)
-    # can take up to ~70 seconds, so long timeout
-    with qtbot.waitSignal(worker.returned, timeout=150000) as blocker:
-        blocker.wait()
-    # check:
-    # - tracking layer data exists
-    # - tracking layer data is nx4
-    # - tracking layer data only has continuous tracks
-    # - z_0 of track n <= z_0 of track n+1
+    with qtbot.waitSignal(worker.returned, timeout=30000):
+        pass
+
+    assert trk_data is not None
     assert trk_data.shape[1] == 4
     unique_ids, indices = np.unique(trk_data[:, 0], return_index=True)
     ordered_unique_ids = unique_ids[np.argsort(indices)]
-    # ids are in correct order
     assert np.array_equal(unique_ids, ordered_unique_ids)
-    # ids are continuous
     assert unique_ids[-1] - unique_ids[0] + 1 == len(unique_ids)
     lower_bound_frame = -1
     for trk_id in ordered_unique_ids:
         trk = trk_data[trk_data[:, 0] == trk_id]
         frames = trk[:, 1]
         low_frame = frames[0]
-        # starting with lowest frame
         assert all(frames >= low_frame)
-        # starting frame is not lower than previous track
         assert low_frame >= lower_bound_frame
         lower_bound_frame = low_frame
         high_frame = frames[-1]
-        # ending with highest frame
         assert all(frames <= high_frame)
-        # only unique frames
         assert len(set(frames)) == len(frames)
-        # continuous frames
         assert len(frames) == high_frame - low_frame + 1
 
-    # assert calls:
-    # - _get_segmentation_data x1 with widget
-    # - _check_for_tracks_layer x1 with widget
-    # - _calculate_centroids_parallel x1 with (widget, data)
-    # - _match_centroids_parallel x1
-    # - _process_matches x1
 
-    # schema for tracking layer after link unlink relaxed to:
-    # - tracking layer exists (only for link?)
-    # - tracking layer is nx4
-    # - tracking layer only has continuous tracks
+@pytest.mark.unit
+def test_split_noncontinuous_tracks_single_gap():
+    # Contiguous rows for track 1 with a frame gap 0,1 then 4,5
+    tracks = np.array(
+        [
+            [1, 0, 0, 0],
+            [1, 1, 0, 0],
+            [1, 4, 1, 1],
+            [1, 5, 1, 1],
+            [2, 0, 2, 2],
+        ]
+    )
+    out = processing.split_noncontinuous_tracks(tracks.copy())
+    assert np.array_equal(out[out[:, 0] == 1][:, 1], [0, 1])
+    other = out[(out[:, 0] != 1) & (out[:, 0] != 2)]
+    assert len(other) == 2
+    assert np.array_equal(other[:, 1], [4, 5])
+    assert len(np.unique(other[:, 0])) == 1
+
+
+@pytest.mark.unit
+def test_split_noncontinuous_tracks_multiple_gaps_interleaved():
+    # Track 1 rows are not a single contiguous block in the array.
+    tracks = np.array(
+        [
+            [1, 0, 0, 0],
+            [2, 0, 9, 9],
+            [1, 1, 0, 0],
+            [2, 1, 9, 9],
+            [1, 5, 1, 1],
+            [1, 6, 1, 1],
+            [1, 10, 2, 2],
+        ]
+    )
+    out = processing.split_noncontinuous_tracks(tracks.copy())
+    by_id = {tid: out[out[:, 0] == tid] for tid in np.unique(out[:, 0])}
+    # Original id 1 keeps the first contiguous run (frames 0-1)
+    assert np.array_equal(by_id[1][:, 1], [0, 1])
+    # Track 2 unchanged
+    assert np.array_equal(by_id[2][:, 1], [0, 1])
+    # Two additional runs from the gaps
+    extra_frames = sorted(
+        tuple(by_id[tid][:, 1].tolist())
+        for tid in by_id
+        if tid not in (1, 2)
+    )
+    assert extra_frames == [(5, 6), (10,)]
+
+
+@pytest.mark.unit
+def test_split_noncontinuous_tracks_already_continuous():
+    tracks = np.array([[1, 0, 0, 0], [1, 1, 0, 0], [1, 2, 0, 0]])
+    out = processing.split_noncontinuous_tracks(tracks.copy())
+    assert np.array_equal(out, tracks)

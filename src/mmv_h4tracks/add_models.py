@@ -1,6 +1,4 @@
-import json
 from pathlib import Path
-import shutil
 from qtpy.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -13,10 +11,11 @@ from qtpy.QtWidgets import (
 )
 from qtpy.QtCore import Qt, QRegularExpression
 from qtpy.QtGui import QRegularExpressionValidator
-import napari
 
 import mmv_h4tracks._processing as processing
+from mmv_h4tracks._constants import CUSTOM_MODEL_PREFIX
 from mmv_h4tracks._logger import notify
+from mmv_h4tracks._qt_utils import apply_napari_dark_theme
 
 SHOW_OPTIONS_TEXT = "Show advanced options"
 HIDE_OPTIONS_TEXT = "Hide advanced options"
@@ -31,10 +30,7 @@ class ModelWindow(QWidget):
         self.parent = parent
         self.mode_path: str
         self.advanced_options = []
-        try:
-            self.setStyleSheet(napari.qt.get_stylesheet(theme="dark"))
-        except TypeError:
-            self.setStyleSheet(napari.qt.get_stylesheet(theme_id="dark"))
+        apply_napari_dark_theme(self)
 
         ## QObjects
         # Labels
@@ -262,19 +258,15 @@ class ModelWindow(QWidget):
         if rescale != "":
             params["rescale"] = float(rescale)
 
-        model_entry = {"filename": canonical, "params": params}
-        self.parent.custom_models[canonical] = model_entry
-        with open(Path(__file__).parent / "custom_models.json", "w") as file:
-            json.dump(self.parent.custom_models, file)
-
-        old_path = Path(self.model_path)
-        path = Path(__file__).parent / "models" / "custom_models"
-        path.mkdir(parents=True, exist_ok=True)
-        new_path = path / canonical
-        shutil.copy2(old_path, new_path)
+        processing.persist_custom_model_entry(
+            self.parent, raw_name, Path(self.model_path), params
+        )
 
         hardcoded_models, custom_models = processing.read_models(self.parent)
         processing.display_models(self.parent, hardcoded_models, custom_models)
+        self.parent.combobox_cellpose_model.setCurrentText(
+            CUSTOM_MODEL_PREFIX + canonical
+        )
         QApplication.restoreOverrideCursor()
         self.close()
 

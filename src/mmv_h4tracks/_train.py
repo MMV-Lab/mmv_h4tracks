@@ -20,6 +20,7 @@ from pathlib import Path
 import numpy as np
 
 from ._grabber import grab_layer
+from ._qt_utils import layer_as_numpy
 
 # Cellpose CLI writes trained weights under ``models/`` with names like ``cellpose_<epoch>.<step>`` (optional extra extension).
 _CELLPOSE_CLI_WEIGHTS_RE = re.compile(r"^cellpose_\d+\.\d+(?:\.[^.]+)?$")
@@ -80,17 +81,7 @@ def parse_use_frames(text: str) -> list[int] | None:
 
 def _get_array_from_layer(layer) -> np.ndarray:
     """Load layer volume as squeezed numpy array (2D single frame or 3D time series)."""
-    if isinstance(layer.data, (list, tuple)) and len(layer.data) > 0:
-        data = layer.data[0]
-    elif isinstance(layer.data, np.ndarray):
-        data = layer.data
-    else:
-        try:
-            data = layer.data[0] if hasattr(layer.data, "__getitem__") else layer.data
-        except (TypeError, IndexError, AttributeError):
-            data = layer.data
-    data = np.asarray(data)
-    data_squeezed = np.squeeze(data)
+    data_squeezed = np.squeeze(layer_as_numpy(layer))
     if data_squeezed.ndim not in (2, 3):
         raise ValueError(
             "Image and segmentation must be 2D or a stack of 2D frames (3D after "

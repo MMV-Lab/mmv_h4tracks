@@ -1,4 +1,4 @@
-from multiprocessing import Pool
+import math
 
 import numpy as np
 from qtpy.QtWidgets import (
@@ -18,13 +18,12 @@ from qtpy.QtWidgets import (
 )
 from qtpy.QtCore import Qt
 from matplotlib.figure import Figure
-from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from napari.qt.threading import thread_worker
-import napari
 from skimage import measure
-import math
 
-from ._grabber import grab_layer
+from ._concurrency import starmap_parallel
+from ._qt_utils import apply_napari_dark_theme
 
 from mmv_h4tracks._logger import handle_exception
 from ._selector import Selector
@@ -51,10 +50,7 @@ class AnalysisWindow(QWidget):
         self.parent = parent
         self.viewer = parent.viewer
         self.setLayout(QVBoxLayout())
-        try:
-            self.setStyleSheet(napari.qt.get_stylesheet(theme="dark"))
-        except TypeError:
-            self.setStyleSheet(napari.qt.get_stylesheet(theme_id="dark"))
+        apply_napari_dark_theme(self)
 
         ### QObjects
 
@@ -254,8 +250,11 @@ class AnalysisWindow(QWidget):
             )
         AMOUNT_OF_PROCESSES = self.parent.get_process_limit()
 
-        with Pool(AMOUNT_OF_PROCESSES) as p:
-            sizes = p.starmap(calculate_size_single_track, track_and_segmentation)
+        sizes = starmap_parallel(
+            calculate_size_single_track,
+            track_and_segmentation,
+            AMOUNT_OF_PROCESSES,
+        )
 
         return np.array(sizes)
 
@@ -557,14 +556,7 @@ class AnalysisWindow(QWidget):
 
         canvas = FigureCanvas(fig)
         self.parent.plot_window = QWidget()
-        try:
-            self.parent.plot_window.setStyleSheet(
-                napari.qt.get_stylesheet(theme="dark")
-            )
-        except TypeError:
-            self.parent.plot_window.setStyleSheet(
-                napari.qt.get_stylesheet(theme_id="dark")
-            )
+        apply_napari_dark_theme(self.parent.plot_window)
         self.parent.plot_window.setLayout(QVBoxLayout())
         self.parent.plot_window.setWindowTitle(plot_dict["Description"])
         self.selector = Selector(self, axes, results)
@@ -590,9 +582,7 @@ class AnalysisWindow(QWidget):
         retval: dict
             dictionary containing the metric data and results
         """
-        tracks_layer = grab_layer(
-            self.parent.viewer, self.parent.combobox_tracks.currentText()
-        )
+        tracks_layer = self.parent.selected_tracks_layer()
         retval = {}
         if metric == "Speed":
             retval.update({"Name": "Speed [px/frame]"})
@@ -604,9 +594,7 @@ class AnalysisWindow(QWidget):
 
         elif metric == "Size":
             retval.update({"Name": "Size [pixels]"})
-            segmentation_layer = grab_layer(
-                self.viewer, self.parent.combobox_segmentation.currentText()
-            )
+            segmentation_layer = self.parent.selected_labels_layer()
             retval.update(
                 {"Description": "Scatterplot Standard Deviation vs Average: Size"}
             )
@@ -663,9 +651,7 @@ class AnalysisWindow(QWidget):
 
         elif metric == "Eccentricity":
             retval.update({"Name": "Eccentricity [a.u.]"})
-            segmentation_layer = grab_layer(
-                self.viewer, self.parent.combobox_segmentation.currentText()
-            )
+            segmentation_layer = self.parent.selected_labels_layer()
             retval.update(
                 {
                     "Description": "Scatterplot Standard Deviation vs Average: Eccentricity"
@@ -682,9 +668,7 @@ class AnalysisWindow(QWidget):
 
         elif metric == "Perimeter":
             retval.update({"Name": "Perimeter [pixels]"})
-            segmentation_layer = grab_layer(
-                self.viewer, self.parent.combobox_segmentation.currentText()
-            )
+            segmentation_layer = self.parent.selected_labels_layer()
             retval.update(
                 {"Description": "Scatterplot Standard Deviation vs Average: Perimeter"}
             )
@@ -773,9 +757,7 @@ class AnalysisWindow(QWidget):
             list of metrics to export
         """
         QApplication.setOverrideCursor(Qt.WaitCursor)
-        tracks = grab_layer(
-            self.parent.viewer, self.parent.combobox_tracks.currentText()
-        ).data
+        tracks = self.parent.selected_tracks_layer().data
         direction = self._calculate_direction(tracks)
         self.direction = direction
 
@@ -995,9 +977,7 @@ class AnalysisWindow(QWidget):
             metrics_dict.update({"Speed": speed})
 
         if "Size" in selected_metrics:
-            segmentation = grab_layer(
-                self.viewer, self.parent.combobox_segmentation.currentText()
-            ).data
+            segmentation = self.parent.selected_labels_layer().data
             size = self._calculate_size(tracks, segmentation)
             metrics.extend(
                 ["Average size [# pixels]", "Standard deviation of size [# pixels]"]
@@ -1193,9 +1173,7 @@ class AnalysisWindow(QWidget):
                 metrics_dict.update({"Directness": directness})
 
         if "Perimeter" in selected_metrics:
-            segmentation = grab_layer(
-                self.viewer, self.parent.combobox_segmentation.currentText()
-            ).data
+            segmentation = self.parent.selected_labels_layer().data
             perimeter = self.calculate_cell_perimeter(tracks, segmentation)
             metrics.extend(
                 [
@@ -1242,9 +1220,7 @@ class AnalysisWindow(QWidget):
             metrics_dict.update({"Perimeter": perimeter})
 
         if "Eccentricity" in selected_metrics:
-            segmentation = grab_layer(
-                self.viewer, self.parent.combobox_segmentation.currentText()
-            ).data
+            segmentation = self.parent.selected_labels_layer().data
             eccentricity = self.calculate_cell_eccentricity(tracks, segmentation)
             metrics.extend(
                 [

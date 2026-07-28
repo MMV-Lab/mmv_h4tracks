@@ -1,46 +1,64 @@
 """Module providing tests for the segmentation widget"""
 
 import pytest
-from pathlib import Path
-from bioio import BioImage
 import numpy as np
 from unittest.mock import Mock
+from scipy import ndimage
 
 from mmv_h4tracks import MMVH4TRACKS
 from mmv_h4tracks._reader import build_multiscale
+from mmv_h4tracks._tests.data_loading import DATA_ROOT, load_image_zyx
+from mmv_h4tracks._tests.fixture_helpers import (
+    clear_viewer_layers,
+    reset_plugin_state,
+    reset_widget,
+)
 
-PATH = Path(__file__).parent / "data"
-IMAGE_EXTENSIONS = {".tif", ".tiff"}
-TRACK_EXTENSIONS = {".npy"}
+PATH = DATA_ROOT
+REMOVE_CELL_SEG = "test_seg"
+REMOVE_CELL_TRK = "test_trk"
+
+
+@pytest.fixture(scope="module")
+def remove_cell_testdata():
+    """Only the labels + tracks pair needed by remove_cell_from_tracks."""
+    seg = load_image_zyx(PATH / "segmentation" / f"{REMOVE_CELL_SEG}.tiff")
+    trk = np.load(PATH / "tracks" / f"{REMOVE_CELL_TRK}.npy")
+    return seg, trk
+
+
+@pytest.fixture(scope="module")
+def remove_cell_widget_loaded(module_widget, remove_cell_testdata):
+    """Attach the slim remove-cell layers once per module."""
+    seg, trk = remove_cell_testdata
+    reset_widget(module_widget)
+    module_widget.viewer.add_labels(np.array(seg, copy=True), name=REMOVE_CELL_SEG)
+    module_widget.viewer.add_tracks(np.array(trk, copy=True), name=REMOVE_CELL_TRK)
+    yield module_widget
 
 
 @pytest.fixture
-def create_widget(make_napari_viewer):
-    yield MMVH4TRACKS(make_napari_viewer())
+def viewer_with_data(remove_cell_widget_loaded, remove_cell_testdata):
+    """
+    Soft-reset + restore slim layers for remove_cell_from_tracks.
 
+    Avoids reloading every image/segmentation/tracks file each parametrized case.
+    """
+    widget = remove_cell_widget_loaded
+    seg, trk = remove_cell_testdata
 
-@pytest.fixture
-def viewer_with_data(create_widget):
-    widget = create_widget
-    viewer = widget.viewer
-    for file in Path(PATH / "images").iterdir():
-        if not file.is_file() or file.suffix.lower() not in IMAGE_EXTENSIONS:
-            continue
-        image = BioImage(file).get_image_data("ZYX")
-        name = file.stem
-        viewer.add_image(image, name=name)
-    for file in Path(PATH / "segmentation").iterdir():
-        if not file.is_file() or file.suffix.lower() not in IMAGE_EXTENSIONS:
-            continue
-        image = BioImage(file).get_image_data("ZYX")
-        name = file.stem
-        viewer.add_labels(image, name=name)
-    for file in Path(PATH / "tracks").iterdir():
-        if not file.is_file() or file.suffix.lower() not in TRACK_EXTENSIONS:
-            continue
-        tracks = np.load(file)
-        name = file.stem
-        viewer.add_tracks(tracks, name=name)
+    reset_plugin_state(widget)
+    present = {layer.name for layer in widget.viewer.layers}
+    if {REMOVE_CELL_SEG, REMOVE_CELL_TRK} - present:
+        clear_viewer_layers(widget.viewer)
+        widget.viewer.add_labels(np.array(seg, copy=True), name=REMOVE_CELL_SEG)
+        widget.viewer.add_tracks(np.array(trk, copy=True), name=REMOVE_CELL_TRK)
+    else:
+        widget.viewer.layers[REMOVE_CELL_SEG].data = np.array(seg, copy=True)
+        widget.viewer.layers[REMOVE_CELL_TRK].data = np.array(trk, copy=True)
+
+    widget.combobox_segmentation.setCurrentText(REMOVE_CELL_SEG)
+    widget.combobox_tracks.setCurrentText(REMOVE_CELL_TRK)
     yield widget
 
 
@@ -54,9 +72,96 @@ def test_remove_cell_from_tracks(viewer_with_data, position):
         pytest.fail(f"An error occurred: {e}")
 
 
-# TODO: test for track layer schema when
-# cell at start/end of track is removed
-# especially when track is only 2 cells long
+def _assert_tracks_schema(tracks: np.ndarray) -> None:
+    """Each track ID must have unique, contiguous frames (sorted)."""
+    assert tracks.ndim == 2 and tracks.shape[1] == 4
+    for trk_id in np.unique(tracks[:, 0]):
+        trk = tracks[tracks[:, 0] == trk_id]
+        trk = trk[np.argsort(trk[:, 1])]
+        frames = trk[:, 1]
+        assert len(set(frames.tolist())) == len(frames)
+        assert len(frames) == frames[-1] - frames[0] + 1
+
+
+def _centroid_of_label(seg_frame: np.ndarray, label_id: int) -> list:
+    y, x = ndimage.center_of_mass(seg_frame, labels=seg_frame, index=label_id)
+    return [int(np.rint(y)), int(np.rint(x))]
+
+
+@pytest.fixture
+def widget_with_short_tracks(create_widget):
+    """Labels + tracks for schema checks when removing start/end of short tracks."""
+    widget = create_widget
+    # 3 frames; label 1 is a small blob at the same place each frame.
+    seg = np.zeros((3, 20, 20), dtype=np.int32)
+    for z in range(3):
+        seg[z, 5:8, 5:8] = 1
+    cy, cx = _centroid_of_label(seg[0], 1)
+    # Track length 3 and a separate length-2 track (label 2 on frames 0-1).
+    seg[:, 12:15, 12:15] = 0
+    for z in range(2):
+        seg[z, 12:15, 12:15] = 2
+    cy2, cx2 = _centroid_of_label(seg[0], 2)
+
+    tracks = np.array(
+        [
+            [1, 0, cy, cx],
+            [1, 1, cy, cx],
+            [1, 2, cy, cx],
+            [2, 0, cy2, cx2],
+            [2, 1, cy2, cx2],
+        ],
+        dtype=np.int64,
+    )
+    widget.viewer.add_labels(seg, name="schema_seg")
+    widget.viewer.add_tracks(tracks, name="schema_trk")
+    widget.combobox_segmentation.setCurrentText("schema_seg")
+    widget.combobox_tracks.setCurrentText("schema_trk")
+    return widget, (cy, cx), (cy2, cx2)
+
+
+@pytest.mark.integration
+@pytest.mark.schema
+@pytest.mark.parametrize(
+    "which, end",
+    [
+        ("long", "start"),
+        ("long", "end"),
+        ("short", "start"),
+        ("short", "end"),
+    ],
+)
+def test_remove_cell_preserves_track_schema(widget_with_short_tracks, which, end):
+    """Removing a cell at the start/end of a track keeps remaining tracks valid."""
+    widget, (cy, cx), (cy2, cx2) = widget_with_short_tracks
+    if which == "long":
+        frame = 0 if end == "start" else 2
+        position = (frame, cy, cx)
+        removed_id = 1
+    else:
+        frame = 0 if end == "start" else 1
+        position = (frame, cy2, cx2)
+        removed_id = 2
+
+    before = widget.viewer.layers["schema_trk"].data.copy()
+    widget.segmentation_window.remove_cell_from_tracks(position)
+    after = widget.viewer.layers["schema_trk"].data
+
+    # Removed centroid should no longer appear for that track id at that frame.
+    remaining_same = after[
+        (after[:, 0] == removed_id) & (after[:, 1] == frame)
+    ]
+    assert len(remaining_same) == 0
+
+    if len(after):
+        _assert_tracks_schema(after)
+    # Length-2 track: removing either end deletes the whole track (both ends).
+    if which == "short":
+        if len(after):
+            assert removed_id not in np.unique(after[:, 0])
+    else:
+        # Length-3: one end removed → remaining run still present or renumbered.
+        assert before.shape[0] > after.shape[0]
 
 
 def create_mock_event(position):

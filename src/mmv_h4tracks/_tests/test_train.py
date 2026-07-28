@@ -246,20 +246,23 @@ def test_is_custom_model_display_name_taken_key_only():
     assert is_custom_model_display_name_taken(w, "used")
 
 
-def test_persist_custom_model_entry_json_key_matches_filename(tmp_path, monkeypatch):
+def test_persist_custom_model_entry_json_key_matches_filename(tmp_path):
     """``custom_models`` key and ``filename`` field are both the canonical basename."""
     import mmv_h4tracks._processing as proc
+    from mmv_h4tracks._custom_models import CustomModelStore, set_custom_model_store
 
-    fake_pkg = tmp_path / "mmv_h4tracks"
-    fake_pkg.mkdir(parents=True)
-    (fake_pkg / "models" / "custom_models").mkdir(parents=True)
-    monkeypatch.setattr(proc, "__file__", str(fake_pkg / "_processing.py"))
+    store = CustomModelStore(tmp_path / "user_data")
+    set_custom_model_store(store)
     source = tmp_path / "w.pth"
     source.write_bytes(b"x")
     widget = Mock()
     widget.custom_models = {}
-    proc.persist_custom_model_entry(widget, "a b", source, {})
-    canonical = proc.custom_model_weights_basename("a b")
-    assert canonical == "a_b"
-    assert widget.custom_models[canonical]["filename"] == canonical
-    assert (fake_pkg / "models" / "custom_models" / canonical).is_file()
+    try:
+        proc.persist_custom_model_entry(widget, "a b", source, {})
+        canonical = proc.custom_model_weights_basename("a b")
+        assert canonical == "a_b"
+        assert widget.custom_models[canonical]["filename"] == canonical
+        assert store.weights_path(canonical).is_file()
+        assert store.json_path.is_file()
+    finally:
+        set_custom_model_store(None)

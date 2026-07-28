@@ -12,14 +12,13 @@ from qtpy.QtWidgets import (
 )
 from qtpy.QtGui import QDoubleValidator
 
-import napari
 from collections import defaultdict
 
 from scipy.ndimage import label, center_of_mass
 from tqdm import tqdm
 
-from ._grabber import grab_layer
 from ._logger import notify
+from ._qt_utils import apply_napari_dark_theme
 from ._constants import (
     DEFAULT_SPEED_THRESHOLD,
     DEFAULT_SIZE_THRESHOLD,
@@ -37,10 +36,7 @@ class AssistantWindow(QWidget):
 
     def setup_ui(self):
         self.setLayout(QVBoxLayout())
-        try:
-            self.setStyleSheet(napari.qt.get_stylesheet(theme="dark"))
-        except TypeError:
-            self.setStyleSheet(napari.qt.get_stylesheet(theme_id="dark"))
+        apply_napari_dark_theme(self)
 
         ### QObjects
 
@@ -180,9 +176,7 @@ class AssistantWindow(QWidget):
         self.parent.callback_handler.remove_callback_viewer()
         self.FOI_lineedit.setText("")
         try:
-            tracks_layer = grab_layer(
-                self.viewer, self.parent.combobox_tracks.currentText()
-            )
+            tracks_layer = self.parent.selected_tracks_layer()
         except ValueError:
             print("No tracks layer found")
             return
@@ -205,17 +199,13 @@ class AssistantWindow(QWidget):
         self.parent.callback_handler.remove_callback_viewer()
         self.FOI_lineedit.setText("")
         try:
-            label_layer = grab_layer(
-                self.viewer, self.parent.combobox_segmentation.currentText()
-            )
+            label_layer = self.parent.selected_labels_layer()
         except ValueError:
             print("No segmentation layer found")
             return
         segmentation = label_layer.data
         try:
-            tracks_layer = grab_layer(
-                self.viewer, self.parent.combobox_tracks.currentText()
-            )
+            tracks_layer = self.parent.selected_tracks_layer()
         except ValueError:
             print("No tracks layer found")
             return
@@ -235,9 +225,7 @@ class AssistantWindow(QWidget):
         self.parent.callback_handler.remove_callback_viewer()
         self.FOI_lineedit.setText("")
         try:
-            label_layer = grab_layer(
-                self.viewer, self.parent.combobox_segmentation.currentText()
-            )
+            label_layer = self.parent.selected_labels_layer()
         except ValueError:
             print("No segmentation layer found")
             return
@@ -245,9 +233,7 @@ class AssistantWindow(QWidget):
         frames, y, x = segmentation.shape
         shape = (y, x)
         try:
-            tracks_layer = grab_layer(
-                self.viewer, self.parent.combobox_tracks.currentText()
-            )
+            tracks_layer = self.parent.selected_tracks_layer()
         except ValueError:
             print("No tracks layer found")
             return
@@ -301,9 +287,7 @@ class AssistantWindow(QWidget):
         self.parent.callback_handler.remove_callback_viewer()
         self.FOI_lineedit.setText("")
         try:
-            label_layer = grab_layer(
-                self.viewer, self.parent.combobox_segmentation.currentText()
-            )
+            label_layer = self.parent.selected_labels_layer()
         except ValueError:
             print("No segmentation layer found")
             return
@@ -372,16 +356,13 @@ class AssistantWindow(QWidget):
         self.parent.callback_handler.remove_callback_viewer()
         self.FOI_lineedit.setText("")
         try:
-            label_layer = grab_layer(
-                self.viewer, self.parent.combobox_segmentation.currentText()
-            )
+            label_layer = self.parent.selected_labels_layer()
         except ValueError:
             print("No segmentation layer found")
         reference_segmentation = label_layer.data
         # new_segmentation = np.zeros_like(reference_segmentation)
-        tracks_name = self.parent.combobox_tracks.currentText()
         try:
-            tracks_layer = grab_layer(self.viewer, tracks_name)
+            tracks_layer = self.parent.selected_tracks_layer()
         except ValueError:
             print("No tracks layer found")
             return
@@ -475,17 +456,13 @@ class AssistantWindow(QWidget):
     def show_untracked_cells_on_click(self):
         self.parent.callback_handler.remove_callback_viewer()
         try:
-            label_layer = grab_layer(
-                self.viewer, self.parent.combobox_segmentation.currentText()
-            )
+            label_layer = self.parent.selected_labels_layer()
         except ValueError:
             print("No segmentation layer found")
             return
         segmentation = label_layer.data
         try:
-            tracks_layer = grab_layer(
-                self.viewer, self.parent.combobox_tracks.currentText()
-            )
+            tracks_layer = self.parent.selected_tracks_layer()
         except ValueError:
             print("No tracks layer found")
             return
@@ -526,9 +503,7 @@ class AssistantWindow(QWidget):
     def show_tiny_cells_on_click(self):
         self.parent.callback_handler.remove_callback_viewer()
         try:
-            label_layer = grab_layer(
-                self.viewer, self.parent.combobox_segmentation.currentText()
-            )
+            label_layer = self.parent.selected_labels_layer()
         except ValueError:
             print("No segmentation layer found")
             return
@@ -555,9 +530,7 @@ class AssistantWindow(QWidget):
 
     def mark_outliers(self, outliers, layername):
         try:
-            label_layer = grab_layer(
-                self.viewer, self.parent.combobox_segmentation.currentText()
-            )
+            label_layer = self.parent.selected_labels_layer()
         except ValueError:
             print("No segmentation layer found")
             return
@@ -578,9 +551,7 @@ class AssistantWindow(QWidget):
 
     def get_plus(self, centroid):
         try:
-            label_layer = grab_layer(
-                self.viewer, self.parent.combobox_segmentation.currentText()
-            )
+            label_layer = self.parent.selected_labels_layer()
         except ValueError:
             print("No segmentation layer found")
             return

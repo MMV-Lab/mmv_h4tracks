@@ -1,12 +1,7 @@
 """Module providing tests for the analysis widget"""
 
-from pathlib import Path
-
 import numpy as np
 import pytest
-from bioio import (
-    BioImage,
-)
 
 from mmv_h4tracks import MMVH4TRACKS
 from mmv_h4tracks._evaluation import (
@@ -15,50 +10,85 @@ from mmv_h4tracks._evaluation import (
     get_false_negatives,
     get_split_cells,
 )
+from mmv_h4tracks._tests.data_loading import (
+    DATA_ROOT,
+    load_named_tracks,
+    load_named_volumes,
+)
+from mmv_h4tracks._tests.fixture_helpers import (
+    clear_viewer_layers,
+    reset_plugin_state,
+    reset_widget,
+)
 
 # this tests if the analysis returns the proper values
-PATH = Path(__file__).parent / "data"
-IMAGE_EXTENSIONS = {".tif", ".tiff"}
-TRACK_EXTENSIONS = {".npy"}
+PATH = DATA_ROOT
+SEGMENTATION_GT = "GT"
+
+
+@pytest.fixture(autouse=True)
+def _evaluation_tests_use_single_process(monkeypatch):
+    """Keep evaluation helpers off multiprocessing.Pool in this module."""
+    monkeypatch.setattr(
+        "mmv_h4tracks._widget.MMVH4TRACKS.get_process_limit",
+        lambda self: 1,
+    )
+
+
+@pytest.fixture(scope="module")
+def evaluation_testdata():
+    """Load evaluation arrays once per module from sibling ``.npy`` dumps."""
+    segmentations = load_named_volumes(PATH / "segmentation")
+    tracks = load_named_tracks(PATH / "tracks")
+    return segmentations, tracks
+
+
+def _ensure_evaluation_layers(widget, segmentations, tracks) -> None:
+    """Add evaluation layers if missing (e.g. after get_widget cleared the viewer)."""
+    viewer = widget.viewer
+    expected = set(segmentations) | set(tracks)
+    present = {layer.name for layer in viewer.layers}
+    if expected.issubset(present):
+        return
+
+    clear_viewer_layers(viewer)
+    for name, data in segmentations.items():
+        viewer.add_labels(np.array(data, copy=True), name=name)
+    for name, data in tracks.items():
+        viewer.add_tracks(np.array(data, copy=True), name=name)
+
+
+def _restore_evaluation_layer_data(widget, segmentations, tracks) -> None:
+    """Reset layer.data in place from pristine module caches."""
+    for name, data in segmentations.items():
+        widget.viewer.layers[name].data = np.array(data, copy=True)
+    for name, data in tracks.items():
+        widget.viewer.layers[name].data = np.array(data, copy=True)
+
+
+@pytest.fixture(scope="module")
+def evaluation_widget_loaded(module_widget, evaluation_testdata):
+    """Attach evaluation layers once per module."""
+    segmentations, tracks = evaluation_testdata
+    reset_widget(module_widget)
+    _ensure_evaluation_layers(module_widget, segmentations, tracks)
+    yield module_widget
 
 
 @pytest.fixture
-def create_widget(make_napari_viewer):
-    yield MMVH4TRACKS(make_napari_viewer())
-
-
-@pytest.fixture
-def set_widget_up(create_widget):
+def set_widget_up(evaluation_widget_loaded, evaluation_testdata):
     """
-    Creates an instance of the plugin and adds all layers of testdata to the viewer
+    Soft-reset plugin state and restore evaluation layer data between tests.
 
-    Parameters
-    ----------
-    make_napari_viewer : fixture
-        Pytest fixture that creates a napari viewer
-
-    Yields
-    ------
-    my_widget
-        Instance of the main widget
+    Layers stay in the viewer across evaluation tests; only mutated ``.data``
+    (e.g. from ``adjust_centroids``) is restored from the module cache.
     """
-    SEGMENTATION_GT = "GT"
-    my_widget = create_widget
-    viewer = my_widget.viewer
-    for file in Path(PATH / "segmentation").iterdir():
-        if not file.is_file() or file.suffix.lower() not in IMAGE_EXTENSIONS:
-            continue
-        print(file.stem)
-        segmentation = BioImage(file).get_image_data("ZYX")
-        name = file.stem
-        viewer.add_labels(segmentation, name=name)
-    for file in Path(PATH / "tracks").iterdir():
-        if not file.is_file() or file.suffix.lower() not in TRACK_EXTENSIONS:
-            continue
-        print(file.stem)
-        tracks = np.load(file)
-        name = file.stem
-        viewer.add_tracks(tracks, name=name)
+    my_widget = evaluation_widget_loaded
+    segmentations, tracks = evaluation_testdata
+
+    reset_plugin_state(my_widget)
+    _ensure_evaluation_layers(my_widget, segmentations, tracks)
+    _restore_evaluation_layer_data(my_widget, segmentations, tracks)
     my_widget.combobox_segmentation.setCurrentIndex(
         my_widget.combobox_segmentation.findText(SEGMENTATION_GT)
     )
@@ -66,24 +96,16 @@ def set_widget_up(create_widget):
 
 
 @pytest.fixture
-def get_widget(create_widget):
+def get_widget(module_widget):
     """
-    Creates an instance of the plugin and adds sample layers
+    Tiny synthetic labels for unit-style evaluation helpers.
 
-    Parameters
-    ----------
-    make_napari_viewer : fixture
-        Pytest fixture that creates a napari viewer
-
-    Yields
-    ------
-    my_widget
-        Instance of the main widget
+    Clears the shared viewer (including module evaluation layers); the next
+    ``set_widget_up`` rebuilds them via ``_ensure_evaluation_layers``.
     """
-    my_widget = create_widget
-    viewer = my_widget.viewer
-    add_layers(viewer)
-    yield my_widget
+    reset_widget(module_widget)
+    add_layers(module_widget.viewer)
+    yield module_widget
 
 
 def add_layers(viewer):
@@ -192,7 +214,7 @@ def test_segmentation_evaluation(get_widget, score, area, frames):
             elif score == "ap50":
                 assert window._calculate_ap50(gt, seg) == 0.75
 
-# TODO: slow setup & call
+# False-positive / FN / split-cell metrics (serial path under test fixtures)
 @pytest.mark.eval
 @pytest.mark.eval_tracking
 @pytest.mark.unit
@@ -221,7 +243,6 @@ def test_false_positives(set_widget_up, layername, expected_value):
     fp = window.get_segmentation_fault(gt_seg, eval_seg, get_false_positives)
     assert fp == expected_value
 
-# TODO: slow call
 @pytest.mark.eval
 @pytest.mark.eval_tracking
 @pytest.mark.unit
@@ -256,7 +277,6 @@ def test_false_negatives(set_widget_up, layername, expected_value, gt):
     fn = window.get_segmentation_fault(gt_seg, eval_seg, get_false_negatives)
     assert fn == expected_value
 
-# TODO: slow call
 @pytest.mark.eval
 @pytest.mark.eval_tracking
 @pytest.mark.unit
@@ -283,7 +303,6 @@ def test_split_cells(set_widget_up, layername, expected_value):
     sc = window.get_segmentation_fault(gt_seg, eval_seg, get_split_cells)
     assert sc == expected_value
 
-# TODO: slow setup
 @pytest.mark.eval
 @pytest.mark.eval_tracking
 @pytest.mark.unit
@@ -318,7 +337,7 @@ def test_added_edges(set_widget_up, layername, expected_value):
     gt_tracks = viewer.layers[viewer.layers.index("GT_tracks")].data
     eval_tracks_layer = viewer.layers[viewer.layers.index(layername)]
     widget.combobox_tracks.setCurrentIndex(widget.combobox_tracks.findText(layername))
-    bounds = (0, gt_seg.shape[0])
+    bounds = (0, gt_seg.shape[0] - 1)
     window.adjust_centroids(gt_seg, eval_tracks_layer, bounds)
     eval_tracks = eval_tracks_layer.data
     _, ae = window.get_track_fault(gt_seg, gt_tracks, eval_seg, eval_tracks)
@@ -359,7 +378,7 @@ def test_added_edges_changed_seg(set_widget_up, layername, expected_value):
     gt_tracks = viewer.layers[viewer.layers.index("GT_tracks")].data
     eval_tracks_layer = viewer.layers[viewer.layers.index(layername)]
     widget.combobox_tracks.setCurrentIndex(widget.combobox_tracks.findText(layername))
-    bounds = (0, gt_seg.shape[0])
+    bounds = (0, gt_seg.shape[0] - 1)
     window.adjust_centroids(eval_seg, eval_tracks_layer, bounds)
     eval_tracks = eval_tracks_layer.data
     _, ae = window.get_track_fault(gt_seg, gt_tracks, eval_seg, eval_tracks)
@@ -378,9 +397,9 @@ def test_added_edges_changed_seg(set_widget_up, layername, expected_value):
         ("switch", 4),
     ],
 )
-def test_deleted_edges(set_widget_up, layername, expected_value):
+def test_deleted_edges_identical_segmentation(set_widget_up, layername, expected_value):
     """
-    Test if deleted edges are calculated correctly
+    Test if deleted edges are calculated correctly when eval seg matches GT seg.
 
     Parameters
     ----------
@@ -399,7 +418,7 @@ def test_deleted_edges(set_widget_up, layername, expected_value):
     gt_tracks = viewer.layers[viewer.layers.index("GT_tracks")].data
     eval_tracks_layer = viewer.layers[viewer.layers.index(layername)]
     widget.combobox_tracks.setCurrentIndex(widget.combobox_tracks.findText(layername))
-    bounds = (0, gt_seg.shape[0])
+    bounds = (0, gt_seg.shape[0] - 1)
     window.adjust_centroids(gt_seg, eval_tracks_layer, bounds)
     eval_tracks = eval_tracks_layer.data
     de, _ = window.get_track_fault(gt_seg, gt_tracks, eval_seg, eval_tracks)
@@ -440,7 +459,7 @@ def test_deleted_edges(set_widget_up, layername, expected_value):
     gt_tracks = viewer.layers[viewer.layers.index("GT_tracks")].data
     eval_tracks_layer = viewer.layers[viewer.layers.index(layername)]
     widget.combobox_tracks.setCurrentIndex(widget.combobox_tracks.findText(layername))
-    bounds = (0, gt_seg.shape[0])
+    bounds = (0, gt_seg.shape[0] - 1)
     window.adjust_centroids(gt_seg, eval_tracks_layer, bounds)
     eval_tracks = eval_tracks_layer.data
     de, _ = window.get_track_fault(gt_seg, gt_tracks, eval_seg, eval_tracks)
@@ -454,36 +473,26 @@ def test_deleted_edges(set_widget_up, layername, expected_value):
     "layername_seg, layername_tracks, expected_value",
     [("false positive", "added_edge", 7)],
 )
-@pytest.mark.xfail(
-    reason="This tests for a result without waiting for the thread to finish"
-)
 def test_fault_value(set_widget_up, layername_seg, layername_tracks, expected_value):
     """
-    Test if fault value for tracking evaluation is calculated correctly
+    Test if fault value for tracking evaluation is calculated correctly.
 
-    Parameters
-    ----------
-    set_widget_up : MMVTracking
-        Instance of the main widget
-    layername_seg : str
-        Name of the label layer to evaluate
-    layername_tracks : str
-        Name of the tracks layer to evaluate
-    expected_vale : float
-        Expected fault value for tracking evaluation
+    Calls ``evaluate_curated_tracking`` synchronously (same work as the
+    ``@thread_worker`` path, without racing the UI thread).
     """
     widget = set_widget_up
     viewer = widget.viewer
     window = widget.evaluation_window
-    eval_seg = viewer.layers[viewer.layers.index(layername_seg)].data
-    eval_tracks = viewer.layers[viewer.layers.index(layername_tracks)].data
-    widget.eval_cache = [eval_seg, eval_tracks]
+    eval_seg = viewer.layers[layername_seg].data
+    eval_tracks = viewer.layers[layername_tracks].data
+    gt_seg = viewer.layers["GT"].data
+    gt_tracks_layer = viewer.layers["GT_tracks"]
     widget.combobox_segmentation.setCurrentIndex(
         widget.combobox_segmentation.findText("GT")
     )
     widget.combobox_tracks.setCurrentIndex(widget.combobox_tracks.findText("GT_tracks"))
-    window.evaluate_tracking()
-    fault_value = float(
-        window.tracking_results.layout().itemAt(1).widget().item(4, 1).text()
-    )
+
+    window.evaluate_curated_tracking(gt_tracks_layer, gt_seg, eval_tracks, eval_seg)
+
+    fault_value = float(window.tracking_table.item(4, 1).text())
     assert fault_value == expected_value

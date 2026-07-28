@@ -9,13 +9,6 @@ from mmv_h4tracks import MMVH4TRACKS
 
 AMOUNT_OF_COMBOBOXES = 3
 
-# make_napari_viewer is a pytest fixture that returns a napari viewer object
-
-
-@pytest.fixture
-def create_widget(make_napari_viewer):
-    yield MMVH4TRACKS(make_napari_viewer())
-
 
 @pytest.fixture
 def viewer_with_widget(create_widget):
@@ -80,6 +73,30 @@ def test_widget_creation(create_widget):
         Instance of the main widget
     """
     assert isinstance(create_widget, MMVH4TRACKS)
+
+
+@pytest.mark.unit
+def test_selected_labels_layer(create_widget):
+    """Selected layer helpers resolve combobox selection and reject blank/missing names."""
+    widget = create_widget
+    viewer = widget.viewer
+    combo = widget.combobox_segmentation
+    name = "MyLabels"
+    labels = viewer.add_labels(np.zeros((1, 5, 5), dtype=int), name=name)
+    combo.setCurrentText(name)
+    assert widget.selected_labels_layer().name == name
+
+    # Removing the last Labels layer restores the empty combobox entry.
+    viewer.layers.remove(labels)
+    assert combo.currentText() == ""
+    with pytest.raises(ValueError, match="blank"):
+        widget.selected_labels_layer()
+
+    # Select a combobox entry that does not exist as a viewer layer.
+    combo.addItem("MissingLayer")
+    combo.setCurrentText("MissingLayer")
+    with pytest.raises(ValueError, match="does not exist"):
+        widget.selected_labels_layer()
 
 
 @pytest.mark.combobox
