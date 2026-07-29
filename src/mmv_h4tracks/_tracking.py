@@ -26,6 +26,7 @@ from ._constants import (
     MIN_OVERLAP,
     DEFAULT_TRACKS_LAYER_NAME,
 )
+from ._grabber import grab_layer
 from ._logger import notify, choice_dialog, handle_exception
 from ._utils import preserve_and_filter_graph
 from ._qt_utils import apply_napari_dark_theme, layer_as_numpy

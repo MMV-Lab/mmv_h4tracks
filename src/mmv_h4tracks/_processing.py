@@ -25,23 +25,8 @@ from ._custom_models import (
 from ._grabber import grab_layer
 from ._session_trained_models import overlap_training_frames_with_stack
 from ._logger import handle_exception, notify
-from ._qt_utils import layer_as_numpy
+from ._qt_utils import layer_as_numpy, _iter_multiscale_levels
 from ._train import CELLPOSE_TRAIN_N_EPOCHS_DEFAULT, _sanitize_model_name_fragment
-
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
-logger.propagate = False
-for handler in logger.handlers:
-    logger.removeHandler(handler)
-handler = logging.StreamHandler()
-handler.setFormatter(
-    logging.Formatter(
-        fmt="%(asctime)s - %(levelname)s - %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-    )
-)
-logger.addHandler(handler)
-logger.debug("logger initialized")
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -286,6 +271,28 @@ def _load_segmentation_image_data(widget, demo: bool):
     """
     layer = widget.parent.selected_image_layer()
 
+    raw = layer.data
+    levels = None
+    if isinstance(raw, (list, tuple)) or getattr(layer, "multiscale", False):
+        try:
+            levels = _iter_multiscale_levels(raw)
+            if levels is None and hasattr(raw, "__len__"):
+                levels = [raw[i] for i in range(len(raw))]
+        except Exception:
+            levels = None
+        if levels is not None:
+            shapes = []
+            for level in levels:
+                try:
+                    shapes.append(tuple(np.asarray(level).shape))
+                except Exception:
+                    shapes.append(None)
+            logger.info(
+                "Segmentation image %r is multiscale; level shapes=%s",
+                getattr(layer, "name", None),
+                shapes,
+            )
+
     data = layer_as_numpy(layer)
 
     original_shape = data.shape
@@ -298,6 +305,20 @@ def _load_segmentation_image_data(widget, demo: bool):
     removed_dims = [i for i, size in enumerate(original_shape) if size == 1]
     if demo:
         data_squeezed = data_squeezed[0:5]
+
+    logger.info(
+        "Segmentation input resolution: layer=%r multiscale=%s "
+        "full_shape=%s squeezed_shape=%s dtype=%s "
+        "yx=%s demo=%s",
+        getattr(layer, "name", None),
+        bool(getattr(layer, "multiscale", False))
+        or isinstance(raw, (list, tuple)),
+        original_shape,
+        data_squeezed.shape,
+        data_squeezed.dtype,
+        data_squeezed.shape[-2:] if data_squeezed.ndim >= 2 else data_squeezed.shape,
+        demo,
+    )
     return data_squeezed, removed_dims
 
 
@@ -633,7 +654,12 @@ def _segment_image(
     if mask.size == 0:
         raise ValueError("Mask is empty after processing")
     if np.all(mask == 0):
-        logger.warning("Mask contains only zeros - no segmentation found. This may indicate a problem with the model or parameters.")
+        logger.warning(
+            "Mask contains only zeros - no segmentation found. "
+            "This may indicate a problem with the model or parameters. "
+            "Mask shape=%s (check preceding 'Segmentation input resolution' log).",
+            getattr(mask, "shape", None),
+        )
 
     if not demo:
         widget.parent.align_cache = mask
