@@ -691,6 +691,7 @@ class MMVH4TRACKS(QWidget):
                             self.viewer.layers.remove(name)
                         except ValueError:
                             pass
+                    return True
 
                 # Yes -> Remove this layer
                 self.viewer.layers.remove(layer_name)
