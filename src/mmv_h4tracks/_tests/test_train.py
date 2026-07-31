@@ -1,5 +1,6 @@
 """Tests for Cellpose training export helpers."""
 
+import logging
 import time
 
 import numpy as np
@@ -21,6 +22,10 @@ from mmv_h4tracks._train import (
     _n_frames,
     _safe_rmtree,
     _validate_frame_pairs,
+    cellpose_train_progress_steps,
+    epoch_from_cellpose_train_log,
+    CellposeEpochProgressHandler,
+    CELLPOSE_TRAIN_PROGRESS_EPOCH_STRIDE,
 )
 
 
@@ -154,6 +159,70 @@ def test_find_cellpose_cli_weights_picks_newest(tmp_path):
     assert picked.resolve() == new.resolve()
 
 
+def test_find_cellpose_cli_weights_accepts_timestamp_name(tmp_path):
+    root = tmp_path / "exp"
+    md = root / "models"
+    md.mkdir(parents=True)
+    weights = md / "cellpose_1743441234.567891"
+    weights.write_bytes(b"w")
+    assert find_cellpose_cli_weights(root).resolve() == weights.resolve()
+
+
+def test_find_cellpose_cli_weights_by_model_name_out(tmp_path):
+    root = tmp_path / "exp"
+    md = root / "models"
+    md.mkdir(parents=True)
+    other = md / "cellpose_old"
+    other.write_bytes(b"old")
+    named = md / "2026_07_31_14_10_05"
+    named.write_bytes(b"new")
+    assert (
+        find_cellpose_cli_weights(root, model_name="2026_07_31_14_10_05").resolve()
+        == named.resolve()
+    )
+    with_ext = md / "2026_07_31_14_11_00.pth"
+    with_ext.write_bytes(b"ext")
+    assert (
+        find_cellpose_cli_weights(root, model_name="2026_07_31_14_11_00").resolve()
+        == with_ext.resolve()
+    )
+
+
+def test_cellpose_train_model_name_out_format():
+    from datetime import datetime
+
+    from mmv_h4tracks._train import cellpose_train_model_name_out
+
+    name = cellpose_train_model_name_out(datetime(2026, 7, 31, 14, 10, 5))
+    assert name == "2026_07_31_14_10_05"
+    assert "." not in name
+
+
+def test_rename_cellpose_weights_keeps_suffix(tmp_path):
+    from mmv_h4tracks._train import rename_cellpose_weights
+
+    src = tmp_path / "cellpose_residual_on_style_on_concatenation_off"
+    src.write_bytes(b"w")
+    dest = rename_cellpose_weights(src, "2026_07_31_14_10_05")
+    assert dest.name == "2026_07_31_14_10_05"
+    assert dest.read_bytes() == b"w"
+    assert not src.exists()
+
+    src2 = tmp_path / "cellpose_old.pth"
+    src2.write_bytes(b"x")
+    dest2 = rename_cellpose_weights(src2, "2026_07_31_14_11_00")
+    assert dest2.name == "2026_07_31_14_11_00.pth"
+
+
+def test_find_cellpose_cli_weights_accepts_long_architecture_name(tmp_path):
+    root = tmp_path / "exp"
+    md = root / "models"
+    md.mkdir(parents=True)
+    weights = md / "cellpose_residual_on_style_on_concatenation_off"
+    weights.write_bytes(b"w")
+    assert find_cellpose_cli_weights(root).resolve() == weights.resolve()
+
+
 def test_find_cellpose_cli_weights_no_models_dir(tmp_path):
     with pytest.raises(FileNotFoundError, match="models/"):
         find_cellpose_cli_weights(tmp_path)
@@ -161,7 +230,7 @@ def test_find_cellpose_cli_weights_no_models_dir(tmp_path):
 
 def test_find_cellpose_cli_weights_empty_models(tmp_path):
     (tmp_path / "models").mkdir()
-    with pytest.raises(FileNotFoundError, match="No cellpose_"):
+    with pytest.raises(FileNotFoundError, match="No weight files"):
         find_cellpose_cli_weights(tmp_path)
 
 
@@ -266,3 +335,65 @@ def test_persist_custom_model_entry_json_key_matches_filename(tmp_path):
         assert store.json_path.is_file()
     finally:
         set_custom_model_store(None)
+
+
+def test_cellpose_train_progress_steps():
+    assert cellpose_train_progress_steps(200) == 20
+    assert cellpose_train_progress_steps(1000) == 100
+    assert cellpose_train_progress_steps(3) == 1
+    assert cellpose_train_progress_steps(200, stride=5) == 40
+
+
+def test_epoch_from_cellpose_train_log():
+    assert (
+        epoch_from_cellpose_train_log(
+            "10, train_loss=0.1234, test_loss=0.0000, LR=0.000010, time 12.34s"
+        )
+        == 10
+    )
+    assert (
+        epoch_from_cellpose_train_log(
+            "2024-01-01 12:00:00 [INFO] 20, train_loss=0.5, test_loss=0.0, LR=0.1, time 1.0s"
+        )
+        == 20
+    )
+    assert epoch_from_cellpose_train_log("5, train_loss=1.0000, test_loss=0.5000, LR=0.2, time 1.00s") == 5
+    assert epoch_from_cellpose_train_log("saving network parameters to /tmp/x") is None
+    assert epoch_from_cellpose_train_log(">>> n_epochs=200, n_train=3, n_test=0") is None
+
+
+def test_cellpose_epoch_progress_handler_maps_epochs_to_steps():
+    reporter = Mock()
+    handler = CellposeEpochProgressHandler(reporter, n_epochs=200)
+    assert handler.total_steps == 20
+    assert handler.stride == CELLPOSE_TRAIN_PROGRESS_EPOCH_STRIDE
+
+    def _emit(msg: str):
+        record = logging.LogRecord(
+            name="cellpose.train",
+            level=logging.INFO,
+            pathname="",
+            lineno=0,
+            msg=msg,
+            args=(),
+            exc_info=None,
+        )
+        handler.emit(record)
+
+    _emit("0, train_loss=1.0000, test_loss=0.0000, LR=0.2, time 0.01s")
+    reporter.set_n.assert_called_with(0)
+    _emit("10, train_loss=0.9000, test_loss=0.0000, LR=0.2, time 1.00s")
+    reporter.set_n.assert_called_with(1)
+    _emit("20, train_loss=0.5000, test_loss=0.0000, LR=0.1, time 5.00s")
+    reporter.set_n.assert_called_with(2)
+    _emit("saving network parameters to /tmp/model")
+    assert reporter.set_n.call_count == 3
+
+
+def test_ensure_tifffile_imsave_alias():
+    import tifffile
+    from mmv_h4tracks._train import _ensure_tifffile_imsave_alias
+
+    _ensure_tifffile_imsave_alias()
+    assert hasattr(tifffile, "imsave")
+    assert callable(tifffile.imsave)

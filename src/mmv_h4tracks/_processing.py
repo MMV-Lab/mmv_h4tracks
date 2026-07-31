@@ -7,7 +7,7 @@ from pathlib import Path
 
 import numpy as np
 from cellpose import models, core
-from napari.qt.threading import create_worker, thread_worker
+from napari.qt.threading import create_worker
 from qtpy.QtCore import Qt, QTimer
 from qtpy.QtWidgets import QApplication, QMessageBox
 from scipy import ndimage, optimize, spatial
@@ -246,28 +246,59 @@ def persist_custom_model_entry(widget, display_name: str, source_weights: Path, 
     )
 
 
-@thread_worker(connect={"errored": handle_exception})
-def _run_cellpose_training_worker(widget, export_dir, n_epochs: int):
-    """
-    Run Cellpose CLI training on ``export_dir`` only.
-
-    UI (save dialog, persist, prune) runs on the main thread when the worker finishes.
-    """
+def _worker_train_cellpose(export_dir, n_epochs: int, reporter):
+    """Thread worker: run Cellpose CLI training with optional dock progress."""
     from ._train import train_cellpose
 
-    QApplication.setOverrideCursor(Qt.WaitCursor)
-    try:
-        return train_cellpose(Path(export_dir), n_epochs=n_epochs)
-    finally:
-        QApplication.restoreOverrideCursor()
+    return train_cellpose(Path(export_dir), n_epochs=n_epochs, reporter=reporter)
 
 
 def start_cellpose_training_worker(
-    widget, export_dir: Path, *, n_epochs: int | None = None
+    widget,
+    export_dir: Path,
+    *,
+    n_epochs: int | None = None,
+    on_returned=None,
 ):
-    """Start train-only worker; ``returned`` emits ``CellposeCliTrainingResult``."""
-    ne = CELLPOSE_TRAIN_N_EPOCHS_DEFAULT if n_epochs is None else n_epochs
-    return _run_cellpose_training_worker(widget, export_dir, ne)
+    """
+    Start train-only worker with dock progress (1 step per 10 epochs via log parsing).
+
+    ``returned`` resets progress then calls ``on_returned`` with ``CellposeCliTrainingResult``.
+    """
+    from ._train import (
+        CELLPOSE_TRAIN_PROGRESS_EPOCH_STRIDE,
+        cellpose_train_progress_steps,
+    )
+
+    parent = widget.parent
+    ne = CELLPOSE_TRAIN_N_EPOCHS_DEFAULT if n_epochs is None else int(n_epochs)
+    steps = cellpose_train_progress_steps(ne, CELLPOSE_TRAIN_PROGRESS_EPOCH_STRIDE)
+    reporter = DockProgressReporter(parent, steps, "Training Cellpose")
+    reporter.start()
+
+    worker = create_worker(
+        _worker_train_cellpose,
+        Path(export_dir),
+        ne,
+        reporter,
+        _start_thread=True,
+    )
+    worker._dock_progress_reporter = reporter
+
+    def _on_returned(result):
+        _stop_worker_progress_reporter(worker)
+        _reset_dock_progress(parent)
+        if on_returned is not None:
+            on_returned(result)
+
+    def _on_errored(exc):
+        _stop_worker_progress_reporter(worker)
+        _reset_dock_progress(parent)
+        handle_exception(exc)
+
+    worker.returned.connect(_on_returned)
+    worker.errored.connect(_on_errored)
+    return worker
 
 
 def _load_segmentation_image_data(widget, demo: bool):
@@ -547,14 +578,18 @@ def _wire_dock_progress(parent, worker, progress: dict | None) -> None:
     If ``progress["absolute"]`` is true, each yielded int is treated as the
     completed count (``n`` out of ``total``); otherwise each yield increments
     by one (used when completion order is unordered).
+
+    Always marks the plugin busy (buttons disabled) for the duration of the job.
     """
+    if hasattr(parent, "set_plugin_busy"):
+        parent.set_plugin_busy(True)
     if progress is None:
         return
     total = int(progress.get("total") or 0)
     desc = str(progress.get("desc") or "Working")
     absolute = bool(progress.get("absolute"))
     if total > 0:
-        parent.set_progress_range(0, total)
+        parent.set_progress_range(0, 100)
         parent.progress_bar.setFormat("%p%")
         parent.set_status_text(f"{desc} 0/{total}")
         done = {"n": 0}
@@ -564,7 +599,9 @@ def _wire_dock_progress(parent, worker, progress: dict | None) -> None:
                 done["n"] = max(0, min(total, int(value)))
             else:
                 done["n"] += 1
-            parent.set_progress_value(done["n"])
+                if done["n"] > total:
+                    done["n"] = total
+            parent.set_progress_value(int(round(100.0 * done["n"] / total)))
             parent.set_status_text(f"{desc} {done['n']}/{total}")
 
         worker.yielded.connect(_on_yielded)
@@ -585,6 +622,8 @@ def _reset_dock_progress(parent) -> None:
         bar.setValue(0)
         bar.setFormat("")
     parent.clear_status()
+    if hasattr(parent, "set_plugin_busy"):
+        parent.set_plugin_busy(False)
 
 
 class DockProgressReporter:
@@ -594,6 +633,10 @@ class DockProgressReporter:
     stalls then jumps (work continues while the worker is paused on yield).
     Call ``increment`` / ``set_n`` from the worker thread only; the timer
     updates Qt widgets on the GUI thread.
+
+    The bar always uses a 0–100 range so ``%p%`` matches the ``n/total``
+    fraction shown in the status label (avoids value==n with max==total
+    looking "full" while the label still shows a partial step).
     """
 
     def __init__(
@@ -614,8 +657,10 @@ class DockProgressReporter:
         self._timer.timeout.connect(self._flush_to_ui)
 
     def start(self) -> None:
+        if hasattr(self.parent, "set_plugin_busy"):
+            self.parent.set_plugin_busy(True)
         if self.total > 0:
-            self.parent.set_progress_range(0, self.total)
+            self.parent.set_progress_range(0, 100)
             self.parent.progress_bar.setFormat("%p%")
             self.parent.set_status_text(f"{self.desc} 0/{self.total}")
         else:
@@ -635,11 +680,16 @@ class DockProgressReporter:
             if self.total:
                 self._n = min(self.total, self._n)
 
+    def _percent(self, n: int) -> int:
+        if self.total <= 0:
+            return 0
+        return int(round(100.0 * n / self.total))
+
     def _flush_to_ui(self) -> None:
         with self._lock:
             n = self._n
         if self.total > 0:
-            self.parent.set_progress_value(n)
+            self.parent.set_progress_value(self._percent(n))
             self.parent.set_status_text(f"{self.desc} {n}/{self.total}")
         else:
             self.parent.set_status_text(self.desc)
@@ -1229,11 +1279,12 @@ def scan_mmvh4tracks_training_temp_on_startup(main_widget) -> None:
             _safe_rmtree(d)
             continue
         layer_prefix, train_frames = parsed
-        worker = start_cellpose_training_worker(seg, d)
-        worker.returned.connect(
-            lambda r, mn=model_name, tf=train_frames, lp=layer_prefix: seg._complete_cellpose_training_after_worker(
-                r, mn, tf, lp
-            )
+        start_cellpose_training_worker(
+            seg,
+            d,
+            on_returned=lambda r, mn=model_name, tf=train_frames, lp=layer_prefix: (
+                seg._complete_cellpose_training_after_worker(r, mn, tf, lp)
+            ),
         )
         return
 

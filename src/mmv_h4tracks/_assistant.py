@@ -11,20 +11,21 @@ from qtpy.QtWidgets import (
     QCheckBox,
 )
 from qtpy.QtGui import QDoubleValidator
+from napari.qt.threading import create_worker
 
 from collections import defaultdict
 
 from scipy.ndimage import label, center_of_mass
-from tqdm import tqdm
 
-from ._logger import notify
-from ._qt_utils import apply_napari_dark_theme
+from ._logger import notify, handle_exception
+from ._qt_utils import apply_napari_dark_theme, layer_as_numpy
 from ._constants import (
     DEFAULT_SPEED_THRESHOLD,
     DEFAULT_SIZE_THRESHOLD,
     DEFAULT_DISTANCE_THRESHOLD,
     DEFAULT_SMALL_SIZE_THRESHOLD,
 )
+import mmv_h4tracks._processing as processing
 
 
 class AssistantWindow(QWidget):
@@ -172,6 +173,29 @@ class AssistantWindow(QWidget):
         content.layout().addWidget(v_spacer)
         self.layout().addWidget(content)
 
+    def _start_assistant_progress_worker(
+        self, desc, total, worker_fn, *args, on_returned
+    ):
+        parent = self.parent
+        reporter = processing.DockProgressReporter(parent, total, desc)
+        reporter.start()
+        worker = create_worker(worker_fn, *args, reporter, _start_thread=True)
+        worker._dock_progress_reporter = reporter
+
+        def _on_returned(result):
+            processing._stop_worker_progress_reporter(worker)
+            processing._reset_dock_progress(parent)
+            if result is not None:
+                on_returned(result)
+
+        def _on_errored(exc):
+            processing._stop_worker_progress_reporter(worker)
+            processing._reset_dock_progress(parent)
+            handle_exception(exc)
+
+        worker.returned.connect(_on_returned)
+        worker.errored.connect(_on_errored)
+
     def show_speed_outliers_on_click(self):
         self.parent.callback_handler.remove_callback_viewer()
         self.FOI_lineedit.setText("")
@@ -289,7 +313,7 @@ class AssistantWindow(QWidget):
         try:
             label_layer = self.parent.selected_labels_layer()
         except ValueError:
-            print("No segmentation layer found")
+            notify("No segmentation layer found")
             return
 
         raw = label_layer.data
@@ -300,7 +324,8 @@ class AssistantWindow(QWidget):
             multiscale_list = list(raw)
             write_multiscale = True
         else:
-            data = np.asarray(raw)
+            data = np.asarray(layer_as_numpy(label_layer))
+            multiscale_list = None
             write_multiscale = False
 
         original_dtype = data.dtype
@@ -317,8 +342,39 @@ class AssistantWindow(QWidget):
             return
 
         n_frames = data_work.shape[0]
+
+        def _on_returned(result):
+            out_to_store, write_ms, ms_list = result
+            if write_ms:
+                ms_list[0] = out_to_store
+                label_layer.data = ms_list
+            else:
+                label_layer.data = out_to_store
+
+        self._start_assistant_progress_worker(
+            "Relabel cells",
+            n_frames,
+            self._worker_relabel_cells,
+            data_work,
+            squeeze_output,
+            original_dtype,
+            write_multiscale,
+            multiscale_list,
+            on_returned=_on_returned,
+        )
+
+    def _worker_relabel_cells(
+        self,
+        data_work,
+        squeeze_output,
+        original_dtype,
+        write_multiscale,
+        multiscale_list,
+        reporter,
+    ):
+        n_frames = data_work.shape[0]
         relabeled_data = np.zeros(data_work.shape, dtype=np.int32)
-        for frame in tqdm(range(n_frames), desc="Processing frames"):
+        for frame in range(n_frames):
             current_frame = data_work[frame]
             unique_ids = np.unique(current_frame)
             unique_ids = unique_ids[unique_ids != 0]
@@ -332,6 +388,7 @@ class AssistantWindow(QWidget):
                 current_max_label = int(labeled_mask.max())
                 new_frame += labeled_mask
             relabeled_data[frame] = new_frame
+            reporter.increment()
 
         out = relabeled_data[0] if squeeze_output else relabeled_data
         if original_dtype.kind in "iu":
@@ -343,11 +400,7 @@ class AssistantWindow(QWidget):
         else:
             out_to_store = out
 
-        if write_multiscale:
-            multiscale_list[0] = out_to_store
-            label_layer.data = multiscale_list
-        else:
-            label_layer.data = out_to_store
+        return out_to_store, write_multiscale, multiscale_list
 
     def align_ids_on_click(self, saving=False):
         """Align the IDs of the tracks with the segmentation
@@ -358,83 +411,101 @@ class AssistantWindow(QWidget):
         try:
             label_layer = self.parent.selected_labels_layer()
         except ValueError:
-            print("No segmentation layer found")
-        reference_segmentation = label_layer.data
-        # new_segmentation = np.zeros_like(reference_segmentation)
+            notify("No segmentation layer found")
+            return
+        reference_segmentation = np.asarray(layer_as_numpy(label_layer))
         try:
             tracks_layer = self.parent.selected_tracks_layer()
         except ValueError:
-            print("No tracks layer found")
+            notify("No tracks layer found")
             return
         if self.parent.tracking_window.cached_tracks is not None:
             tracks = self.parent.tracking_window.cached_tracks
         else:
             tracks = tracks_layer.data
+        tracks = np.asarray(tracks).copy()
 
         if 0 in tracks[:, 0]:
             tracks[:, 0] = tracks[:, 0] + 1
 
-        # all IDs are raised to be greater than the greatest segmentation and track ID
-        # Offset each frame's labels so that no label with the same id exists in two different slices
         offset = np.max([np.max(reference_segmentation), np.max(tracks[:, 0])])
 
-        # Vectorized relabeling for efficiency
+        tracks_by_frame = defaultdict(list)
+        for track in tracks:
+            tracks_by_frame[track[1]].append(track)
+
+        n_frames = reference_segmentation.shape[0]
+        total = (n_frames if saving else 1) + len(tracks_by_frame)
+
+        def _on_returned(new_segmentation):
+            label_layer.data = new_segmentation
+
+        self._start_assistant_progress_worker(
+            "Align IDs",
+            total,
+            self._worker_align_ids,
+            reference_segmentation,
+            tracks,
+            saving,
+            offset,
+            dict(tracks_by_frame),
+            on_returned=_on_returned,
+        )
+
+    def _worker_align_ids(
+        self, reference_segmentation, tracks, saving, offset, tracks_by_frame, reporter
+    ):
         def inflate_labels(reference_segmentation, starting_offset=1):
             output = np.zeros_like(reference_segmentation, dtype=np.int32)
-            offset = starting_offset
+            frame_offset = starting_offset
 
-            for z in tqdm(range(reference_segmentation.shape[0])):
+            for z in range(reference_segmentation.shape[0]):
                 frame = reference_segmentation[z]
                 labels = np.unique(frame)
                 labels = labels[labels != 0]
                 if labels.size == 0:
+                    reporter.increment()
                     continue
 
-                # Map: label → unique ID
-                mapping = np.arange(offset, offset + labels.size)
-                offset += labels.size
+                mapping = np.arange(frame_offset, frame_offset + labels.size)
+                frame_offset += labels.size
 
-                # Use searchsorted for fast replacement
                 sort_idx = np.searchsorted(labels, frame)
-                # Out-of-range values (i.e., zeros) will need masking
                 mask = frame != 0
                 output[z][mask] = mapping[sort_idx[mask]]
+                reporter.increment()
 
             return output
-        
+
         def inflate_labels_simple(reference_segmentation):
-            """Simple relabeling that does not take the offset into account"""
             output = np.zeros_like(reference_segmentation, dtype=np.int32)
             output[reference_segmentation > 0] = reference_segmentation[
                 reference_segmentation > 0
             ] + np.max([np.max(reference_segmentation), np.max(tracks[:, 0])])
             return output
-        
+
         if saving:
             new_segmentation = inflate_labels(reference_segmentation, starting_offset=offset)
         else:
             new_segmentation = inflate_labels_simple(reference_segmentation)
+            reporter.increment()
 
-        # Group tracks by frame index
-        tracks_by_frame = defaultdict(list)
-        for track in tracks:
-            tracks_by_frame[track[1]].append(track)
-
-        for z in tqdm(sorted(tracks_by_frame), desc="Adjusting IDs"):
+        for z in sorted(tracks_by_frame):
             z_tracks = tracks_by_frame[z]
             ref_slice = reference_segmentation[z]
             new_slice = new_segmentation[z]
 
-            # Only precompute centroids if any track has val == 0
-            needs_centroids = any(new_slice[track[2], track[3]] == 0 for track in z_tracks)
+            needs_centroids = any(
+                new_slice[track[2], track[3]] == 0 for track in z_tracks
+            )
             centroids_dict = None
             if needs_centroids:
                 labels = np.unique(ref_slice)
                 labels = labels[labels != 0]
                 centroids = center_of_mass(ref_slice, labels=ref_slice, index=labels)
                 centroids_dict = {
-                    label: (int(round(c[0])), int(round(c[1])))
-                    for label, c in zip(labels, centroids)
+                    label_id: (int(round(c[0])), int(round(c[1])))
+                    for label_id, c in zip(labels, centroids)
                 }
 
             for track_id, _, y, x in z_tracks:
@@ -442,29 +513,31 @@ class AssistantWindow(QWidget):
                 if val == 0:
                     if centroids_dict is None:
                         raise ValueError("Centroids not computed")
-                    for label, center in centroids_dict.items():
+                    for label_id, center in centroids_dict.items():
                         if center == (y, x):
-                            new_slice[ref_slice == label] = track_id
+                            new_slice[ref_slice == label_id] = track_id
                             break
                     else:
                         raise ValueError("Could not find cell")
                 else:
                     new_slice[new_slice == val] = track_id
 
-        label_layer.data = new_segmentation
+            reporter.increment()
+
+        return new_segmentation
 
     def show_untracked_cells_on_click(self):
         self.parent.callback_handler.remove_callback_viewer()
         try:
             label_layer = self.parent.selected_labels_layer()
         except ValueError:
-            print("No segmentation layer found")
+            notify("No segmentation layer found")
             return
-        segmentation = label_layer.data
+        segmentation = np.asarray(layer_as_numpy(label_layer))
         try:
             tracks_layer = self.parent.selected_tracks_layer()
         except ValueError:
-            print("No tracks layer found")
+            notify("No tracks layer found")
             return
         if (
             self.checkbox_hidden.isChecked()
@@ -473,9 +546,29 @@ class AssistantWindow(QWidget):
             tracks = self.parent.tracking_window.cached_tracks
         else:
             tracks = tracks_layer.data
-        untracked = []
-        for frame in tqdm(range(segmentation.shape[0])):
+        tracks = np.asarray(tracks)
+        n_frames = segmentation.shape[0]
 
+        def _on_returned(untracked):
+            if len(untracked) > 0:
+                unique_frames = set([coord[0] for coord in untracked])
+                self.FOI_lineedit.setText(", ".join(map(str, sorted(unique_frames))))
+            else:
+                self.FOI_lineedit.setText("")
+            self.mark_outliers(untracked, "Untracked cells")
+
+        self._start_assistant_progress_worker(
+            "Untracked cells",
+            n_frames,
+            self._worker_untracked_cells,
+            segmentation,
+            tracks,
+            on_returned=_on_returned,
+        )
+
+    def _worker_untracked_cells(self, segmentation, tracks, reporter):
+        untracked = []
+        for frame in range(segmentation.shape[0]):
             tracked_centroids = [
                 [entry[2], entry[3]] for entry in tracks if entry[1] == frame
             ]
@@ -483,56 +576,70 @@ class AssistantWindow(QWidget):
                 segmentation[frame][coord[0], coord[1]] for coord in tracked_centroids
             ]
             untracked_ids = set(np.unique(segmentation[frame])) - set(tracked_ids) - {0}
-            centroids = center_of_mass(
-                segmentation[frame],
-                labels=segmentation[frame],
-                index=list(untracked_ids),
-            )
-            for centroid in centroids:
-                centroid = [frame, int(np.rint(centroid[0])), int(np.rint(centroid[1]))]
-                if centroid[1:] not in tracked_centroids:
-                    untracked.append(centroid)
-
-        if len(untracked) > 0:
-            unique_frames = set([coord[0] for coord in untracked])
-            self.FOI_lineedit.setText(", ".join(map(str, sorted(unique_frames))))
-        else:
-            self.FOI_lineedit.setText("")
-        self.mark_outliers(untracked, "Untracked cells")
+            if untracked_ids:
+                centroids = center_of_mass(
+                    segmentation[frame],
+                    labels=segmentation[frame],
+                    index=list(untracked_ids),
+                )
+                for centroid in centroids:
+                    centroid = [
+                        frame,
+                        int(np.rint(centroid[0])),
+                        int(np.rint(centroid[1])),
+                    ]
+                    if centroid[1:] not in tracked_centroids:
+                        untracked.append(centroid)
+            reporter.increment()
+        return untracked
 
     def show_tiny_cells_on_click(self):
         self.parent.callback_handler.remove_callback_viewer()
         try:
             label_layer = self.parent.selected_labels_layer()
         except ValueError:
-            print("No segmentation layer found")
+            notify("No segmentation layer found")
             return
-        segmentation = label_layer.data
+        segmentation = np.asarray(layer_as_numpy(label_layer))
         try:
             threshold = float(self.tiny_lineedit.text())
         except ValueError:
             threshold = DEFAULT_SMALL_SIZE_THRESHOLD
+        n_frames = segmentation.shape[0]
+
+        def _on_returned(tiny):
+            unique_frames = set([coord[0] for coord in tiny])
+            if len(unique_frames) > 0:
+                self.FOI_lineedit.setText(", ".join(map(str, sorted(unique_frames))))
+            else:
+                self.FOI_lineedit.setText("")
+            self.mark_outliers(tiny, "Tiny cells")
+
+        self._start_assistant_progress_worker(
+            "Small cells",
+            n_frames,
+            self._worker_tiny_cells,
+            segmentation,
+            threshold,
+            on_returned=_on_returned,
+        )
+
+    def _worker_tiny_cells(self, segmentation, threshold, reporter):
         tiny = []
-        for frame in tqdm(range(segmentation.shape[0])):
+        for frame in range(segmentation.shape[0]):
             for id_ in set(np.unique(segmentation[frame])) - {0}:
                 if np.sum(segmentation[frame] == id_) < threshold:
                     all_pixels = np.where(segmentation[frame] == id_)
                     for y, x in zip(all_pixels[0], all_pixels[1]):
                         tiny.append([frame, y, x])
-
-        unique_frames = set([coord[0] for coord in tiny])
-        if len(unique_frames) > 0:
-            self.FOI_lineedit.setText(", ".join(map(str, sorted(unique_frames))))
-        else:
-            self.FOI_lineedit.setText("")
-
-        self.mark_outliers(tiny, "Tiny cells")
+            reporter.increment()
+        return tiny
 
     def mark_outliers(self, outliers, layername):
         try:
             label_layer = self.parent.selected_labels_layer()
         except ValueError:
-            print("No segmentation layer found")
+            notify("No segmentation layer found")
             return
         data = np.zeros_like(label_layer.data)
         indices = []
@@ -553,8 +660,8 @@ class AssistantWindow(QWidget):
         try:
             label_layer = self.parent.selected_labels_layer()
         except ValueError:
-            print("No segmentation layer found")
-            return
+            notify("No segmentation layer found")
+            return []
         _, max_y, max_x = label_layer.data.shape
         z, y, x = centroid
         plus_size = 35

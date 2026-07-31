@@ -2,7 +2,7 @@ import csv
 import locale
 
 import numpy as np
-from qtpy.QtWidgets import QFileDialog, QApplication
+from qtpy.QtWidgets import QFileDialog
 from napari.layers import Image, Labels, Tracks
 import zarr
 from ome_zarr.io import parse_url
@@ -38,57 +38,103 @@ def save_dialog(parent, filetype="*.ome.zarr", directory=""):
     )
     return filepath
 
-def save_zarr(file, layers: list):
+def write_zarr_data(file, raw_image, segmentation, tracks, reporter=None):
     """
-    Save the image, segmentation and tracking data to a zarr file
+    Write raw / segmentation / tracks arrays to a zarr store.
+
+    Optional ``reporter`` receives one increment per array written (3 phases).
 
     Parameters
     ----------
-    file : str
-        Path of the zarr file to write to
-    layers : list
-        List of layers to save, in the order: raw image, segmentation
-    """
-    assert len(layers) == 3, "Only raw image segmentation and tracking layers are supported"
-    assert isinstance(layers[0], Image)
-    assert isinstance(layers[1], Labels)
-    assert isinstance(layers[2], Tracks)
+    file : str or zarr.Group
+        Path to create, or an existing group to update
+    raw_image, segmentation, tracks : array-like
+        Arrays to write
+    reporter : optional
+        Progress reporter with ``increment()`` (e.g. DockProgressReporter)
 
+    Returns
+    -------
+    zarr.Group
+        The root group written to
+    """
     if isinstance(file, str):
-        # create the zarr file
         store = parse_url(file, mode="w").store
         root = zarr.group(store=store)
+        exists = False
     else:
-        # zarr file already exists, use it
         root = file
+        exists = "raw_data" in root
 
-    if layers[0].multiscale:
-        raw_image = layers[0].data[0]
-    else:
-        raw_image = layers[0].data
-
-    if not "raw_data" in file:
+    if not exists:
         root.create_dataset(
             "raw_data",
             shape=raw_image.shape,
             dtype="f8",
             data=raw_image,
         )
+        if reporter is not None:
+            reporter.increment()
         root.create_dataset(
             "segmentation_data",
-            shape=layers[1].data.shape,
+            shape=segmentation.shape,
             dtype="i4",
-            data=layers[1].data,
+            data=segmentation,
         )
+        if reporter is not None:
+            reporter.increment()
         root.create_dataset(
-            "tracking_data", shape=layers[2].data.shape, dtype="i4", data=layers[2].data
+            "tracking_data",
+            shape=tracks.shape,
+            dtype="i4",
+            data=tracks,
         )
+        if reporter is not None:
+            reporter.increment()
     else:
         root["raw_data"][:] = raw_image
-        root["segmentation_data"][:] = layers[1].data
-        root["tracking_data"].resize((layers[2].data.shape[0], layers[2].data.shape[1]))
-        root["tracking_data"][:] = layers[2].data
-    QApplication.restoreOverrideCursor()
+        if reporter is not None:
+            reporter.increment()
+        root["segmentation_data"][:] = segmentation
+        if reporter is not None:
+            reporter.increment()
+        root["tracking_data"].resize((tracks.shape[0], tracks.shape[1]))
+        root["tracking_data"][:] = tracks
+        if reporter is not None:
+            reporter.increment()
+    return root
+
+
+def save_zarr(file, layers: list, reporter=None):
+    """
+    Save the image, segmentation and tracking data to a zarr file
+
+    Parameters
+    ----------
+    file : str or zarr.Group
+        Path of the zarr file to write to, or an existing group
+    layers : list
+        List of layers to save, in the order: raw image, segmentation, tracks
+    reporter : optional
+        Progress reporter with ``increment()``
+    """
+    assert len(layers) == 3, "Only raw image segmentation and tracking layers are supported"
+    assert isinstance(layers[0], Image)
+    assert isinstance(layers[1], Labels)
+    assert isinstance(layers[2], Tracks)
+
+    if layers[0].multiscale:
+        raw_image = layers[0].data[0]
+    else:
+        raw_image = layers[0].data
+
+    write_zarr_data(
+        file,
+        raw_image,
+        layers[1].data,
+        layers[2].data,
+        reporter=reporter,
+    )
     if isinstance(file, str):
         notify(f"{file} has been saved.")
     else:

@@ -277,16 +277,14 @@ class SegmentationWindow(QWidget):
             if self.checkbox_cellpose_longer_training.isChecked()
             else None
         )
-        worker = processing.start_cellpose_training_worker(
-            self, export_result.export_dir, n_epochs=train_epochs
-        )
-
         train_frames = tuple(export_result.frame_indices)
-
-        worker.returned.connect(
-            lambda r, mn=model_name, tf=train_frames, lp=layer_prefix: self._complete_cellpose_training_after_worker(
-                r, mn, tf, lp
-            )
+        processing.start_cellpose_training_worker(
+            self,
+            export_result.export_dir,
+            n_epochs=train_epochs,
+            on_returned=lambda r, mn=model_name, tf=train_frames, lp=layer_prefix: (
+                self._complete_cellpose_training_after_worker(r, mn, tf, lp)
+            ),
         )
 
     def _complete_cellpose_training_after_worker(

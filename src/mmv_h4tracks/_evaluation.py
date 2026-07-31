@@ -425,28 +425,23 @@ class EvaluationWindow(QWidget):
                 "for now export your data as zarr and import it."
             )
             return
-        eval_tracks = np.asarray(eval_tracks)
+        eval_tracks = np.asarray(eval_tracks).copy()
         eval_seg = np.asarray(eval_seg)
+        gt_tracks = np.asarray(gt_tracks_layer.data).copy()
 
         bounds = self._parse_evaluation_bounds(gt_seg.shape[0])
         if bounds is None:
             return
         lower_bound, upper_bound = bounds
         n_range = upper_bound - lower_bound + 1
-
-        # Mutates the tracks layer — must run on the GUI thread.
-        self.adjust_centroids(gt_seg, gt_tracks_layer, (lower_bound, upper_bound))
-        prepared = self._prepare_tracking_eval_arrays(
-            gt_tracks_layer.data,
-            gt_seg,
-            eval_tracks,
-            eval_seg,
-            lower_bound,
-            upper_bound,
+        n_adjust = int(
+            np.sum(
+                (gt_tracks[:, 1] >= lower_bound) & (gt_tracks[:, 1] <= upper_bound)
+            )
         )
 
-        # FP / FN / split: one step per frame each; then track-edge faults.
-        total = 3 * n_range + 1
+        # Centroid adjust (per in-range track row) + FP/FN/split per frame + track faults
+        total = n_adjust + 3 * n_range + 1
         reporter = processing.DockProgressReporter(
             parent, total, "Track evaluation"
         )
@@ -455,10 +450,10 @@ class EvaluationWindow(QWidget):
         logger.info("Tracking evaluation started…")
         worker = create_worker(
             self._worker_evaluate_tracking,
-            prepared["gt_seg"],
-            prepared["gt_tracks"],
-            prepared["eval_seg"],
-            prepared["eval_tracks"],
+            gt_seg,
+            gt_tracks,
+            eval_seg,
+            eval_tracks,
             lower_bound,
             upper_bound,
             reporter,
@@ -472,7 +467,7 @@ class EvaluationWindow(QWidget):
             logger.info("Tracking evaluation finished.")
             if result is None:
                 return
-            self._apply_tracking_eval_results(result)
+            self._apply_tracking_eval_results(result, gt_tracks_layer)
 
         def _on_errored(exc):
             processing._stop_worker_progress_reporter(worker)
@@ -519,17 +514,42 @@ class EvaluationWindow(QWidget):
         upper_bound,
         reporter,
     ):
-        """Compute tracking fault metrics; report progress via ``reporter``."""
+        """Adjust centroids and compute tracking metrics off the GUI thread."""
+        adjusted_tracks = self._adjust_centroids_array(
+            gt_seg, gt_tracks, (lower_bound, upper_bound), reporter=reporter
+        )
+        prepared = self._prepare_tracking_eval_arrays(
+            adjusted_tracks,
+            gt_seg,
+            eval_tracks,
+            eval_seg,
+            lower_bound,
+            upper_bound,
+        )
         fp = self.get_segmentation_fault(
-            gt_seg, eval_seg, get_false_positives, reporter=reporter
+            prepared["gt_seg"],
+            prepared["eval_seg"],
+            get_false_positives,
+            reporter=reporter,
         )
         fn = self.get_segmentation_fault(
-            gt_seg, eval_seg, get_false_negatives, reporter=reporter
+            prepared["gt_seg"],
+            prepared["eval_seg"],
+            get_false_negatives,
+            reporter=reporter,
         )
         sc = self.get_segmentation_fault(
-            gt_seg, eval_seg, get_split_cells, reporter=reporter
+            prepared["gt_seg"],
+            prepared["eval_seg"],
+            get_split_cells,
+            reporter=reporter,
         )
-        de, ae = self.get_track_fault(gt_seg, gt_tracks, eval_seg, eval_tracks)
+        de, ae = self.get_track_fault(
+            prepared["gt_seg"],
+            prepared["gt_tracks"],
+            prepared["eval_seg"],
+            prepared["eval_tracks"],
+        )
         reporter.increment()
         fv = fp + fn * 10 + sc * 5 + de + ae * 1.5
         return {
@@ -541,10 +561,18 @@ class EvaluationWindow(QWidget):
             "de": de,
             "ae": ae,
             "fv": fv,
+            "adjusted_tracks": adjusted_tracks,
         }
 
-    def _apply_tracking_eval_results(self, result: dict):
-        """Update the tracking results table (main thread)."""
+    def _apply_tracking_eval_results(self, result: dict, tracks_layer):
+        """Apply adjusted tracks and update the results table (main thread)."""
+        adjusted = result.get("adjusted_tracks")
+        if adjusted is not None:
+            filtered_graph = preserve_and_filter_graph(tracks_layer, adjusted)
+            tracks_layer.data = adjusted
+            if filtered_graph:
+                tracks_layer.graph = filtered_graph
+
         table = self.tracking_table
         table.item(0, 1).setText(str(result["fp"]))
         table.item(1, 1).setText(str(result["fn"]))
@@ -570,48 +598,53 @@ class EvaluationWindow(QWidget):
             return
         lower_bound, upper_bound = bounds
 
-        self.adjust_centroids(gt_seg, gt_tracks_layer, (lower_bound, upper_bound))
-        prepared = self._prepare_tracking_eval_arrays(
-            gt_tracks_layer.data,
-            gt_seg,
-            eval_tracks,
-            eval_seg,
-            lower_bound,
-            upper_bound,
-        )
-
         class _NoopReporter:
             def increment(self, step: int = 1):
                 return 0
 
         result = self._worker_evaluate_tracking(
-            prepared["gt_seg"],
-            prepared["gt_tracks"],
-            prepared["eval_seg"],
-            prepared["eval_tracks"],
+            gt_seg,
+            np.asarray(gt_tracks_layer.data).copy(),
+            np.asarray(eval_seg),
+            np.asarray(eval_tracks).copy(),
             lower_bound,
             upper_bound,
             _NoopReporter(),
         )
-        self._apply_tracking_eval_results(result)
+        self._apply_tracking_eval_results(result, gt_tracks_layer)
+
+    def _adjust_centroids_array(
+        self, segmentation, tracks, bounds, reporter=None
+    ):
+        """
+        Return a copy of ``tracks`` with centroids snapped to label centers
+        for rows whose frame lies in the inclusive ``bounds``.
+
+        Does not touch napari layers (safe to call from a worker thread).
+        """
+        tracks = np.asarray(tracks).copy()
+        lo, hi = bounds
+        for row in tracks:
+            z = int(row[1])
+            if z < lo or z > hi:
+                continue
+            y, x = int(row[2]), int(row[3])
+            segmentation_id = segmentation[z, y, x]
+            if segmentation_id != 0:
+                centroid = ndimage.center_of_mass(
+                    segmentation[z], labels=segmentation[z], index=segmentation_id
+                )
+                row[2] = int(np.rint(centroid[0]))
+                row[3] = int(np.rint(centroid[1]))
+            if reporter is not None:
+                reporter.increment()
+        return tracks
 
     def adjust_centroids(self, segmentation, tracks_layer, bounds):
         """Adjust centroids in the inclusive frame range [bounds[0], bounds[1]]."""
-        tracks = tracks_layer.data
-        for row in tracks:
-            _, z, y, x = row
-            if z < bounds[0] or z > bounds[1]:
-                continue
-            segmentation_id = segmentation[z, y, x]
-            if segmentation_id == 0:
-                continue
-            centroid = ndimage.center_of_mass(
-                segmentation[z], labels=segmentation[z], index=segmentation_id
-            )
-            row[2] = int(np.rint(centroid[0]))
-            row[3] = int(np.rint(centroid[1]))
-
-        # Preserve and filter graph from existing layer
+        tracks = self._adjust_centroids_array(
+            segmentation, tracks_layer.data, bounds
+        )
         filtered_graph = preserve_and_filter_graph(tracks_layer, tracks)
         tracks_layer.data = tracks
         if filtered_graph:
