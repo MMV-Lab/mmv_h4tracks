@@ -25,6 +25,7 @@ from ._constants import (
     DEFAULT_DISTANCE_THRESHOLD,
     DEFAULT_SMALL_SIZE_THRESHOLD,
 )
+from ._analysis import calculate_size_single_track
 import mmv_h4tracks._processing as processing
 
 
@@ -204,20 +205,31 @@ class AssistantWindow(QWidget):
         except ValueError:
             print("No tracks layer found")
             return
-        tracks = tracks_layer.data
-        outliers = []
+        tracks = np.asarray(tracks_layer.data)
         try:
             threshold = float(self.speed_lineedit.text())
         except ValueError:
             threshold = DEFAULT_SPEED_THRESHOLD
-        speeds = self.parent.analysis_window._calculate_speed(tracks)
+        n_tracks = len(np.unique(tracks[:, 0])) if tracks.size else 0
+        self._start_assistant_progress_worker(
+            "Speed outliers",
+            n_tracks,
+            self._worker_speed_outliers,
+            tracks,
+            threshold,
+            on_returned=self.display_outliers,
+        )
+
+    def _worker_speed_outliers(self, tracks, threshold, reporter):
+        speeds = self.parent.analysis_window._calculate_speed(tracks, reporter)
+        outliers = []
         for result in speeds:
             if result[1] == 0:
                 print(f"avoiding division by zero. would divide {result[3]}")
                 continue
             if result[3] / result[1] > threshold:
                 outliers.append(int(result[0]))
-        self.display_outliers(outliers)
+        return outliers
 
     def show_size_outliers_on_click(self):
         self.parent.callback_handler.remove_callback_viewer()
@@ -227,23 +239,37 @@ class AssistantWindow(QWidget):
         except ValueError:
             print("No segmentation layer found")
             return
-        segmentation = label_layer.data
+        segmentation = np.asarray(layer_as_numpy(label_layer))
         try:
             tracks_layer = self.parent.selected_tracks_layer()
         except ValueError:
             print("No tracks layer found")
             return
-        tracks = tracks_layer.data
-        outliers = []
+        tracks = np.asarray(tracks_layer.data)
         try:
             threshold = float(self.size_lineedit.text())
         except ValueError:
             threshold = DEFAULT_SIZE_THRESHOLD
-        sizes = self.parent.analysis_window._calculate_size(tracks, segmentation)
-        for result in sizes:
-            if result[4] / result[3] > threshold:
+        n_tracks = len(np.unique(tracks[:, 0])) if tracks.size else 0
+        self._start_assistant_progress_worker(
+            "Size outliers",
+            n_tracks,
+            self._worker_size_outliers,
+            tracks,
+            segmentation,
+            threshold,
+            on_returned=self.display_outliers,
+        )
+
+    def _worker_size_outliers(self, tracks, segmentation, threshold, reporter):
+        outliers = []
+        for unique_id in np.unique(tracks[:, 0]):
+            track = tracks[tracks[:, 0] == unique_id]
+            result = calculate_size_single_track(track, segmentation)
+            if result[3] != 0 and result[4] / result[3] > threshold:
                 outliers.append(int(result[0]))
-        self.display_outliers(outliers)
+            reporter.increment()
+        return outliers
 
     def show_abrupt_tracks_on_click(self):
         self.parent.callback_handler.remove_callback_viewer()
@@ -253,7 +279,7 @@ class AssistantWindow(QWidget):
         except ValueError:
             print("No segmentation layer found")
             return
-        segmentation = label_layer.data
+        segmentation = np.asarray(layer_as_numpy(label_layer))
         frames, y, x = segmentation.shape
         shape = (y, x)
         try:
@@ -261,37 +287,56 @@ class AssistantWindow(QWidget):
         except ValueError:
             print("No tracks layer found")
             return
-        tracks = tracks_layer.data
-        outliers = []
+        tracks = np.asarray(tracks_layer.data)
         try:
             threshold = float(self.distance_lineedit.text())
         except ValueError:
             threshold = DEFAULT_DISTANCE_THRESHOLD
 
-        # Get tracks layer graph (lineage information)
-        # graph maps track_id -> list of parent_ids
-        graph = getattr(tracks_layer, 'graph', {}) or {}
-        
-        # Build reverse lookup for children: parent_id -> list of child track_ids
+        # graph maps track_id -> list of parent_ids (lineage)
+        graph = dict(getattr(tracks_layer, "graph", {}) or {})
+        n_tracks = len(np.unique(tracks[:, 0])) if tracks.size else 0
+        self._start_assistant_progress_worker(
+            "Noteworthy tracks",
+            n_tracks,
+            self._worker_abrupt_tracks,
+            tracks,
+            frames,
+            shape,
+            threshold,
+            graph,
+            on_returned=self.display_outliers,
+        )
+
+    def _worker_abrupt_tracks(self, tracks, frames, shape, threshold, graph, reporter):
         children_dict = defaultdict(list)
         for track_id, parent_ids in graph.items():
-            # parent_ids is a list (can have multiple parents)
             for parent_id in parent_ids:
                 children_dict[parent_id].append(track_id)
 
+        outliers = []
         for id_ in np.unique(tracks[:, 0]):
             track = tracks[tracks[:, 0] == id_]
             # Beginning check: exclude if track has a parent (came from division)
-            if track[0, 1] > 0 and not self.close_to_edge(
-                track[0, 2], track[0, 3], shape, threshold
-            ) and id_ not in graph:
+            if (
+                track[0, 1] > 0
+                and not self.close_to_edge(
+                    track[0, 2], track[0, 3], shape, threshold
+                )
+                and id_ not in graph
+            ):
                 outliers.append(int(id_))
             # End check: exclude if track has children (split into multiple tracks)
-            elif track[-1, 1] < frames - 1 and not self.close_to_edge(
-                track[-1, 2], track[-1, 3], shape, threshold
-            ) and id_ not in children_dict:
+            elif (
+                track[-1, 1] < frames - 1
+                and not self.close_to_edge(
+                    track[-1, 2], track[-1, 3], shape, threshold
+                )
+                and id_ not in children_dict
+            ):
                 outliers.append(int(id_))
-        self.display_outliers(outliers)
+            reporter.increment()
+        return outliers
 
     def close_to_edge(self, y, x, shape, threshold):
         y_edge = y < threshold or y > shape[0] - threshold

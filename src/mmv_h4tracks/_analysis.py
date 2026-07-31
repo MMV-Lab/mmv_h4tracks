@@ -14,12 +14,10 @@ from qtpy.QtWidgets import (
     QFileDialog,
     QSizePolicy,
     QMessageBox,
-    QApplication,
 )
-from qtpy.QtCore import Qt
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
-from napari.qt.threading import thread_worker
+from napari.qt.threading import create_worker
 from skimage import measure
 
 from ._concurrency import starmap_parallel
@@ -28,6 +26,22 @@ from ._qt_utils import apply_napari_dark_theme
 from mmv_h4tracks._logger import handle_exception
 from ._selector import Selector
 from ._writer import save_csv
+import mmv_h4tracks._processing as processing
+
+# Plot/export metrics that progress by unique track time index (segmentation per cell/frame).
+_CELL_BASED_PLOT_METRICS = frozenset({"Size", "Perimeter", "Eccentricity"})
+
+
+def _progress_increment(reporter, step: int = 1) -> None:
+    if reporter is not None:
+        reporter.increment(step)
+
+
+def _metric_progress_steps(metric: str, tracks) -> int:
+    """Progress steps for one metric (same rules as plotting)."""
+    if metric in _CELL_BASED_PLOT_METRICS:
+        return max(1, int(len(np.unique(tracks[:, 1]))))
+    return max(1, int(len(np.unique(tracks[:, 0]))))
 
 
 class AnalysisWindow(QWidget):
@@ -185,14 +199,14 @@ class AnalysisWindow(QWidget):
         self.parent.callback_handler.remove_callback_viewer()
         if self.btn_select_all.text() == "Select all":
             for checkbox in self.checkboxes:
-                checkbox.setCheckState(2)
+                checkbox.setChecked(True)
             self.btn_select_all.setText("Unselect all")
         else:
             for checkbox in self.checkboxes:
-                checkbox.setCheckState(0)
+                checkbox.setChecked(False)
             self.btn_select_all.setText("Select all")
 
-    def _calculate_speed(self, tracks):
+    def _calculate_speed(self, tracks, reporter=None):
         """
         Calculates the speed of each track
 
@@ -200,6 +214,8 @@ class AnalysisWindow(QWidget):
         ----------
         tracks : nd array
             (N,4) shape array, which follows napari's trackslayer format (ID, z, y, x)
+        reporter : optional
+            Dock progress reporter; one increment per track
 
         Returns
         -------
@@ -225,9 +241,10 @@ class AnalysisWindow(QWidget):
                 )
             else:
                 speeds = np.array([[unique_id, average, std_deviation, max_speed]])
+            _progress_increment(reporter)
         return speeds
 
-    def _calculate_size(self, tracks, segmentation):
+    def _calculate_size(self, tracks, segmentation, reporter=None):
         """
         Calculates the size of each tracked cell
 
@@ -237,28 +254,57 @@ class AnalysisWindow(QWidget):
             (N,4) shape array, which follows napari's trackslayer format (ID, z, y, x)
         segmentation : nd array
             (z,y,x) shape array, which follows napari's labelslayer format
+        reporter : optional
+            Dock progress reporter; one increment per completed time frame
 
         Returns
         -------
         speeds: nd array
             (N,3) shape array, which contains the ID, average speed and standard deviation of speed
         """
-        track_and_segmentation = []
-        for unique_id in np.unique(tracks[:, 0]):
-            track_and_segmentation.append(
-                [tracks[np.where(tracks[:, 0] == unique_id)], segmentation]
+        if reporter is None:
+            track_and_segmentation = []
+            for unique_id in np.unique(tracks[:, 0]):
+                track_and_segmentation.append(
+                    [tracks[np.where(tracks[:, 0] == unique_id)], segmentation]
+                )
+            AMOUNT_OF_PROCESSES = self.parent.get_process_limit()
+
+            sizes = starmap_parallel(
+                calculate_size_single_track,
+                track_and_segmentation,
+                AMOUNT_OF_PROCESSES,
             )
-        AMOUNT_OF_PROCESSES = self.parent.get_process_limit()
+            return np.array(sizes)
 
-        sizes = starmap_parallel(
-            calculate_size_single_track,
-            track_and_segmentation,
-            AMOUNT_OF_PROCESSES,
-        )
+        unique_ids = np.unique(tracks[:, 0])
+        sizes_by_id = {int(uid): [] for uid in unique_ids}
+        for z in np.unique(tracks[:, 1]):
+            rows = tracks[tracks[:, 1] == z]
+            for line in rows:
+                uid, _, y, x = line
+                seg_id = segmentation[int(z), int(y), int(x)]
+                size = int(np.count_nonzero(segmentation[int(z)] == seg_id))
+                sizes_by_id[int(uid)].append(size)
+            _progress_increment(reporter)
 
+        sizes = []
+        for uid in unique_ids:
+            vals = sizes_by_id[int(uid)]
+            if not vals:
+                continue
+            sizes.append(
+                [
+                    uid,
+                    np.around(np.average(vals), 3),
+                    np.around(np.std(vals), 3),
+                    min(vals),
+                    max(vals),
+                ]
+            )
         return np.array(sizes)
 
-    def _calculate_direction(self, tracks):
+    def _calculate_direction(self, tracks, reporter=None):
         """
         Calculates the angle [°] of each trajectory
 
@@ -266,6 +312,8 @@ class AnalysisWindow(QWidget):
         ----------
         tracks : nd array
             (N,4) shape array, which follows napari's trackslayer format (ID, z, y, x)
+        reporter : optional
+            Dock progress reporter; one increment per track
 
         Returns
         -------
@@ -295,9 +343,10 @@ class AnalysisWindow(QWidget):
                 retval = np.append(retval, [[unique_id, x, y, direction]], 0)
             else:
                 retval = np.array([[unique_id, x, y, direction]])
+            _progress_increment(reporter)
         return retval
 
-    def _calculate_euclidean_distance(self, tracks):
+    def _calculate_euclidean_distance(self, tracks, reporter=None):
         """
         Calculates the euclidean distance of each trajectory
 
@@ -305,6 +354,8 @@ class AnalysisWindow(QWidget):
         ----------
         tracks : nd array
             (N,4) shape array, which follows napari's trackslayer format (ID, z, y, x)
+        reporter : optional
+            Dock progress reporter; one increment per track
 
         Returns
         -------
@@ -323,9 +374,10 @@ class AnalysisWindow(QWidget):
                 )
             else:
                 euclidean_distances = np.array([[id, euclidean_distance, len(track)]])
+            _progress_increment(reporter)
         return euclidean_distances
 
-    def _calculate_velocity(self, tracks):
+    def _calculate_velocity(self, tracks, reporter=None):
         """
         Calculates the velocity of each trajectory
 
@@ -333,6 +385,8 @@ class AnalysisWindow(QWidget):
         ----------
         tracks : nd array
             (N,4) shape array, which follows napari's trackslayer format (ID, z, y, x)
+        reporter : optional
+            Dock progress reporter; one increment per track (via euclidean pass)
 
         Returns
         -------
@@ -340,7 +394,10 @@ class AnalysisWindow(QWidget):
             (N,3) shape array, which contains the ID, velocity and ID again
         """
         directed_speeds = np.array([])
-        euclidean_distances = self._calculate_euclidean_distance(tracks)
+        # Euclidean pass owns per-track progress increments.
+        euclidean_distances = self._calculate_euclidean_distance(
+            tracks, reporter=reporter
+        )
         for unique_id in np.unique(tracks[:, 0]):
             euclidean_distance = np.delete(
                 euclidean_distances, np.where(euclidean_distances[:, 0] != unique_id), 0
@@ -355,7 +412,7 @@ class AnalysisWindow(QWidget):
                 directed_speeds = np.array([[unique_id, directed_speed, unique_id]])
         return directed_speeds
 
-    def _calculate_accumulated_distance(self, tracks):
+    def _calculate_accumulated_distance(self, tracks, reporter=None):
         """
         Calculates the accumulated distance of each trajectory
 
@@ -363,6 +420,8 @@ class AnalysisWindow(QWidget):
         ----------
         tracks : nd array
             (N,4) shape array, which follows napari's trackslayer format (ID, z, y, x)
+        reporter : optional
+            Dock progress reporter; one increment per track
 
         Returns
         -------
@@ -390,9 +449,10 @@ class AnalysisWindow(QWidget):
                 accumulated_distances = np.array(
                     [[unique_id, accumulated_distance, len(track)]]
                 )
+            _progress_increment(reporter)
         return accumulated_distances
 
-    def calculate_cell_eccentricity(self, tracks, segmentation):
+    def calculate_cell_eccentricity(self, tracks, segmentation, reporter=None):
         """
         Calculates the eccentricity of each cell
 
@@ -402,47 +462,76 @@ class AnalysisWindow(QWidget):
             (N,4) shape array, which follows napari's trackslayer format (ID, z, y, x)
         segmentation : nd array
             (z,y,x) shape array, which follows napari's labelslayer format
+        reporter : optional
+            Dock progress reporter; one increment per completed time frame
 
         Returns
         -------
         eccentricities: nd array
             (N,3) shape array, which contains the ID, average eccentricity and standard deviation of eccentricity
         """
-        eccentricities = np.array([])
-        for unique_id in np.unique(tracks[:, 0]):
-            track = np.delete(tracks, np.where(tracks[:, 0] != unique_id), 0)
-            eccentricity = []
-            for i in range(len(track)):
-                seg_id = segmentation[track[i, 1], track[i, 2], track[i, 3]]
-                properties = measure.regionprops(
-                    (segmentation[track[i, 1]] == seg_id).astype(int)
-                )
-                eccentricity.append(properties[0].eccentricity)
-            if eccentricities.shape[0] > 0:
-                eccentricities = np.append(
-                    eccentricities,
-                    [
+        if reporter is None:
+            eccentricities = np.array([])
+            for unique_id in np.unique(tracks[:, 0]):
+                track = np.delete(tracks, np.where(tracks[:, 0] != unique_id), 0)
+                eccentricity = []
+                for i in range(len(track)):
+                    seg_id = segmentation[track[i, 1], track[i, 2], track[i, 3]]
+                    properties = measure.regionprops(
+                        (segmentation[track[i, 1]] == seg_id).astype(int)
+                    )
+                    eccentricity.append(properties[0].eccentricity)
+                if eccentricities.shape[0] > 0:
+                    eccentricities = np.append(
+                        eccentricities,
                         [
-                            unique_id,
-                            np.around(np.average(eccentricity), 3),
-                            np.around(np.std(eccentricity), 3),
-                        ]
-                    ],
-                    0,
-                )
-            else:
-                eccentricities = np.array(
-                    [
+                            [
+                                unique_id,
+                                np.around(np.average(eccentricity), 3),
+                                np.around(np.std(eccentricity), 3),
+                            ]
+                        ],
+                        0,
+                    )
+                else:
+                    eccentricities = np.array(
                         [
-                            unique_id,
-                            np.around(np.average(eccentricity), 3),
-                            np.around(np.std(eccentricity), 3),
+                            [
+                                unique_id,
+                                np.around(np.average(eccentricity), 3),
+                                np.around(np.std(eccentricity), 3),
+                            ]
                         ]
-                    ]
-                )
-        return eccentricities
+                    )
+            return eccentricities
 
-    def calculate_cell_perimeter(self, tracks, segmentation):
+        unique_ids = np.unique(tracks[:, 0])
+        ecc_by_id = {int(uid): [] for uid in unique_ids}
+        for z in np.unique(tracks[:, 1]):
+            rows = tracks[tracks[:, 1] == z]
+            frame = segmentation[int(z)]
+            for line in rows:
+                uid, _, y, x = line
+                seg_id = frame[int(y), int(x)]
+                properties = measure.regionprops((frame == seg_id).astype(int))
+                ecc_by_id[int(uid)].append(properties[0].eccentricity)
+            _progress_increment(reporter)
+
+        eccentricities = []
+        for uid in unique_ids:
+            vals = ecc_by_id[int(uid)]
+            if not vals:
+                continue
+            eccentricities.append(
+                [
+                    uid,
+                    np.around(np.average(vals), 3),
+                    np.around(np.std(vals), 3),
+                ]
+            )
+        return np.array(eccentricities)
+
+    def calculate_cell_perimeter(self, tracks, segmentation, reporter=None):
         """
         Calculates the perimeter of each cell
 
@@ -452,54 +541,143 @@ class AnalysisWindow(QWidget):
             (N,4) shape array, which follows napari's trackslayer format (ID, z, y, x)
         segmentation : nd array
             (z,y,x) shape array, which follows napari's labelslayer format
+        reporter : optional
+            Dock progress reporter; one increment per completed time frame
 
         Returns
         -------
         perimeters: nd array
             (N,3) shape array, which contains the ID, average perimeter and standard deviation of perimeter
         """
-        perimeters = np.array([])
-        for unique_id in np.unique(tracks[:, 0]):
-            track = np.delete(tracks, np.where(tracks[:, 0] != unique_id), 0)
-            perimeter = []
-            for i in range(len(track)):
-                seg_id = segmentation[track[i, 1], track[i, 2], track[i, 3]]
-                properties = measure.regionprops(
-                    (segmentation[track[i, 1]] == seg_id).astype(int)
-                )
-                perimeter.append(properties[0].perimeter)
-            if perimeters.shape[0] > 0:
-                perimeters = np.append(
-                    perimeters,
-                    [
+        if reporter is None:
+            perimeters = np.array([])
+            for unique_id in np.unique(tracks[:, 0]):
+                track = np.delete(tracks, np.where(tracks[:, 0] != unique_id), 0)
+                perimeter = []
+                for i in range(len(track)):
+                    seg_id = segmentation[track[i, 1], track[i, 2], track[i, 3]]
+                    properties = measure.regionprops(
+                        (segmentation[track[i, 1]] == seg_id).astype(int)
+                    )
+                    perimeter.append(properties[0].perimeter)
+                if perimeters.shape[0] > 0:
+                    perimeters = np.append(
+                        perimeters,
                         [
-                            unique_id,
-                            np.around(np.average(perimeter), 3),
-                            np.around(np.std(perimeter), 3),
-                        ]
-                    ],
-                    0,
-                )
-            else:
-                perimeters = np.array(
-                    [
+                            [
+                                unique_id,
+                                np.around(np.average(perimeter), 3),
+                                np.around(np.std(perimeter), 3),
+                            ]
+                        ],
+                        0,
+                    )
+                else:
+                    perimeters = np.array(
                         [
-                            unique_id,
-                            np.around(np.average(perimeter), 3),
-                            np.around(np.std(perimeter), 3),
+                            [
+                                unique_id,
+                                np.around(np.average(perimeter), 3),
+                                np.around(np.std(perimeter), 3),
+                            ]
                         ]
-                    ]
-                )
-        return perimeters
+                    )
+            return perimeters
+
+        unique_ids = np.unique(tracks[:, 0])
+        peri_by_id = {int(uid): [] for uid in unique_ids}
+        for z in np.unique(tracks[:, 1]):
+            rows = tracks[tracks[:, 1] == z]
+            frame = segmentation[int(z)]
+            for line in rows:
+                uid, _, y, x = line
+                seg_id = frame[int(y), int(x)]
+                properties = measure.regionprops((frame == seg_id).astype(int))
+                peri_by_id[int(uid)].append(properties[0].perimeter)
+            _progress_increment(reporter)
+
+        perimeters = []
+        for uid in unique_ids:
+            vals = peri_by_id[int(uid)]
+            if not vals:
+                continue
+            perimeters.append(
+                [
+                    uid,
+                    np.around(np.average(vals), 3),
+                    np.around(np.std(vals), 3),
+                ]
+            )
+        return np.array(perimeters)
+
+    def _calculate_track_duration(self, tracks, reporter=None):
+        """Track duration per ID; one progress increment per track."""
+        results = []
+        for uid in np.unique(tracks[:, 0]):
+            results.append([uid, np.count_nonzero(tracks[:, 0] == uid), uid])
+            _progress_increment(reporter)
+        return np.array(results)
 
     def _start_plot_worker(self):
         """
         Starts the worker to plot the selected metric
         """
         self.parent.callback_handler.remove_callback_viewer()
-        QApplication.setOverrideCursor(Qt.WaitCursor)
-        worker = self._sort_plot_data(self.combobox_plots.currentText())
-        worker.returned.connect(self._plot)
+        metric = self.combobox_plots.currentText()
+        try:
+            tracks = np.asarray(self.parent.selected_tracks_layer().data)
+        except ValueError as exc:
+            handle_exception(exc)
+            return
+
+        segmentation = None
+        if metric in _CELL_BASED_PLOT_METRICS:
+            try:
+                segmentation = np.asarray(self.parent.selected_labels_layer().data)
+            except ValueError as exc:
+                handle_exception(exc)
+                return
+            total = max(1, len(np.unique(tracks[:, 1])))
+        else:
+            total = max(1, len(np.unique(tracks[:, 0])))
+
+        parent = self.parent
+        reporter = processing.DockProgressReporter(
+            parent, total, f"Computing {metric}"
+        )
+        reporter.start()
+        worker = create_worker(
+            self._sort_plot_data,
+            metric,
+            tracks,
+            segmentation,
+            reporter,
+            _start_thread=True,
+        )
+        worker._dock_progress_reporter = reporter
+
+        def _on_returned(plot_dict):
+            processing._stop_worker_progress_reporter(worker)
+            try:
+                if parent.progress_bar.maximum() > 0:
+                    parent.set_status_text(
+                        f"Drawing {metric} plot "
+                        f"{parent.progress_bar.maximum()}/{parent.progress_bar.maximum()}"
+                    )
+                    parent.set_progress_value(100)
+                    parent.status_label.repaint()
+                    parent.progress_bar.repaint()
+                self._plot(plot_dict)
+            finally:
+                processing._reset_dock_progress(parent)
+
+        def _on_errored(exc):
+            processing._stop_worker_progress_reporter(worker)
+            processing._reset_dock_progress(parent)
+            handle_exception(exc)
+
+        worker.returned.connect(_on_returned)
+        worker.errored.connect(_on_errored)
 
     def _plot(self, plot_dict):
         """
@@ -566,23 +744,27 @@ class AnalysisWindow(QWidget):
         btn_apply.clicked.connect(self.selector.apply)
         self.parent.plot_window.layout().addWidget(btn_apply)
         self.parent.plot_window.show()
-        QApplication.restoreOverrideCursor()
 
-    @thread_worker(connect={"errored": handle_exception})
-    def _sort_plot_data(self, metric):
+    def _sort_plot_data(self, metric, tracks, segmentation, reporter):
         """
         Create dictionary holding metric data and results
+
         Parameters
         ----------
         metric : str
             metric to plot
+        tracks : array
+            tracks array snapshotted on the GUI thread
+        segmentation : array or None
+            labels volume when needed for cell-based metrics
+        reporter : DockProgressReporter
+            progress reporter for the calculation
 
         Returns
         -------
         retval: dict
             dictionary containing the metric data and results
         """
-        tracks_layer = self.parent.selected_tracks_layer()
         retval = {}
         if metric == "Speed":
             retval.update({"Name": "Speed [px/frame]"})
@@ -590,11 +772,10 @@ class AnalysisWindow(QWidget):
                 {"Description": "Scatterplot Standard Deviation vs Average: Speed"}
             )
             retval.update({"x_label": "Average", "y_label": "Standard Deviation"})
-            retval.update({"Results": self._calculate_speed(tracks_layer.data)})
+            retval.update({"Results": self._calculate_speed(tracks, reporter=reporter)})
 
         elif metric == "Size":
             retval.update({"Name": "Size [pixels]"})
-            segmentation_layer = self.parent.selected_labels_layer()
             retval.update(
                 {"Description": "Scatterplot Standard Deviation vs Average: Size"}
             )
@@ -602,7 +783,7 @@ class AnalysisWindow(QWidget):
             retval.update(
                 {
                     "Results": self._calculate_size(
-                        tracks_layer.data, segmentation_layer.data
+                        tracks, segmentation, reporter=reporter
                     )
                 }
             )
@@ -610,13 +791,17 @@ class AnalysisWindow(QWidget):
         elif metric == "Direction":
             retval.update({"Name": "Direction [°]"})
             retval.update({"Description": "Scatterplot Travel direction & Distance"})
-            retval.update({"Results": self._calculate_direction(tracks_layer.data)})
+            retval.update(
+                {"Results": self._calculate_direction(tracks, reporter=reporter)}
+            )
             retval.update({"x_label": "Δx", "y_label": "Δy"})
 
         elif metric == "Velocity":
             retval.update({"Name": "Velocity"})
             retval.update({"Description": "Scatterplot velocity vs track id"})
-            retval.update({"Results": self._calculate_velocity(tracks_layer.data)})
+            retval.update(
+                {"Results": self._calculate_velocity(tracks, reporter=reporter)}
+            )
             retval.update({"x_label": "Velocity [px/frame]", "y_label": "ID"})
 
         elif metric == "Euclidean distance":
@@ -631,7 +816,11 @@ class AnalysisWindow(QWidget):
                 }
             )
             retval.update(
-                {"Results": self._calculate_euclidean_distance(tracks_layer.data)}
+                {
+                    "Results": self._calculate_euclidean_distance(
+                        tracks, reporter=reporter
+                    )
+                }
             )
 
         elif metric == "Accumulated distance":
@@ -646,12 +835,15 @@ class AnalysisWindow(QWidget):
                 }
             )
             retval.update(
-                {"Results": self._calculate_accumulated_distance(tracks_layer.data)}
+                {
+                    "Results": self._calculate_accumulated_distance(
+                        tracks, reporter=reporter
+                    )
+                }
             )
 
         elif metric == "Eccentricity":
             retval.update({"Name": "Eccentricity [a.u.]"})
-            segmentation_layer = self.parent.selected_labels_layer()
             retval.update(
                 {
                     "Description": "Scatterplot Standard Deviation vs Average: Eccentricity"
@@ -661,14 +853,13 @@ class AnalysisWindow(QWidget):
             retval.update(
                 {
                     "Results": self.calculate_cell_eccentricity(
-                        tracks_layer.data, segmentation_layer.data
+                        tracks, segmentation, reporter=reporter
                     )
                 }
             )
 
         elif metric == "Perimeter":
             retval.update({"Name": "Perimeter [pixels]"})
-            segmentation_layer = self.parent.selected_labels_layer()
             retval.update(
                 {"Description": "Scatterplot Standard Deviation vs Average: Perimeter"}
             )
@@ -676,7 +867,7 @@ class AnalysisWindow(QWidget):
             retval.update(
                 {
                     "Results": self.calculate_cell_perimeter(
-                        tracks_layer.data, segmentation_layer.data
+                        tracks, segmentation, reporter=reporter
                     )
                 }
             )
@@ -687,11 +878,8 @@ class AnalysisWindow(QWidget):
             retval.update({"x_label": "Track duration [frames]", "y_label": "ID"})
             retval.update(
                 {
-                    "Results": np.array(
-                        [
-                            [i, np.count_nonzero(tracks_layer.data[:, 0] == i), i]
-                            for i in np.unique(tracks_layer.data[:, 0])
-                        ]
+                    "Results": self._calculate_track_duration(
+                        tracks, reporter=reporter
                     )
                 }
             )
@@ -742,10 +930,59 @@ class AnalysisWindow(QWidget):
         if file[0] == "":
             return
 
-        self._export(file, selected_metrics)
+        try:
+            tracks = np.asarray(self.parent.selected_tracks_layer().data)
+        except ValueError as exc:
+            handle_exception(exc)
+            return
 
-    @thread_worker(connect={"errored": handle_exception})
-    def _export(self, file, metrics):
+        segmentation = None
+        if any(m in _CELL_BASED_PLOT_METRICS for m in selected_metrics):
+            try:
+                segmentation = np.asarray(self.parent.selected_labels_layer().data)
+            except ValueError as exc:
+                handle_exception(exc)
+                return
+
+        # Each selected metric contributes its plot-style step count; filter prep
+        # always needs accumulated distance (counted only if that metric is not
+        # already selected, so it is not double-counted).
+        total = sum(
+            _metric_progress_steps(m, tracks) for m in selected_metrics
+        )
+        if "Accumulated distance" not in selected_metrics:
+            total += _metric_progress_steps("Accumulated distance", tracks)
+        total = max(1, int(total))
+
+        parent = self.parent
+        reporter = processing.DockProgressReporter(
+            parent, total, "Exporting metrics"
+        )
+        reporter.start()
+        worker = create_worker(
+            self._export,
+            file,
+            selected_metrics,
+            tracks,
+            segmentation,
+            reporter,
+            _start_thread=True,
+        )
+        worker._dock_progress_reporter = reporter
+
+        def _on_returned(_result):
+            processing._stop_worker_progress_reporter(worker)
+            processing._reset_dock_progress(parent)
+
+        def _on_errored(exc):
+            processing._stop_worker_progress_reporter(worker)
+            processing._reset_dock_progress(parent)
+            handle_exception(exc)
+
+        worker.returned.connect(_on_returned)
+        worker.errored.connect(_on_errored)
+
+    def _export(self, file, metrics, tracks, segmentation, reporter):
         """
         Exports the selected metrics as csv
 
@@ -755,28 +992,46 @@ class AnalysisWindow(QWidget):
             path to save the csv file
         metrics : list
             list of metrics to export
+        tracks : array
+            tracks snapshotted on the GUI thread
+        segmentation : array or None
+            labels volume when cell-based metrics are selected
+        reporter : DockProgressReporter
+            cumulative progress across selected metrics
         """
-        QApplication.setOverrideCursor(Qt.WaitCursor)
-        tracks = self.parent.selected_tracks_layer().data
-        direction = self._calculate_direction(tracks)
-        self.direction = direction
+        # Filter always needs path lengths. Progress for this pass is either the
+        # selected "Accumulated distance" budget or the extra filter-prep steps.
+        distances = self._calculate_accumulated_distance(tracks, reporter=reporter)
 
         (
             filtered_mask,
             min_movement,
             min_duration,
-        ) = self._filter_tracks_by_parameters(tracks)
+        ) = self._filter_tracks_by_parameters(tracks, distances=distances)
+
+        direction = None
+        if "Direction" in metrics:
+            direction = self._calculate_direction(tracks, reporter=reporter)
+        self.direction = direction
 
         duration = np.array(
             [[i, np.count_nonzero(tracks[:, 0] == i)] for i in np.unique(tracks[:, 0])]
         )
         data = self._compose_csv_data(
-            tracks, duration, filtered_mask, min_movement, min_duration, metrics
+            tracks,
+            duration,
+            filtered_mask,
+            min_movement,
+            min_duration,
+            metrics,
+            reporter=reporter,
+            segmentation=segmentation,
+            distances=distances,
+            direction=direction,
         )
         save_csv(file, data)
-        QApplication.restoreOverrideCursor()
 
-    def _filter_tracks_by_parameters(self, tracks):
+    def _filter_tracks_by_parameters(self, tracks, distances=None):
         """
         Filters the tracks by the given parameters
 
@@ -784,6 +1039,8 @@ class AnalysisWindow(QWidget):
         ----------
         tracks : nd array
             (N,4) shape array, which follows napari's trackslayer format (ID, z, y, x)
+        distances : nd array, optional
+            Precomputed accumulated distances; computed if omitted
 
         Returns
         -------
@@ -794,7 +1051,8 @@ class AnalysisWindow(QWidget):
         min_duration: int
             minimum duration in frames
         """
-        distances = self._calculate_accumulated_distance(tracks)
+        if distances is None:
+            distances = self._calculate_accumulated_distance(tracks)
         if self.lineedit_movement.text() == "":
             min_movement = 0
             movement_mask = np.unique(tracks[:, 0])
@@ -828,6 +1086,10 @@ class AnalysisWindow(QWidget):
         min_movement,
         min_duration,
         selected_metrics,
+        reporter=None,
+        segmentation=None,
+        distances=None,
+        direction=None,
     ):
         """
         Composes the data for the csv file
@@ -896,7 +1158,16 @@ class AnalysisWindow(QWidget):
                 more_all_values,
                 more_valid_values,
                 metrics_dict,
-            ) = self._extend_metrics(tracks, selected_metrics, filtered_mask, duration)
+            ) = self._extend_metrics(
+                tracks,
+                selected_metrics,
+                filtered_mask,
+                duration,
+                reporter=reporter,
+                segmentation=segmentation,
+                distances=distances,
+                direction=direction,
+            )
             metrics.extend(more_metrics)
             individual_metrics.extend(more_individual_metrics)
             all_values.extend(more_all_values)
@@ -930,7 +1201,17 @@ class AnalysisWindow(QWidget):
 
         return rows
 
-    def _extend_metrics(self, tracks, selected_metrics, filtered_mask, duration):
+    def _extend_metrics(
+        self,
+        tracks,
+        selected_metrics,
+        filtered_mask,
+        duration,
+        reporter=None,
+        segmentation=None,
+        distances=None,
+        direction=None,
+    ):
         """
         Extends the metrics for the export
 
@@ -953,7 +1234,7 @@ class AnalysisWindow(QWidget):
         metrics, individual_metrics, all_values, valid_values = [[], [], [], []]
         metrics_dict = {}
         if "Speed" in selected_metrics:
-            speed = self._calculate_speed(tracks)
+            speed = self._calculate_speed(tracks, reporter=reporter)
             metrics.append("Average_speed [# pixels/frame]")
             individual_metrics.extend(
                 [
@@ -977,8 +1258,9 @@ class AnalysisWindow(QWidget):
             metrics_dict.update({"Speed": speed})
 
         if "Size" in selected_metrics:
-            segmentation = self.parent.selected_labels_layer().data
-            size = self._calculate_size(tracks, segmentation)
+            if segmentation is None:
+                segmentation = self.parent.selected_labels_layer().data
+            size = self._calculate_size(tracks, segmentation, reporter=reporter)
             metrics.extend(
                 ["Average size [# pixels]", "Standard deviation of size [# pixels]"]
             )
@@ -1015,6 +1297,8 @@ class AnalysisWindow(QWidget):
             metrics_dict.update({"Size": size})
 
         if "Direction" in selected_metrics:
+            if direction is None:
+                direction = self._calculate_direction(tracks, reporter=reporter)
             metrics.extend(
                 [
                     "Average direction [°]",
@@ -1024,8 +1308,8 @@ class AnalysisWindow(QWidget):
             individual_metrics.extend(["Direction [°]"])
             all_values.extend(
                 [
-                    np.around(np.average(self.direction[:, 3]), 3),
-                    np.around(np.std(self.direction[:, 3]), 3),
+                    np.around(np.average(direction[:, 3]), 3),
+                    np.around(np.std(direction[:, 3]), 3),
                 ]
             )
             valid_values.extend(
@@ -1033,9 +1317,9 @@ class AnalysisWindow(QWidget):
                     np.around(
                         np.average(
                             [
-                                self.direction[i, 3]
-                                for i in range(len(self.direction))
-                                if self.direction[i, 0] in filtered_mask
+                                direction[i, 3]
+                                for i in range(len(direction))
+                                if direction[i, 0] in filtered_mask
                             ]
                         ),
                         3,
@@ -1043,19 +1327,21 @@ class AnalysisWindow(QWidget):
                     np.around(
                         np.std(
                             [
-                                self.direction[i, 3]
-                                for i in range(len(self.direction))
-                                if self.direction[i, 0] in filtered_mask
+                                direction[i, 3]
+                                for i in range(len(direction))
+                                if direction[i, 0] in filtered_mask
                             ]
                         ),
                         3,
                     ),
                 ]
             )
-            metrics_dict.update({"Direction": self.direction})
+            metrics_dict.update({"Direction": direction})
 
         if "Euclidean distance" in selected_metrics:
-            euclidean_distance = self._calculate_euclidean_distance(tracks)
+            euclidean_distance = self._calculate_euclidean_distance(
+                tracks, reporter=reporter
+            )
             metrics.extend(["Average euclidean distance [# pixels]"])
             individual_metrics.extend(["Euclidean distance [# pixels]"])
             all_values.extend(
@@ -1080,7 +1366,7 @@ class AnalysisWindow(QWidget):
             metrics_dict.update({"Euclidean distance": euclidean_distance})
 
         if "Velocity" in selected_metrics:
-            velocity = self._calculate_velocity(tracks)
+            velocity = self._calculate_velocity(tracks, reporter=reporter)
             metrics.extend(
                 [
                     "Average velocity [#pixels/frame]",
@@ -1121,7 +1407,13 @@ class AnalysisWindow(QWidget):
             metrics_dict.update({"Velocity": velocity})
 
         if "Accumulated distance" in selected_metrics:
-            accumulated_distance = self._calculate_accumulated_distance(tracks)
+            # Prefer distances already computed (and progressed) for filtering.
+            if distances is None:
+                accumulated_distance = self._calculate_accumulated_distance(
+                    tracks, reporter=reporter
+                )
+            else:
+                accumulated_distance = distances
             metrics.append("Average accumulated distance [# pixels]")
             individual_metrics.append("Accumulated distance [# pixels]")
             all_values.append(np.around(np.average(accumulated_distance[:, 1]), 3))
@@ -1173,8 +1465,11 @@ class AnalysisWindow(QWidget):
                 metrics_dict.update({"Directness": directness})
 
         if "Perimeter" in selected_metrics:
-            segmentation = self.parent.selected_labels_layer().data
-            perimeter = self.calculate_cell_perimeter(tracks, segmentation)
+            if segmentation is None:
+                segmentation = self.parent.selected_labels_layer().data
+            perimeter = self.calculate_cell_perimeter(
+                tracks, segmentation, reporter=reporter
+            )
             metrics.extend(
                 [
                     "Average perimeter [# pixels]",
@@ -1220,8 +1515,11 @@ class AnalysisWindow(QWidget):
             metrics_dict.update({"Perimeter": perimeter})
 
         if "Eccentricity" in selected_metrics:
-            segmentation = self.parent.selected_labels_layer().data
-            eccentricity = self.calculate_cell_eccentricity(tracks, segmentation)
+            if segmentation is None:
+                segmentation = self.parent.selected_labels_layer().data
+            eccentricity = self.calculate_cell_eccentricity(
+                tracks, segmentation, reporter=reporter
+            )
             metrics.extend(
                 [
                     "Average eccentricity [# pixels]",
