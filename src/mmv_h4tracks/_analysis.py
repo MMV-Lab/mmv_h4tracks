@@ -17,7 +17,6 @@ from qtpy.QtWidgets import (
 )
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
-from napari.qt.threading import create_worker
 from skimage import measure
 
 from ._concurrency import starmap_parallel
@@ -642,42 +641,17 @@ class AnalysisWindow(QWidget):
             total = max(1, len(np.unique(tracks[:, 0])))
 
         parent = self.parent
-        reporter = processing.DockProgressReporter(
-            parent, total, f"Computing {metric}"
-        )
-        reporter.start()
-        worker = create_worker(
+        processing.run_with_dock_progress(
+            parent,
             self._sort_plot_data,
             metric,
             tracks,
             segmentation,
-            reporter,
-            _start_thread=True,
+            desc=f"Computing {metric}",
+            total=total,
+            finish_desc=f"Drawing {metric} plot",
+            on_returned=self._plot,
         )
-        worker._dock_progress_reporter = reporter
-
-        def _on_returned(plot_dict):
-            processing._stop_worker_progress_reporter(worker)
-            try:
-                if parent.progress_bar.maximum() > 0:
-                    parent.set_status_text(
-                        f"Drawing {metric} plot "
-                        f"{parent.progress_bar.maximum()}/{parent.progress_bar.maximum()}"
-                    )
-                    parent.set_progress_value(100)
-                    parent.status_label.repaint()
-                    parent.progress_bar.repaint()
-                self._plot(plot_dict)
-            finally:
-                processing._reset_dock_progress(parent)
-
-        def _on_errored(exc):
-            processing._stop_worker_progress_reporter(worker)
-            processing._reset_dock_progress(parent)
-            handle_exception(exc)
-
-        worker.returned.connect(_on_returned)
-        worker.errored.connect(_on_errored)
 
     def _plot(self, plot_dict):
         """
@@ -954,33 +928,16 @@ class AnalysisWindow(QWidget):
             total += _metric_progress_steps("Accumulated distance", tracks)
         total = max(1, int(total))
 
-        parent = self.parent
-        reporter = processing.DockProgressReporter(
-            parent, total, "Exporting metrics"
-        )
-        reporter.start()
-        worker = create_worker(
+        processing.run_with_dock_progress(
+            self.parent,
             self._export,
             file,
             selected_metrics,
             tracks,
             segmentation,
-            reporter,
-            _start_thread=True,
+            desc="Exporting metrics",
+            total=total,
         )
-        worker._dock_progress_reporter = reporter
-
-        def _on_returned(_result):
-            processing._stop_worker_progress_reporter(worker)
-            processing._reset_dock_progress(parent)
-
-        def _on_errored(exc):
-            processing._stop_worker_progress_reporter(worker)
-            processing._reset_dock_progress(parent)
-            handle_exception(exc)
-
-        worker.returned.connect(_on_returned)
-        worker.errored.connect(_on_errored)
 
     def _export(self, file, metrics, tracks, segmentation, reporter):
         """

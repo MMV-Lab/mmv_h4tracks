@@ -8,7 +8,7 @@ from pathlib import Path
 import numpy as np
 from cellpose import models, core
 from napari.qt.threading import create_worker
-from qtpy.QtCore import Qt, QTimer
+from qtpy.QtCore import Qt, QThread, QObject, Signal
 from qtpy.QtWidgets import QApplication, QMessageBox
 from scipy import ndimage, optimize, spatial
 
@@ -273,32 +273,15 @@ def start_cellpose_training_worker(
     parent = widget.parent
     ne = CELLPOSE_TRAIN_N_EPOCHS_DEFAULT if n_epochs is None else int(n_epochs)
     steps = cellpose_train_progress_steps(ne, CELLPOSE_TRAIN_PROGRESS_EPOCH_STRIDE)
-    reporter = DockProgressReporter(parent, steps, "Training Cellpose")
-    reporter.start()
-
-    worker = create_worker(
+    return run_with_dock_progress(
+        parent,
         _worker_train_cellpose,
         Path(export_dir),
         ne,
-        reporter,
-        _start_thread=True,
+        desc="Training Cellpose",
+        total=steps,
+        on_returned=on_returned,
     )
-    worker._dock_progress_reporter = reporter
-
-    def _on_returned(result):
-        _stop_worker_progress_reporter(worker)
-        _reset_dock_progress(parent)
-        if on_returned is not None:
-            on_returned(result)
-
-    def _on_errored(exc):
-        _stop_worker_progress_reporter(worker)
-        _reset_dock_progress(parent)
-        handle_exception(exc)
-
-    worker.returned.connect(_on_returned)
-    worker.errored.connect(_on_errored)
-    return worker
 
 
 def _load_segmentation_image_data(widget, demo: bool):
@@ -568,12 +551,75 @@ def _segmentation_progress(widget, exclude_frame_indices, demo: bool = False):
     return None
 
 
+def _paint_dock_progress(parent) -> None:
+    """Force the dock bar and status label to paint (avoids stale n/total text)."""
+    status = getattr(parent, "status_label", None)
+    bar = getattr(parent, "progress_bar", None)
+    if status is not None:
+        status.repaint()
+    if bar is not None:
+        bar.repaint()
+
+
+class _GuiInvoker(QObject):
+    """Marshal callables onto the GUI thread that owns the dock widget."""
+
+    _call = Signal(object)
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self._call.connect(self._invoke, Qt.QueuedConnection)
+
+    def _invoke(self, fn):
+        fn()
+
+    def post(self, fn) -> None:
+        app = QApplication.instance()
+        if app is not None and QThread.currentThread() is app.thread():
+            fn()
+            return
+        self._call.emit(fn)
+
+
+def _gui_invoker(parent) -> _GuiInvoker:
+    inv = getattr(parent, "_mmv_gui_invoker", None)
+    if inv is None:
+        inv = _GuiInvoker(parent)
+        parent._mmv_gui_invoker = inv
+    return inv
+
+
+def _run_on_gui_thread(parent, fn) -> None:
+    """
+    Run ``fn`` on the GUI thread that owns ``parent``.
+
+    Bare callables connected to napari worker signals often use a direct
+    connection and run on the worker thread; a queued signal through a
+    child ``QObject`` keeps widget updates on the GUI thread.
+    """
+    _gui_invoker(parent).post(fn)
+
+
+def _apply_dock_progress_widgets(parent, *, n: int, total: int, desc: str) -> None:
+    """Update bar + status together on the GUI thread."""
+    if total > 0:
+        pct = int(round(100.0 * n / total))
+        parent.set_progress_value(pct)
+        parent.progress_bar.setFormat("%p%")
+        parent.set_status_text(f"{desc} {n}/{total}")
+    else:
+        parent.progress_bar.setFormat("%p%")
+        parent.set_status_text(desc)
+    _paint_dock_progress(parent)
+
+
 def _wire_dock_progress(parent, worker, progress: dict | None) -> None:
     """Drive the plugin progress bar/status from worker ``yielded`` signals.
 
-    Do not pass ``_progress=`` to napari ``create_worker``: napari's activity
-    bar calls ``QApplication.processEvents()`` inside ``setValue``, which
-    re-enters on rapid yields and stack-overflows (especially on Windows).
+    Prefer :func:`run_with_dock_progress` with ``mode="yield"`` for new call
+    sites. Do not pass ``_progress=`` to napari ``create_worker``: napari's
+    activity bar calls ``QApplication.processEvents()`` inside ``setValue``,
+    which re-enters on rapid yields and stack-overflows (especially on Windows).
 
     If ``progress["absolute"]`` is true, each yielded int is treated as the
     completed count (``n`` out of ``total``); otherwise each yield increments
@@ -590,25 +636,29 @@ def _wire_dock_progress(parent, worker, progress: dict | None) -> None:
     absolute = bool(progress.get("absolute"))
     if total > 0:
         parent.set_progress_range(0, 100)
-        parent.progress_bar.setFormat("%p%")
-        parent.set_status_text(f"{desc} 0/{total}")
+        _apply_dock_progress_widgets(parent, n=0, total=total, desc=desc)
         done = {"n": 0}
 
         def _on_yielded(value):
-            if absolute:
-                done["n"] = max(0, min(total, int(value)))
-            else:
-                done["n"] += 1
-                if done["n"] > total:
-                    done["n"] = total
-            parent.set_progress_value(int(round(100.0 * done["n"] / total)))
-            parent.set_status_text(f"{desc} {done['n']}/{total}")
+            def _update():
+                if absolute:
+                    done["n"] = max(0, min(total, int(value)))
+                else:
+                    done["n"] += 1
+                    if done["n"] > total:
+                        done["n"] = total
+                _apply_dock_progress_widgets(
+                    parent, n=done["n"], total=total, desc=desc
+                )
+
+            _run_on_gui_thread(parent, _update)
 
         worker.yielded.connect(_on_yielded)
     else:
         parent.set_progress_range(0, 0)
         parent.progress_bar.setFormat("%p%")
         parent.set_status_text(desc)
+        _paint_dock_progress(parent)
 
 
 def _reset_dock_progress(parent) -> None:
@@ -626,18 +676,112 @@ def _reset_dock_progress(parent) -> None:
         parent.set_plugin_busy(False)
 
 
-class DockProgressReporter:
-    """Thread-safe progress counter flushed to the dock bar by a QTimer.
-
-    Use this for pool-backed jobs where napari generator ``yield`` progress
-    stalls then jumps (work continues while the worker is paused on yield).
-    Call ``increment`` / ``set_n`` from the worker thread only; the timer
-    updates Qt widgets on the GUI thread.
-
-    The bar always uses a 0–100 range so ``%p%`` matches the ``n/total``
-    fraction shown in the status label (avoids value==n with max==total
-    looking "full" while the label still shows a partial step).
+def run_with_dock_progress(
+    parent,
+    worker_fn,
+    *args,
+    on_returned=None,
+    on_errored=None,
+    desc: str = "Working",
+    total: int = 0,
+    finish_desc: str | None = None,
+    mode: str = "reporter",
+    progress: dict | None = None,
+    idle_status: str | None = None,
+    pass_reporter: bool = True,
+    skip_none_result: bool = False,
+):
     """
+    Start a napari worker and drive the plugin dock progress bar.
+
+    Use this as the single entry point for progress-tracked jobs. Two modes:
+
+    **``mode="reporter"``** (default)
+        Creates a :class:`DockProgressReporter` (queued signal / side-channel).
+        Prefer for pool-backed work or loops that call ``reporter.increment()``.
+        If ``pass_reporter`` is true (default), ``reporter`` is appended as the
+        last positional argument to ``worker_fn``.
+        If ``finish_desc`` is set, bar total is ``total + 1`` so the GUI
+        callback can claim the last step (e.g. adding layers) before reset.
+
+    **``mode="yield"``**
+        Wires :func:`_wire_dock_progress` to the worker's ``yielded`` signal.
+        Prefer for generator workers that ``yield`` progress. Pass ``progress``
+        as ``{"total": N, "desc": "...", "absolute": bool}`` or ``None`` for
+        busy-only (optional ``idle_status`` text). Does not pass a reporter.
+
+    Never pass napari ``_progress=`` to ``create_worker`` (Windows stack overflow).
+
+    On success: stops any reporter, optionally shows ``finish_desc``, runs
+    ``on_returned(result)``, then resets the dock. On error: resets, runs
+    optional ``on_errored(exc)``, then ``handle_exception``.
+    """
+    mode = str(mode or "reporter").lower()
+    if mode not in ("reporter", "yield"):
+        raise ValueError(f"Unknown dock progress mode: {mode!r}")
+
+    reporter = None
+    if mode == "reporter":
+        worker_steps = max(0, int(total))
+        bar_total = worker_steps + (1 if finish_desc else 0)
+        reporter = DockProgressReporter(parent, bar_total, desc)
+        reporter.start()
+        worker_args = (*args, reporter) if pass_reporter else args
+        worker = create_worker(worker_fn, *worker_args, _start_thread=True)
+        worker._dock_progress_reporter = reporter
+    else:
+        bar_total = 0
+        # Intentionally no napari ``_progress`` — see ``_wire_dock_progress``.
+        worker = create_worker(worker_fn, *args, _start_thread=True)
+        _wire_dock_progress(parent, worker, progress)
+        if progress is None and idle_status:
+            parent.set_status_text(idle_status)
+
+    def _on_returned(result):
+        def _run():
+            _stop_worker_progress_reporter(worker)
+            try:
+                if finish_desc and mode == "reporter":
+                    parent.set_status_text(f"{finish_desc} {bar_total}/{bar_total}")
+                    parent.set_progress_value(100)
+                    parent.progress_bar.setFormat("%p%")
+                    _paint_dock_progress(parent)
+                if on_returned is not None and not (
+                    skip_none_result and result is None
+                ):
+                    on_returned(result)
+            finally:
+                _reset_dock_progress(parent)
+
+        _run_on_gui_thread(parent, _run)
+
+    def _on_errored(exc):
+        def _run():
+            _stop_worker_progress_reporter(worker)
+            _reset_dock_progress(parent)
+            if on_errored is not None:
+                on_errored(exc)
+            handle_exception(exc)
+
+        _run_on_gui_thread(parent, _run)
+
+    worker.returned.connect(_on_returned)
+    worker.errored.connect(_on_errored)
+    return worker
+
+
+class DockProgressReporter(QObject):
+    """Thread-safe progress reporter for the dock bar.
+
+    Prefer starting jobs via :func:`run_with_dock_progress` (``mode="reporter"``).
+    ``increment`` / ``set_n`` may be called from a worker thread; each change is
+    delivered to the GUI thread with a queued signal (no polling timer).
+
+    The bar uses a 0–100 range so ``%p%`` matches the ``n/total`` fraction
+    shown in the status label.
+    """
+
+    _progress = Signal(int, int)  # n, epoch
 
     def __init__(
         self,
@@ -647,58 +791,69 @@ class DockProgressReporter:
         *,
         interval_ms: int = 50,
     ):
-        self.parent = parent
+        super().__init__(parent)
+        self._parent = parent
         self.total = max(0, int(total))
         self.desc = str(desc)
         self._n = 0
+        self._epoch = 0
         self._lock = threading.Lock()
-        self._timer = QTimer(parent)
-        self._timer.setInterval(interval_ms)
-        self._timer.timeout.connect(self._flush_to_ui)
+        self._progress.connect(self._apply_progress, Qt.QueuedConnection)
+        _ = interval_ms  # retained for call-site compatibility
 
     def start(self) -> None:
-        if hasattr(self.parent, "set_plugin_busy"):
-            self.parent.set_plugin_busy(True)
+        if hasattr(self._parent, "set_plugin_busy"):
+            self._parent.set_plugin_busy(True)
         if self.total > 0:
-            self.parent.set_progress_range(0, 100)
-            self.parent.progress_bar.setFormat("%p%")
-            self.parent.set_status_text(f"{self.desc} 0/{self.total}")
+            self._parent.set_progress_range(0, 100)
+            _apply_dock_progress_widgets(
+                self._parent, n=0, total=self.total, desc=self.desc
+            )
         else:
-            self.parent.set_progress_range(0, 0)
-            self.parent.progress_bar.setFormat("%p%")
-            self.parent.set_status_text(self.desc)
-        self._timer.start()
+            self._parent.set_progress_range(0, 0)
+            self._parent.progress_bar.setFormat("%p%")
+            self._parent.set_status_text(self.desc)
+            _paint_dock_progress(self._parent)
 
     def increment(self, step: int = 1) -> int:
         with self._lock:
-            self._n = min(self.total, self._n + int(step)) if self.total else self._n + int(step)
-            return self._n
+            self._n = (
+                min(self.total, self._n + int(step)) if self.total else self._n + int(step)
+            )
+            n = self._n
+            epoch = self._epoch
+        self._progress.emit(n, epoch)
+        return n
 
     def set_n(self, n: int) -> None:
         with self._lock:
             self._n = max(0, int(n))
             if self.total:
                 self._n = min(self.total, self._n)
-
-    def _percent(self, n: int) -> int:
-        if self.total <= 0:
-            return 0
-        return int(round(100.0 * n / self.total))
-
-    def _flush_to_ui(self) -> None:
-        with self._lock:
             n = self._n
-        if self.total > 0:
-            self.parent.set_progress_value(self._percent(n))
-            self.parent.set_status_text(f"{self.desc} {n}/{self.total}")
-        else:
-            self.parent.set_status_text(self.desc)
+            epoch = self._epoch
+        self._progress.emit(n, epoch)
+
+    def _apply_progress(self, n: int, epoch: int) -> None:
+        # Drop stale queued updates after stop() bumps the epoch.
+        if epoch != self._epoch:
+            return
+        _apply_dock_progress_widgets(
+            self._parent, n=n, total=self.total, desc=self.desc
+        )
 
     def stop(self) -> None:
-        """Stop the timer and push a final UI update (call from the GUI thread)."""
-        if self._timer.isActive():
-            self._timer.stop()
-        self._flush_to_ui()
+        """Push a final UI update (call from the GUI thread when possible)."""
+        with self._lock:
+            self._epoch += 1
+            n = self._n
+            epoch = self._epoch
+        # Apply synchronously when already on this QObject's thread so finish_desc
+        # cannot race ahead of a still-queued progress event.
+        if QThread.currentThread() is self.thread():
+            self._apply_progress(n, epoch)
+        else:
+            self._progress.emit(n, epoch)
 
 
 def _stop_worker_progress_reporter(worker) -> None:
@@ -718,38 +873,23 @@ def _start_segmentation_worker(
 ):
     """Start Cellpose on a worker with dock progress (CPU and GPU)."""
     parent = widget.parent
-    args = (
+    progress = _segmentation_progress(widget, exclude_frame_indices, demo)
+    worker_fn = _segment_image_gpu if core.use_gpu() else _segment_image_cpu
+    backend = "GPU" if core.use_gpu() else "CPU"
+    return run_with_dock_progress(
+        parent,
+        worker_fn,
         widget,
         demo,
         exclude_frame_indices,
         copy_excluded_frames_from_layer,
         excluded_frames_masks_dir,
         excluded_frames_layer_prefix,
+        mode="yield",
+        progress=progress,
+        idle_status=f"Cellpose ({backend}) — running…",
+        on_returned=_add_segmentation_to_viewer,
     )
-    progress = _segmentation_progress(widget, exclude_frame_indices, demo)
-    worker_fn = _segment_image_gpu if core.use_gpu() else _segment_image_cpu
-    # Intentionally no napari ``_progress`` — see ``_wire_dock_progress``.
-    worker = create_worker(
-        worker_fn,
-        *args,
-        _start_thread=True,
-    )
-    _wire_dock_progress(parent, worker, progress)
-    if progress is None:
-        backend = "GPU" if core.use_gpu() else "CPU"
-        parent.set_status_text(f"Cellpose ({backend}) — running…")
-
-    def _on_returned(widget_and_mask):
-        _reset_dock_progress(parent)
-        _add_segmentation_to_viewer(widget_and_mask)
-
-    def _on_errored(exc):
-        _reset_dock_progress(parent)
-        handle_exception(exc)
-
-    worker.returned.connect(_on_returned)
-    worker.errored.connect(_on_errored)
-    return worker
 
 
 def _add_segmentation_to_viewer(widget_and_mask):
@@ -993,12 +1133,13 @@ def _get_parameters(widget, model: str):
     raise ValueError(f"Unknown model: {model!r}")
 
 
-def _track_segmentation(widget):
+def _track_segmentation(widget, on_returned=None):
     """
     Start coordinate-based tracking with side-channel dock progress.
 
     Returns a started napari worker (no ``_progress`` / no generator yields for
-    progress — see ``DockProgressReporter``).
+    progress — see ``DockProgressReporter``). If ``on_returned`` is set it is
+    called with the tracks array after progress is torn down.
     """
     parent = widget.parent
     try:
@@ -1010,22 +1151,15 @@ def _track_segmentation(widget):
     n_frames = int(len(data))
     n_pairs = max(0, n_frames - 1)
     total = n_frames + n_pairs
-    reporter = DockProgressReporter(
+    return run_with_dock_progress(
         parent,
-        total,
-        "Coordinate tracking",
-    )
-    reporter.start()
-
-    worker = create_worker(
         _worker_track_segmentation,
         widget,
         data,
-        reporter,
-        _start_thread=True,
+        desc="Coordinate tracking",
+        total=total,
+        on_returned=on_returned,
     )
-    worker._dock_progress_reporter = reporter
-    return worker
 
 
 def _worker_track_segmentation(widget, data, reporter: DockProgressReporter):

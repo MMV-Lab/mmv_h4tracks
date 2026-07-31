@@ -16,7 +16,6 @@ from qtpy.QtWidgets import (
     QAbstractScrollArea,
 )
 from qtpy.QtGui import QIntValidator
-from napari.qt.threading import create_worker
 from scipy import ndimage
 from scipy.optimize import linear_sum_assignment
 from numba import jit
@@ -208,38 +207,25 @@ class EvaluationWindow(QWidget):
         n_range = upper_bound - lower_bound + 1
         # IoU range/all, DICE range/all, then one step per AP50 frame in range
         total = 4 + n_range
-        reporter = processing.DockProgressReporter(
-            parent, total, "Seg evaluation"
-        )
-        reporter.start()
-
         logger.info("Segmentation evaluation started…")
-        worker = create_worker(
-            self._worker_evaluate_segmentation,
-            gt_seg,
-            eval_seg,
-            lower_bound,
-            upper_bound,
-            reporter,
-            _start_thread=True,
-        )
-        worker._dock_progress_reporter = reporter
 
         def _on_returned(result):
-            processing._stop_worker_progress_reporter(worker)
-            processing._reset_dock_progress(parent)
             logger.info("Segmentation evaluation finished.")
             if result is None:
                 return
             self._apply_segmentation_eval_results(result)
 
-        def _on_errored(exc):
-            processing._stop_worker_progress_reporter(worker)
-            processing._reset_dock_progress(parent)
-            handle_exception(exc)
-
-        worker.returned.connect(_on_returned)
-        worker.errored.connect(_on_errored)
+        processing.run_with_dock_progress(
+            parent,
+            self._worker_evaluate_segmentation,
+            gt_seg,
+            eval_seg,
+            lower_bound,
+            upper_bound,
+            desc="Seg evaluation",
+            total=total,
+            on_returned=_on_returned,
+        )
 
     def _parse_evaluation_bounds(self, n_frames: int):
         """Return ``(lower, upper)`` inclusive bounds, or ``None`` if invalid."""
@@ -442,13 +428,16 @@ class EvaluationWindow(QWidget):
 
         # Centroid adjust (per in-range track row) + FP/FN/split per frame + track faults
         total = n_adjust + 3 * n_range + 1
-        reporter = processing.DockProgressReporter(
-            parent, total, "Track evaluation"
-        )
-        reporter.start()
-
         logger.info("Tracking evaluation started…")
-        worker = create_worker(
+
+        def _on_returned(result):
+            logger.info("Tracking evaluation finished.")
+            if result is None:
+                return
+            self._apply_tracking_eval_results(result, gt_tracks_layer)
+
+        processing.run_with_dock_progress(
+            parent,
             self._worker_evaluate_tracking,
             gt_seg,
             gt_tracks,
@@ -456,26 +445,10 @@ class EvaluationWindow(QWidget):
             eval_tracks,
             lower_bound,
             upper_bound,
-            reporter,
-            _start_thread=True,
+            desc="Track evaluation",
+            total=total,
+            on_returned=_on_returned,
         )
-        worker._dock_progress_reporter = reporter
-
-        def _on_returned(result):
-            processing._stop_worker_progress_reporter(worker)
-            processing._reset_dock_progress(parent)
-            logger.info("Tracking evaluation finished.")
-            if result is None:
-                return
-            self._apply_tracking_eval_results(result, gt_tracks_layer)
-
-        def _on_errored(exc):
-            processing._stop_worker_progress_reporter(worker)
-            processing._reset_dock_progress(parent)
-            handle_exception(exc)
-
-        worker.returned.connect(_on_returned)
-        worker.errored.connect(_on_errored)
 
     def _prepare_tracking_eval_arrays(
         self,

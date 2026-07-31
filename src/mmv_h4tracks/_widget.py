@@ -53,8 +53,6 @@ from ._session_trained_models import (
 )
 from ._utils import CallbackHandler
 
-from napari.qt.threading import create_worker
-
 import mmv_h4tracks._processing as mmv_processing
 
 
@@ -697,52 +695,6 @@ class MMVH4TRACKS(QWidget):
                 self.viewer.layers.remove(layer_name)
         return True
 
-    def _start_dock_progress_worker(
-        self,
-        desc,
-        total,
-        worker_fn,
-        *args,
-        on_returned,
-        finish_desc=None,
-    ):
-        """
-        Run ``worker_fn(*args, reporter)`` with dock progress and UI lock.
-
-        If ``finish_desc`` is set, the bar total is ``total + 1`` so the GUI
-        callback can claim the last step (e.g. adding layers) before reset.
-        Progress is only cleared after ``on_returned`` finishes.
-        """
-        worker_steps = max(0, int(total))
-        bar_total = worker_steps + (1 if finish_desc else 0)
-        reporter = mmv_processing.DockProgressReporter(self, bar_total, desc)
-        reporter.start()
-        worker = create_worker(worker_fn, *args, reporter, _start_thread=True)
-        worker._dock_progress_reporter = reporter
-
-        def _on_returned(result):
-            mmv_processing._stop_worker_progress_reporter(worker)
-            try:
-                if finish_desc:
-                    # Status first, then bar, then force paint before heavy GUI work
-                    # so the label cannot stay stuck on the previous n/total.
-                    self.set_status_text(f"{finish_desc} {bar_total}/{bar_total}")
-                    self.set_progress_value(100)
-                    self.status_label.repaint()
-                    self.progress_bar.repaint()
-                on_returned(result)
-            finally:
-                mmv_processing._reset_dock_progress(self)
-
-        def _on_errored(exc):
-            mmv_processing._stop_worker_progress_reporter(worker)
-            mmv_processing._reset_dock_progress(self)
-            handle_exception(exc)
-
-        worker.returned.connect(_on_returned)
-        worker.errored.connect(_on_errored)
-        return worker
-
     def _apply_loaded_zarr(self, result, zarr_file, filepath):
         raw_levels, segmentation, filtered_tracks, is_multiscale = result
         self.is_multiscale = is_multiscale
@@ -833,11 +785,12 @@ class MMVH4TRACKS(QWidget):
         if not self._clear_layers(layernames):
             return
 
-        self._start_dock_progress_worker(
-            "Loading zarr",
-            4,
+        mmv_processing.run_with_dock_progress(
+            self,
             load_zarr_data,
             zarr_file,
+            desc="Loading zarr",
+            total=4,
             on_returned=lambda result: self._apply_loaded_zarr(
                 result, zarr_file, filepath
             ),
@@ -845,12 +798,13 @@ class MMVH4TRACKS(QWidget):
         )
 
     def _start_ome_zarr_load(self, zarr_file, filepath):
-        self._start_dock_progress_worker(
-            "Loading OME-zarr",
-            3,
+        mmv_processing.run_with_dock_progress(
+            self,
             load_ome_zarr_data,
             zarr_file,
             filepath,
+            desc="Loading OME-zarr",
+            total=3,
             on_returned=lambda result: self._apply_loaded_ome_zarr(
                 result, zarr_file, filepath
             ),
@@ -1014,14 +968,15 @@ class MMVH4TRACKS(QWidget):
             return
 
         target = self.zarr
-        self._start_dock_progress_worker(
-            "Saving zarr",
-            3,
+        mmv_processing.run_with_dock_progress(
+            self,
             write_zarr_data,
             target,
             raw_image,
             segmentation,
             tracks,
+            desc="Saving zarr",
+            total=3,
             on_returned=lambda _root: notify("Zarr file has been saved."),
         )
 
@@ -1047,14 +1002,15 @@ class MMVH4TRACKS(QWidget):
             handle_exception(exc)
             return
 
-        self._start_dock_progress_worker(
-            "Saving zarr",
-            3,
+        mmv_processing.run_with_dock_progress(
+            self,
             write_zarr_data,
             path,
             raw_image,
             segmentation,
             tracks,
+            desc="Saving zarr",
+            total=3,
             on_returned=lambda _root: notify(f"{path} has been saved."),
         )
 

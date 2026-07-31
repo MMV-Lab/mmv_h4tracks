@@ -11,13 +11,11 @@ from qtpy.QtWidgets import (
     QCheckBox,
 )
 from qtpy.QtGui import QDoubleValidator
-from napari.qt.threading import create_worker
-
 from collections import defaultdict
 
 from scipy.ndimage import label, center_of_mass
 
-from ._logger import notify, handle_exception
+from ._logger import notify
 from ._qt_utils import apply_napari_dark_theme, layer_as_numpy
 from ._constants import (
     DEFAULT_SPEED_THRESHOLD,
@@ -174,29 +172,6 @@ class AssistantWindow(QWidget):
         content.layout().addWidget(v_spacer)
         self.layout().addWidget(content)
 
-    def _start_assistant_progress_worker(
-        self, desc, total, worker_fn, *args, on_returned
-    ):
-        parent = self.parent
-        reporter = processing.DockProgressReporter(parent, total, desc)
-        reporter.start()
-        worker = create_worker(worker_fn, *args, reporter, _start_thread=True)
-        worker._dock_progress_reporter = reporter
-
-        def _on_returned(result):
-            processing._stop_worker_progress_reporter(worker)
-            processing._reset_dock_progress(parent)
-            if result is not None:
-                on_returned(result)
-
-        def _on_errored(exc):
-            processing._stop_worker_progress_reporter(worker)
-            processing._reset_dock_progress(parent)
-            handle_exception(exc)
-
-        worker.returned.connect(_on_returned)
-        worker.errored.connect(_on_errored)
-
     def show_speed_outliers_on_click(self):
         self.parent.callback_handler.remove_callback_viewer()
         self.FOI_lineedit.setText("")
@@ -211,13 +186,15 @@ class AssistantWindow(QWidget):
         except ValueError:
             threshold = DEFAULT_SPEED_THRESHOLD
         n_tracks = len(np.unique(tracks[:, 0])) if tracks.size else 0
-        self._start_assistant_progress_worker(
-            "Speed outliers",
-            n_tracks,
+        processing.run_with_dock_progress(
+            self.parent,
             self._worker_speed_outliers,
             tracks,
             threshold,
+            desc="Speed outliers",
+            total=n_tracks,
             on_returned=self.display_outliers,
+            skip_none_result=True,
         )
 
     def _worker_speed_outliers(self, tracks, threshold, reporter):
@@ -251,14 +228,16 @@ class AssistantWindow(QWidget):
         except ValueError:
             threshold = DEFAULT_SIZE_THRESHOLD
         n_tracks = len(np.unique(tracks[:, 0])) if tracks.size else 0
-        self._start_assistant_progress_worker(
-            "Size outliers",
-            n_tracks,
+        processing.run_with_dock_progress(
+            self.parent,
             self._worker_size_outliers,
             tracks,
             segmentation,
             threshold,
+            desc="Size outliers",
+            total=n_tracks,
             on_returned=self.display_outliers,
+            skip_none_result=True,
         )
 
     def _worker_size_outliers(self, tracks, segmentation, threshold, reporter):
@@ -296,16 +275,18 @@ class AssistantWindow(QWidget):
         # graph maps track_id -> list of parent_ids (lineage)
         graph = dict(getattr(tracks_layer, "graph", {}) or {})
         n_tracks = len(np.unique(tracks[:, 0])) if tracks.size else 0
-        self._start_assistant_progress_worker(
-            "Noteworthy tracks",
-            n_tracks,
+        processing.run_with_dock_progress(
+            self.parent,
             self._worker_abrupt_tracks,
             tracks,
             frames,
             shape,
             threshold,
             graph,
+            desc="Noteworthy tracks",
+            total=n_tracks,
             on_returned=self.display_outliers,
+            skip_none_result=True,
         )
 
     def _worker_abrupt_tracks(self, tracks, frames, shape, threshold, graph, reporter):
@@ -396,16 +377,18 @@ class AssistantWindow(QWidget):
             else:
                 label_layer.data = out_to_store
 
-        self._start_assistant_progress_worker(
-            "Relabel cells",
-            n_frames,
+        processing.run_with_dock_progress(
+            self.parent,
             self._worker_relabel_cells,
             data_work,
             squeeze_output,
             original_dtype,
             write_multiscale,
             multiscale_list,
+            desc="Relabel cells",
+            total=n_frames,
             on_returned=_on_returned,
+            skip_none_result=True,
         )
 
     def _worker_relabel_cells(
@@ -485,16 +468,18 @@ class AssistantWindow(QWidget):
         def _on_returned(new_segmentation):
             label_layer.data = new_segmentation
 
-        self._start_assistant_progress_worker(
-            "Align IDs",
-            total,
+        processing.run_with_dock_progress(
+            self.parent,
             self._worker_align_ids,
             reference_segmentation,
             tracks,
             saving,
             offset,
             dict(tracks_by_frame),
+            desc="Align IDs",
+            total=total,
             on_returned=_on_returned,
+            skip_none_result=True,
         )
 
     def _worker_align_ids(
@@ -602,13 +587,15 @@ class AssistantWindow(QWidget):
                 self.FOI_lineedit.setText("")
             self.mark_outliers(untracked, "Untracked cells")
 
-        self._start_assistant_progress_worker(
-            "Untracked cells",
-            n_frames,
+        processing.run_with_dock_progress(
+            self.parent,
             self._worker_untracked_cells,
             segmentation,
             tracks,
+            desc="Untracked cells",
+            total=n_frames,
             on_returned=_on_returned,
+            skip_none_result=True,
         )
 
     def _worker_untracked_cells(self, segmentation, tracks, reporter):
@@ -660,13 +647,15 @@ class AssistantWindow(QWidget):
                 self.FOI_lineedit.setText("")
             self.mark_outliers(tiny, "Tiny cells")
 
-        self._start_assistant_progress_worker(
-            "Small cells",
-            n_frames,
+        processing.run_with_dock_progress(
+            self.parent,
             self._worker_tiny_cells,
             segmentation,
             threshold,
+            desc="Small cells",
+            total=n_frames,
             on_returned=_on_returned,
+            skip_none_result=True,
         )
 
     def _worker_tiny_cells(self, segmentation, threshold, reporter):

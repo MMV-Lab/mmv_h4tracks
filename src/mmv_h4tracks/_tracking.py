@@ -1,6 +1,6 @@
 import numpy as np
 import pandas as pd
-from napari.qt.threading import create_worker, thread_worker
+from napari.qt.threading import thread_worker
 from qtpy.QtCore import Qt
 from qtpy.QtWidgets import (
     QApplication,
@@ -200,22 +200,9 @@ class TrackingWindow(QWidget):
             return
 
         parent = self.parent
-        worker = processing._track_segmentation(self)
-        if worker is None:
-            return
-
-        def _on_returned(tracks):
-            processing._stop_worker_progress_reporter(worker)
-            processing._reset_dock_progress(parent)
-            self.process_new_tracks(tracks)
-
-        def _on_errored(exc):
-            processing._stop_worker_progress_reporter(worker)
-            processing._reset_dock_progress(parent)
-            handle_exception(exc)
-
-        worker.returned.connect(_on_returned)
-        worker.errored.connect(_on_errored)
+        processing._track_segmentation(
+            self, on_returned=self.process_new_tracks
+        )
 
     def overlap_tracking_on_click(self):
         """
@@ -236,28 +223,16 @@ class TrackingWindow(QWidget):
         progress = (
             {"total": n_steps, "desc": "Overlap tracking"} if n_steps else None
         )
-        parent = self.parent
-        # Intentionally no napari ``_progress`` — see ``_wire_dock_progress``.
-        worker = create_worker(
+        processing.run_with_dock_progress(
+            self.parent,
             self.worker_overlap_tracking,
             segmentation,
-            _start_thread=True,
+            mode="yield",
+            progress=progress,
+            idle_status="Running overlap-based tracking…",
+            on_returned=self.process_new_tracks,
+            on_errored=lambda _exc: QApplication.restoreOverrideCursor(),
         )
-        processing._wire_dock_progress(parent, worker, progress)
-        if progress is None:
-            parent.set_status_text("Running overlap-based tracking…")
-
-        def _on_returned(tracks):
-            processing._reset_dock_progress(parent)
-            self.process_new_tracks(tracks)
-
-        def _on_errored(exc):
-            processing._reset_dock_progress(parent)
-            QApplication.restoreOverrideCursor()
-            handle_exception(exc)
-
-        worker.returned.connect(_on_returned)
-        worker.errored.connect(_on_errored)
 
     def worker_overlap_tracking(self, segmentation):
         """
@@ -1366,19 +1341,7 @@ class TrackingWindow(QWidget):
         }
         parent = self.parent
 
-        # Intentionally no napari ``_progress`` — see ``_wire_dock_progress``.
-        worker = create_worker(
-            self._worker_update_all_centroids,
-            label_data,
-            tracks,
-            frames_set,
-            yield_step,
-            _start_thread=True,
-        )
-        processing._wire_dock_progress(parent, worker, progress)
-
         def _on_returned(updated_tracks):
-            processing._reset_dock_progress(parent)
             if updated_tracks is None:
                 return
             filtered_graph = preserve_and_filter_graph(tracks_layer, updated_tracks)
@@ -1388,12 +1351,18 @@ class TrackingWindow(QWidget):
             parent.align_cache = label_data
             notify("Centroids updated.")
 
-        def _on_errored(exc):
-            processing._reset_dock_progress(parent)
-            handle_exception(exc)
-
-        worker.returned.connect(_on_returned)
-        worker.errored.connect(_on_errored)
+        processing.run_with_dock_progress(
+            parent,
+            self._worker_update_all_centroids,
+            label_data,
+            tracks,
+            frames_set,
+            yield_step,
+            mode="yield",
+            progress=progress,
+            on_returned=_on_returned,
+            on_errored=lambda _exc: QApplication.restoreOverrideCursor(),
+        )
 
     def _worker_update_all_centroids(
         self, label_data, tracks, frames_set, yield_step: int = 1
