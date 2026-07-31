@@ -1,13 +1,14 @@
-import multiprocessing
 import logging
+import multiprocessing
+import threading
+import time
 from datetime import datetime
 from pathlib import Path
-import time
 
 import numpy as np
 from cellpose import models, core
-from napari.qt.threading import thread_worker
-from qtpy.QtCore import Qt
+from napari.qt.threading import create_worker, thread_worker
+from qtpy.QtCore import Qt, QTimer
 from qtpy.QtWidgets import QApplication, QMessageBox
 from scipy import ndimage, optimize, spatial
 
@@ -17,7 +18,12 @@ from ._constants import (
     CUSTOM_MODEL_PREFIX,
     DEFAULT_TRACKS_LAYER_NAME,
 )
-from ._concurrency import map_parallel, starmap_parallel
+from ._concurrency import (
+    iter_map_as_completed,
+    iter_starmap_as_completed,
+    map_parallel,
+    starmap_parallel,
+)
 from ._custom_models import (
     get_custom_model_store,
     package_models_dir,
@@ -498,8 +504,7 @@ def run_segmentation(widget):
     """
     pr = _prompt_exclude_training_frames_if_applicable(widget, False)
     excl, mdir, mpfx = (None, None, None) if pr is None else pr
-    worker = _segment_image(widget, False, excl, None, mdir, mpfx)
-    worker.returned.connect(_add_segmentation_to_viewer)
+    _start_segmentation_worker(widget, False, excl, None, mdir, mpfx)
 
 
 def run_demo_segmentation(widget):
@@ -508,8 +513,193 @@ def run_demo_segmentation(widget):
     """
     pr = _prompt_exclude_training_frames_if_applicable(widget, True)
     excl, mdir, mpfx = (None, None, None) if pr is None else pr
-    worker = _segment_image(widget, True, excl, None, mdir, mpfx)
-    worker.returned.connect(_add_segmentation_to_viewer)
+    _start_segmentation_worker(widget, True, excl, None, mdir, mpfx)
+
+
+def _segmentation_progress(widget, exclude_frame_indices, demo: bool = False):
+    """Build a dock progress dict for Cellpose (GPU or CPU)."""
+    use_gpu = core.use_gpu()
+    desc = "Cellpose (GPU)" if use_gpu else "Cellpose (CPU)"
+    try:
+        data = np.squeeze(layer_as_numpy(widget.parent.selected_image_layer()))
+    except Exception:
+        return {"desc": desc}
+    if demo and data.ndim >= 3:
+        data = data[0:5]
+    excl = exclude_frame_indices or frozenset()
+    if data.ndim == 2:
+        total = 0 if 0 in excl else 1
+        return {"total": total, "desc": desc} if total else None
+    if data.ndim >= 3:
+        n_t = data.shape[0]
+        total = sum(1 for i in range(n_t) if i not in excl)
+        return {"total": total, "desc": desc} if total else None
+    return None
+
+
+def _wire_dock_progress(parent, worker, progress: dict | None) -> None:
+    """Drive the plugin progress bar/status from worker ``yielded`` signals.
+
+    Do not pass ``_progress=`` to napari ``create_worker``: napari's activity
+    bar calls ``QApplication.processEvents()`` inside ``setValue``, which
+    re-enters on rapid yields and stack-overflows (especially on Windows).
+
+    If ``progress["absolute"]`` is true, each yielded int is treated as the
+    completed count (``n`` out of ``total``); otherwise each yield increments
+    by one (used when completion order is unordered).
+    """
+    if progress is None:
+        return
+    total = int(progress.get("total") or 0)
+    desc = str(progress.get("desc") or "Working")
+    absolute = bool(progress.get("absolute"))
+    if total > 0:
+        parent.set_progress_range(0, total)
+        parent.progress_bar.setFormat("%p%")
+        parent.set_status_text(f"{desc} 0/{total}")
+        done = {"n": 0}
+
+        def _on_yielded(value):
+            if absolute:
+                done["n"] = max(0, min(total, int(value)))
+            else:
+                done["n"] += 1
+            parent.set_progress_value(done["n"])
+            parent.set_status_text(f"{desc} {done['n']}/{total}")
+
+        worker.yielded.connect(_on_yielded)
+    else:
+        parent.set_progress_range(0, 0)
+        parent.progress_bar.setFormat("%p%")
+        parent.set_status_text(desc)
+
+
+def _reset_dock_progress(parent) -> None:
+    """After a job: leave determinate bars at 100%, otherwise a blank idle bar."""
+    bar = parent.progress_bar
+    if bar.maximum() > 0:
+        bar.setValue(bar.maximum())
+        bar.setFormat("%p%")
+    else:
+        bar.setRange(0, 1)
+        bar.setValue(0)
+        bar.setFormat("")
+    parent.clear_status()
+
+
+class DockProgressReporter:
+    """Thread-safe progress counter flushed to the dock bar by a QTimer.
+
+    Use this for pool-backed jobs where napari generator ``yield`` progress
+    stalls then jumps (work continues while the worker is paused on yield).
+    Call ``increment`` / ``set_n`` from the worker thread only; the timer
+    updates Qt widgets on the GUI thread.
+    """
+
+    def __init__(
+        self,
+        parent,
+        total: int,
+        desc: str,
+        *,
+        interval_ms: int = 50,
+    ):
+        self.parent = parent
+        self.total = max(0, int(total))
+        self.desc = str(desc)
+        self._n = 0
+        self._lock = threading.Lock()
+        self._timer = QTimer(parent)
+        self._timer.setInterval(interval_ms)
+        self._timer.timeout.connect(self._flush_to_ui)
+
+    def start(self) -> None:
+        if self.total > 0:
+            self.parent.set_progress_range(0, self.total)
+            self.parent.progress_bar.setFormat("%p%")
+            self.parent.set_status_text(f"{self.desc} 0/{self.total}")
+        else:
+            self.parent.set_progress_range(0, 0)
+            self.parent.progress_bar.setFormat("%p%")
+            self.parent.set_status_text(self.desc)
+        self._timer.start()
+
+    def increment(self, step: int = 1) -> int:
+        with self._lock:
+            self._n = min(self.total, self._n + int(step)) if self.total else self._n + int(step)
+            return self._n
+
+    def set_n(self, n: int) -> None:
+        with self._lock:
+            self._n = max(0, int(n))
+            if self.total:
+                self._n = min(self.total, self._n)
+
+    def _flush_to_ui(self) -> None:
+        with self._lock:
+            n = self._n
+        if self.total > 0:
+            self.parent.set_progress_value(n)
+            self.parent.set_status_text(f"{self.desc} {n}/{self.total}")
+        else:
+            self.parent.set_status_text(self.desc)
+
+    def stop(self) -> None:
+        """Stop the timer and push a final UI update (call from the GUI thread)."""
+        if self._timer.isActive():
+            self._timer.stop()
+        self._flush_to_ui()
+
+
+def _stop_worker_progress_reporter(worker) -> None:
+    reporter = getattr(worker, "_dock_progress_reporter", None)
+    if reporter is not None:
+        reporter.stop()
+        worker._dock_progress_reporter = None
+
+
+def _start_segmentation_worker(
+    widget,
+    demo,
+    exclude_frame_indices,
+    copy_excluded_frames_from_layer,
+    excluded_frames_masks_dir,
+    excluded_frames_layer_prefix,
+):
+    """Start Cellpose on a worker with dock progress (CPU and GPU)."""
+    parent = widget.parent
+    args = (
+        widget,
+        demo,
+        exclude_frame_indices,
+        copy_excluded_frames_from_layer,
+        excluded_frames_masks_dir,
+        excluded_frames_layer_prefix,
+    )
+    progress = _segmentation_progress(widget, exclude_frame_indices, demo)
+    worker_fn = _segment_image_gpu if core.use_gpu() else _segment_image_cpu
+    # Intentionally no napari ``_progress`` — see ``_wire_dock_progress``.
+    worker = create_worker(
+        worker_fn,
+        *args,
+        _start_thread=True,
+    )
+    _wire_dock_progress(parent, worker, progress)
+    if progress is None:
+        backend = "GPU" if core.use_gpu() else "CPU"
+        parent.set_status_text(f"Cellpose ({backend}) — running…")
+
+    def _on_returned(widget_and_mask):
+        _reset_dock_progress(parent)
+        _add_segmentation_to_viewer(widget_and_mask)
+
+    def _on_errored(exc):
+        _reset_dock_progress(parent)
+        handle_exception(exc)
+
+    worker.returned.connect(_on_returned)
+    worker.errored.connect(_on_errored)
+    return worker
 
 
 def _add_segmentation_to_viewer(widget_and_mask):
@@ -527,87 +717,18 @@ def _add_segmentation_to_viewer(widget_and_mask):
     notify("Segmentation finished.")
 
 
-@thread_worker(connect={"errored": handle_exception})
-def _segment_image(
+def _finalize_segmentation_mask(
     widget,
-    demo=False,
-    exclude_frame_indices=None,
-    copy_excluded_frames_from_layer=None,
-    excluded_frames_masks_dir: Path | None = None,
-    excluded_frames_layer_prefix: str | None = None,
+    mask,
+    data_squeezed,
+    removed_dims,
+    exclude_set,
+    copy_excluded_frames_from_layer,
+    excluded_frames_masks_dir,
+    excluded_frames_layer_prefix,
+    demo,
 ):
-    """
-    Run segmentation on the raw image data
-
-    Parameters
-    ----------
-    demo : Boolean
-        whether or not to do a demo of the segmentation
-    exclude_frame_indices : frozenset[int] | None
-        Time indices (into ``data_squeezed``) not passed to Cellpose.
-    copy_excluded_frames_from_layer : str | None
-        Labels layer name to copy excluded frames from; if None, excluded frames stay zero.
-    excluded_frames_masks_dir : Path | None
-        If set with ``excluded_frames_layer_prefix``, excluded frames load from mask TIFFs here.
-    excluded_frames_layer_prefix : str | None
-        Prefix in ``{prefix}_frame_XXXXX_masks.tif`` filenames.
-
-    Returns
-    -------
-    widget, mask
-        the widget and the segmentation mask
-    """
-    logger.info("Starting segmentation")
-    QApplication.setOverrideCursor(Qt.WaitCursor)
-
-    data_squeezed, removed_dims = _load_segmentation_image_data(widget, demo)
-    exclude_set = exclude_frame_indices or frozenset()
-
-    selected_model = widget.combobox_cellpose_model.currentText()
-    parameters = _get_parameters(widget, selected_model)
-
-    if core.use_gpu():
-        logger.info("Using GPU for segmentation")
-        model = models.CellposeModel(
-            gpu=True, pretrained_model=parameters.pop("model_path")
-        )
-        if data_squeezed.ndim == 2:
-            if 0 in exclude_set:
-                mask = np.zeros_like(data_squeezed, dtype=np.int32)
-            else:
-                mask, _, _ = model.eval(data_squeezed, **parameters)
-        else:
-            n_t = data_squeezed.shape[0]
-            mask = np.zeros((n_t, *data_squeezed.shape[1:]), dtype=np.int32)
-            for i in range(n_t):
-                if i in exclude_set:
-                    continue
-                layer_mask, _, _ = model.eval(data_squeezed[i], **parameters)
-                mask[i] = layer_mask
-    else:
-        logger.info("Using CPU for segmentation")
-        AMOUNT_OF_PROCESSES = widget.parent.get_process_limit()
-        logger.debug("Amount of processes: " + str(AMOUNT_OF_PROCESSES))
-
-        if data_squeezed.ndim == 2:
-            if 0 in exclude_set:
-                mask = np.zeros_like(data_squeezed, dtype=np.int32)
-            else:
-                mask = segment_slice_cpu(data_squeezed, parameters)
-        else:
-            n_t = data_squeezed.shape[0]
-            mask = np.zeros((n_t, *data_squeezed.shape[1:]), dtype=np.int32)
-            indices_to_run = [i for i in range(n_t) if i not in exclude_set]
-            if indices_to_run:
-                data_with_parameters = [
-                    (data_squeezed[i], parameters) for i in indices_to_run
-                ]
-                parts = starmap_parallel(
-                    segment_slice_cpu, data_with_parameters, AMOUNT_OF_PROCESSES
-                )
-                for idx, layer_mask in zip(indices_to_run, parts):
-                    mask[idx] = layer_mask
-
+    """Fill excluded frames, restore shape, cache, and return ``(widget, mask)``."""
     if (
         exclude_set
         and excluded_frames_masks_dir is not None
@@ -629,28 +750,23 @@ def _segment_image(
             data_squeezed.ndim,
         )
 
-    # Ensure mask is a proper numpy array before shape restoration
     if isinstance(mask, list):
-        # Check if all masks have the same shape
         if len(mask) > 0:
             first_shape = mask[0].shape
             if not all(m.shape == first_shape for m in mask):
-                logger.warning(f"Masks have different shapes. First: {first_shape}, others may differ.")
-                # Try to convert anyway - this might create an object array
+                logger.warning(
+                    f"Masks have different shapes. First: {first_shape}, others may differ."
+                )
             mask = np.asarray(mask)
         else:
             raise ValueError("Mask list is empty - no segmentation results")
-    
-    # Ensure integer dtype for labels
+
     if mask.dtype != np.int32 and mask.dtype != np.int64:
         mask = mask.astype(np.int32)
-    
-    # Restore original shape by adding back removed dimensions
-    # Add dimensions back starting from the lowest index to maintain correct positions
+
     for dim_idx in sorted(removed_dims):
         mask = np.expand_dims(mask, axis=dim_idx)
-    
-    # Final validation
+
     if mask.size == 0:
         raise ValueError("Mask is empty after processing")
     if np.all(mask == 0):
@@ -666,6 +782,117 @@ def _segment_image(
     QApplication.restoreOverrideCursor()
     logger.info("Segmentation finished")
     return widget, mask
+
+
+def _segment_image_cpu(
+    widget,
+    demo=False,
+    exclude_frame_indices=None,
+    copy_excluded_frames_from_layer=None,
+    excluded_frames_masks_dir: Path | None = None,
+    excluded_frames_layer_prefix: str | None = None,
+):
+    """
+    CPU Cellpose. Yields once per segmented frame for ``create_worker`` progress.
+
+    Parallel path streams results via ``iter_starmap_as_completed`` so the dock
+    progress bar advances as worker processes finish (not only at the end).
+    """
+    logger.info("Starting segmentation")
+    QApplication.setOverrideCursor(Qt.WaitCursor)
+
+    data_squeezed, removed_dims = _load_segmentation_image_data(widget, demo)
+    exclude_set = exclude_frame_indices or frozenset()
+    selected_model = widget.combobox_cellpose_model.currentText()
+    parameters = _get_parameters(widget, selected_model)
+
+    logger.info("Using CPU for segmentation")
+    amount_of_processes = widget.parent.get_process_limit()
+    logger.debug("Amount of processes: " + str(amount_of_processes))
+
+    if data_squeezed.ndim == 2:
+        if 0 in exclude_set:
+            mask = np.zeros_like(data_squeezed, dtype=np.int32)
+        else:
+            mask = segment_slice_cpu(data_squeezed, parameters)
+            yield 0
+    else:
+        n_t = data_squeezed.shape[0]
+        mask = np.zeros((n_t, *data_squeezed.shape[1:]), dtype=np.int32)
+        indices_to_run = [i for i in range(n_t) if i not in exclude_set]
+        if indices_to_run:
+            data_with_parameters = [
+                (data_squeezed[i], parameters) for i in indices_to_run
+            ]
+            for task_i, layer_mask in iter_starmap_as_completed(
+                segment_slice_cpu, data_with_parameters, amount_of_processes
+            ):
+                idx = indices_to_run[task_i]
+                mask[idx] = layer_mask
+                yield idx
+
+    return _finalize_segmentation_mask(
+        widget,
+        mask,
+        data_squeezed,
+        removed_dims,
+        exclude_set,
+        copy_excluded_frames_from_layer,
+        excluded_frames_masks_dir,
+        excluded_frames_layer_prefix,
+        demo,
+    )
+
+
+def _segment_image_gpu(
+    widget,
+    demo=False,
+    exclude_frame_indices=None,
+    copy_excluded_frames_from_layer=None,
+    excluded_frames_masks_dir: Path | None = None,
+    excluded_frames_layer_prefix: str | None = None,
+):
+    """
+    GPU Cellpose. Yields once per segmented frame for ``create_worker`` progress.
+    """
+    logger.info("Starting segmentation")
+    QApplication.setOverrideCursor(Qt.WaitCursor)
+
+    data_squeezed, removed_dims = _load_segmentation_image_data(widget, demo)
+    exclude_set = exclude_frame_indices or frozenset()
+    selected_model = widget.combobox_cellpose_model.currentText()
+    parameters = _get_parameters(widget, selected_model)
+
+    logger.info("Using GPU for segmentation")
+    model = models.CellposeModel(
+        gpu=True, pretrained_model=parameters.pop("model_path")
+    )
+    if data_squeezed.ndim == 2:
+        if 0 in exclude_set:
+            mask = np.zeros_like(data_squeezed, dtype=np.int32)
+        else:
+            mask, _, _ = model.eval(data_squeezed, **parameters)
+            yield 0
+    else:
+        n_t = data_squeezed.shape[0]
+        mask = np.zeros((n_t, *data_squeezed.shape[1:]), dtype=np.int32)
+        frames_to_run = [i for i in range(n_t) if i not in exclude_set]
+        for i in frames_to_run:
+            layer_mask, _, _ = model.eval(data_squeezed[i], **parameters)
+            mask[i] = layer_mask
+            yield i
+
+    return _finalize_segmentation_mask(
+        widget,
+        mask,
+        data_squeezed,
+        removed_dims,
+        exclude_set,
+        copy_excluded_frames_from_layer,
+        excluded_frames_masks_dir,
+        excluded_frames_layer_prefix,
+        demo,
+    )
 
 
 def _get_parameters(widget, model: str):
@@ -716,40 +943,80 @@ def _get_parameters(widget, model: str):
     raise ValueError(f"Unknown model: {model!r}")
 
 
-@thread_worker(connect={"errored": handle_exception})
 def _track_segmentation(widget):
     """
-    Run tracking on the segmentation data
+    Start coordinate-based tracking with side-channel dock progress.
 
-    Parameters
-    ----------
-    widget : QWidget
-        the widget containing the viewer and the comboboxes
+    Returns a started napari worker (no ``_progress`` / no generator yields for
+    progress — see ``DockProgressReporter``).
+    """
+    parent = widget.parent
+    try:
+        data = _get_segmentation_data(widget)
+    except ValueError as exc:
+        handle_exception(exc)
+        return None
 
-    Returns
-    -------
-    widget, tracks, tracks_name
-        the widget, the tracks and the name of the tracks layer
+    n_frames = int(len(data))
+    n_pairs = max(0, n_frames - 1)
+    total = n_frames + n_pairs
+    reporter = DockProgressReporter(
+        parent,
+        total,
+        "Coordinate tracking",
+    )
+    reporter.start()
+
+    worker = create_worker(
+        _worker_track_segmentation,
+        widget,
+        data,
+        reporter,
+        _start_thread=True,
+    )
+    worker._dock_progress_reporter = reporter
+    return worker
+
+
+def _worker_track_segmentation(widget, data, reporter: DockProgressReporter):
+    """
+    Coordinate tracking. Reports progress via ``reporter`` (side channel);
+    returns the tracks array.
     """
     starttime = time.time()
     QApplication.setOverrideCursor(Qt.WaitCursor)
-    data = _get_segmentation_data(widget)
-    time1 = time.time()
-    logger.info(f"getting segmentation data took {time1 - starttime} seconds")
+    try:
+        n_workers = widget.parent.get_process_limit()
+        n_frames = int(len(data))
 
-    # these two calls are slow (30-40 seconds each)
-    extended_centroids = _calculate_centroids_parallel(widget, data)
-    time3 = time.time()
-    logger.info(f"calculating centroids took {time3 - time1} seconds")
-    matches = _match_centroids_parallel(widget, extended_centroids)
-    time4 = time.time()
-    logger.info(f"matching centroids took {time4 - time3} seconds")
+        extended_centroids = [None] * n_frames
+        for task_i, result in iter_map_as_completed(
+            calculate_centroids, data, n_workers
+        ):
+            extended_centroids[task_i] = result
+            reporter.increment()
+        time3 = time.time()
+        logger.info(f"calculating centroids took {time3 - starttime} seconds")
 
-    tracks = _process_matches(matches)
-    time5 = time.time()
-    logger.info(f"processing matches took {time5 - time4} seconds")
-    QApplication.restoreOverrideCursor()
-    return tracks
+        slice_pairs = [
+            (extended_centroids[i - 1], extended_centroids[i])
+            for i in range(1, n_frames)
+        ]
+        matches = [None] * len(slice_pairs)
+        for task_i, result in iter_map_as_completed(
+            match_centroids, slice_pairs, n_workers
+        ):
+            matches[task_i] = result
+            reporter.increment()
+        time4 = time.time()
+        logger.info(f"matching centroids took {time4 - time3} seconds")
+
+        tracks = _process_matches(matches)
+        time5 = time.time()
+        logger.info(f"processing matches took {time5 - time4} seconds")
+        return tracks
+    finally:
+        QApplication.restoreOverrideCursor()
 
 
 def _get_segmentation_data(widget):

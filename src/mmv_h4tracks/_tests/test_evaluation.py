@@ -478,7 +478,7 @@ def test_fault_value(set_widget_up, layername_seg, layername_tracks, expected_va
     Test if fault value for tracking evaluation is calculated correctly.
 
     Calls ``evaluate_curated_tracking`` synchronously (same work as the
-    ``@thread_worker`` path, without racing the UI thread).
+    worker path, without racing the UI thread).
     """
     widget = set_widget_up
     viewer = widget.viewer

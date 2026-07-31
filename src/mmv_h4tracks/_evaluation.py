@@ -16,17 +16,19 @@ from qtpy.QtWidgets import (
     QAbstractScrollArea,
 )
 from qtpy.QtGui import QIntValidator
-from napari.qt.threading import thread_worker
+from napari.qt.threading import create_worker
 from scipy import ndimage
 from scipy.optimize import linear_sum_assignment
 from numba import jit
 
-from ._concurrency import starmap_parallel
+from ._concurrency import iter_starmap_as_completed, starmap_parallel
 from ._constants import IOU_THRESHOLD, IOU_LOW_THRESHOLD
 from ._logger import notify
 from ._grabber import grab_layer
+from ._qt_utils import layer_as_numpy
 from ._utils import preserve_and_filter_graph
 from mmv_h4tracks._logger import handle_exception
+import mmv_h4tracks._processing as processing
 
 logger = logging.getLogger(__name__)
 
@@ -179,42 +181,68 @@ class EvaluationWindow(QWidget):
 
     def start_evaluate_segmentation(self):
         """
-        Start the evaluate segmentation worker to keep UI responsive
+        Start the evaluate segmentation worker to keep UI responsive.
+        Progress uses a side-channel reporter (no napari ``_progress``).
         """
         self.parent.callback_handler.remove_callback_viewer()
-        logger.info("Segmentation evaluation started…")
-        worker = self.evaluate_segmentation()
-        worker.finished.connect(
-            lambda: logger.info("Segmentation evaluation finished.")
-        )
-        worker.start()
-
-    @thread_worker
-    def evaluate_segmentation(self):
-        """
-        Evaluate the segmentation results against the curated segmentation.
-        """
+        parent = self.parent
         try:
-            gt_seg = self.parent.selected_labels_layer().data
+            gt_seg = np.asarray(layer_as_numpy(parent.selected_labels_layer()))
         except ValueError as exc:
             handle_exception(exc)
             return
-        eval_seg = self.parent.eval_cache[0]
+        eval_seg = parent.eval_cache[0]
         if eval_seg is None:
             notify(
-                "Segmentation and Tracks must be imported from zarr currently! (Drag and drop will be supported in the future). As a work-around for now export your data as zarr and import it."
+                "Segmentation and Tracks must be imported from zarr currently! "
+                "(Drag and drop will be supported in the future). As a work-around "
+                "for now export your data as zarr and import it."
             )
             return
+        eval_seg = np.asarray(eval_seg)
 
-        self.evaluate_curated_segmentation(gt_seg, eval_seg)
-        content = self.layout().itemAt(0).widget()
-        if not self.segmentation_results.isVisible():
-            content.layout().replaceWidget(self.v_spacer, self.segmentation_results)
-            content.layout().addWidget(self.v_spacer)
-            self.segmentation_results.show()
+        bounds = self._parse_evaluation_bounds(gt_seg.shape[0])
+        if bounds is None:
+            return
+        lower_bound, upper_bound = bounds
+        n_range = upper_bound - lower_bound + 1
+        # IoU range/all, DICE range/all, then one step per AP50 frame in range
+        total = 4 + n_range
+        reporter = processing.DockProgressReporter(
+            parent, total, "Seg evaluation"
+        )
+        reporter.start()
 
-    def evaluate_curated_segmentation(self, gt_seg, eval_seg):
-        """Evaluate the curated ground truth segmentation against the automatically generated segmentation."""
+        logger.info("Segmentation evaluation started…")
+        worker = create_worker(
+            self._worker_evaluate_segmentation,
+            gt_seg,
+            eval_seg,
+            lower_bound,
+            upper_bound,
+            reporter,
+            _start_thread=True,
+        )
+        worker._dock_progress_reporter = reporter
+
+        def _on_returned(result):
+            processing._stop_worker_progress_reporter(worker)
+            processing._reset_dock_progress(parent)
+            logger.info("Segmentation evaluation finished.")
+            if result is None:
+                return
+            self._apply_segmentation_eval_results(result)
+
+        def _on_errored(exc):
+            processing._stop_worker_progress_reporter(worker)
+            processing._reset_dock_progress(parent)
+            handle_exception(exc)
+
+        worker.returned.connect(_on_returned)
+        worker.errored.connect(_on_errored)
+
+    def _parse_evaluation_bounds(self, n_frames: int):
+        """Return ``(lower, upper)`` inclusive bounds, or ``None`` if invalid."""
         try:
             lower_bound = int(self.evaluation_limit_lower.text())
         except ValueError:
@@ -222,52 +250,85 @@ class EvaluationWindow(QWidget):
         try:
             upper_bound = int(self.evaluation_limit_upper.text())
         except ValueError:
-            upper_bound = gt_seg.shape[0] - 1
+            upper_bound = n_frames - 1
         if lower_bound > upper_bound:
             lower_bound, upper_bound = upper_bound, lower_bound
         if lower_bound < 0:
             lower_bound = 0
-        if upper_bound >= gt_seg.shape[0]:
-            upper_bound = gt_seg.shape[0] - 1
-
+        if upper_bound >= n_frames:
+            upper_bound = n_frames - 1
         if lower_bound == upper_bound:
-            return
+            return None
+        return lower_bound, upper_bound
 
-        ### Calculate the scores
-        # IoU
-        range_iou = self._calculate_iou(
-            gt_seg[lower_bound : upper_bound + 1],
-            eval_seg[lower_bound : upper_bound + 1],
-        )
+    def _worker_evaluate_segmentation(
+        self, gt_seg, eval_seg, lower_bound, upper_bound, reporter
+    ):
+        """Compute segmentation metrics; report progress via ``reporter``."""
+        gt_range = gt_seg[lower_bound : upper_bound + 1]
+        eval_range = eval_seg[lower_bound : upper_bound + 1]
+
+        range_iou = self._calculate_iou(gt_range, eval_range)
+        reporter.increment()
         all_iou = self._calculate_iou(gt_seg, eval_seg)
-
-        # DICE
-        range_dice = self._calculate_dice(
-            gt_seg[lower_bound : upper_bound + 1],
-            eval_seg[lower_bound : upper_bound + 1],
-        )
+        reporter.increment()
+        range_dice = self._calculate_dice(gt_range, eval_range)
+        reporter.increment()
         all_dice = self._calculate_dice(gt_seg, eval_seg)
-
-        # Average Precision 50
+        reporter.increment()
         range_ap50 = self._calculate_ap50(
-            gt_seg[lower_bound : upper_bound + 1],
-            eval_seg[lower_bound : upper_bound + 1],
+            gt_range, eval_range, on_frame=reporter.increment
         )
-        # skip all_ap50 for now, takes too long
-        # all_ap50 = self._calculate_ap50(gt_seg, eval_seg)
+        return {
+            "lower_bound": lower_bound,
+            "upper_bound": upper_bound,
+            "range_iou": range_iou,
+            "range_dice": range_dice,
+            "range_ap50": range_ap50,
+            "all_iou": all_iou,
+            "all_dice": all_dice,
+        }
 
-        ### Update the table
+    def _apply_segmentation_eval_results(self, result: dict):
+        """Update the segmentation results table (main thread)."""
         table = self.segmentation_table
+        lower_bound = result["lower_bound"]
+        upper_bound = result["upper_bound"]
         table.setVerticalHeaderItem(
             0, QTableWidgetItem(f"{lower_bound} - {upper_bound}")
         )
-        table.item(0, 0).setText(f"{round_half_up(range_iou, 3):.3f}")
-        table.item(0, 1).setText(f"{round_half_up(range_dice, 3):.3f}")
-        table.item(0, 2).setText(f"{round_half_up(range_ap50, 3):.3f}")
-        table.item(1, 0).setText(f"{round_half_up(all_iou, 3):.3f}")
-        table.item(1, 1).setText(f"{round_half_up(all_dice, 3):.3f}")
+        table.item(0, 0).setText(f"{round_half_up(result['range_iou'], 3):.3f}")
+        table.item(0, 1).setText(f"{round_half_up(result['range_dice'], 3):.3f}")
+        table.item(0, 2).setText(f"{round_half_up(result['range_ap50'], 3):.3f}")
+        table.item(1, 0).setText(f"{round_half_up(result['all_iou'], 3):.3f}")
+        table.item(1, 1).setText(f"{round_half_up(result['all_dice'], 3):.3f}")
         table.item(1, 2).setText("")
-        # table.item(1, 2).setText(f"{round_half_up(all_ap50, 3):.3f}")
+
+        content = self.layout().itemAt(0).widget()
+        if not self.segmentation_results.isVisible():
+            content.layout().replaceWidget(self.v_spacer, self.segmentation_results)
+            content.layout().addWidget(self.v_spacer)
+            self.segmentation_results.show()
+
+    def evaluate_curated_segmentation(self, gt_seg, eval_seg):
+        """Evaluate curated GT vs auto segmentation and update the results table."""
+        bounds = self._parse_evaluation_bounds(gt_seg.shape[0])
+        if bounds is None:
+            return
+        lower_bound, upper_bound = bounds
+        # Synchronous path (tests / callers): no progress reporter.
+        class _NoopReporter:
+            def increment(self, step: int = 1):
+                return 0
+
+        result = self._worker_evaluate_segmentation(
+            np.asarray(gt_seg),
+            np.asarray(eval_seg),
+            lower_bound,
+            upper_bound,
+            _NoopReporter(),
+        )
+        self._apply_segmentation_eval_results(result)
 
     def _calculate_iou(self, gt_seg, eval_seg):
         """Calculate the IoU score for two given segmentations."""
@@ -282,10 +343,15 @@ class EvaluationWindow(QWidget):
             2 * intersection / (np.count_nonzero(gt_seg) + np.count_nonzero(eval_seg))
         )
 
-    def _calculate_ap50(self, gt_seg, eval_seg):
+    def _calculate_ap50(self, gt_seg, eval_seg, on_frame=None):
         """
         Heavily based on the average_precision function from the cellpose library
         (https://github.com/MouseLand/cellpose/blob/06df602fbe074be02db3d716e280f0990816c726/cellpose/metrics.py#L73C5-L73C22)
+
+        Parameters
+        ----------
+        on_frame : callable, optional
+            Called once after each frame is processed (for progress reporting).
         """
         if gt_seg.shape != eval_seg.shape:
             raise ValueError("gt_seg and eval_seg must have the same shape")
@@ -314,6 +380,8 @@ class EvaluationWindow(QWidget):
             tp += tp_n
             fp += n_pred[n] - tp_n
             fn += n_true[n] - tp_n
+            if on_frame is not None:
+                on_frame()
         ap = tp / (tp + fp + fn)
 
         return ap
@@ -336,35 +404,157 @@ class EvaluationWindow(QWidget):
 
     def start_evaluate_tracking(self):
         """
-        Start the evaluate tracking worker to keep UI responsive
+        Start the evaluate tracking worker to keep UI responsive.
+        Progress uses a side-channel reporter (no napari ``_progress``).
         """
         self.parent.callback_handler.remove_callback_viewer()
-        logger.info("Tracking evaluation started…")
-        worker = self.evaluate_tracking()
-        worker.finished.connect(
-            lambda: logger.info("Tracking evaluation finished.")
-        )
-        worker.start()
-
-    @thread_worker
-    def evaluate_tracking(self):
-        """Evaluate the tracking results against the curated tracks."""
+        parent = self.parent
         try:
-            gt_tracks_layer = self.parent.selected_tracks_layer()
-            gt_seg = self.parent.selected_labels_layer().data
-
+            gt_tracks_layer = parent.selected_tracks_layer()
+            gt_seg = np.asarray(layer_as_numpy(parent.selected_labels_layer()))
         except ValueError as exc:
             handle_exception(exc)
             return
 
-        eval_tracks = self.parent.eval_cache[1]
-        eval_seg = self.parent.eval_cache[0]
+        eval_tracks = parent.eval_cache[1]
+        eval_seg = parent.eval_cache[0]
         if eval_tracks is None or eval_seg is None:
             notify(
-                "Segmentation and Tracks must be imported from zarr currently! (Drag and drop will be supported in the future). As a work-around for now export your data as zarr and import it."
+                "Segmentation and Tracks must be imported from zarr currently! "
+                "(Drag and drop will be supported in the future). As a work-around "
+                "for now export your data as zarr and import it."
             )
             return
-        self.evaluate_curated_tracking(gt_tracks_layer, gt_seg, eval_tracks, eval_seg)
+        eval_tracks = np.asarray(eval_tracks)
+        eval_seg = np.asarray(eval_seg)
+
+        bounds = self._parse_evaluation_bounds(gt_seg.shape[0])
+        if bounds is None:
+            return
+        lower_bound, upper_bound = bounds
+        n_range = upper_bound - lower_bound + 1
+
+        # Mutates the tracks layer — must run on the GUI thread.
+        self.adjust_centroids(gt_seg, gt_tracks_layer, (lower_bound, upper_bound))
+        prepared = self._prepare_tracking_eval_arrays(
+            gt_tracks_layer.data,
+            gt_seg,
+            eval_tracks,
+            eval_seg,
+            lower_bound,
+            upper_bound,
+        )
+
+        # FP / FN / split: one step per frame each; then track-edge faults.
+        total = 3 * n_range + 1
+        reporter = processing.DockProgressReporter(
+            parent, total, "Track evaluation"
+        )
+        reporter.start()
+
+        logger.info("Tracking evaluation started…")
+        worker = create_worker(
+            self._worker_evaluate_tracking,
+            prepared["gt_seg"],
+            prepared["gt_tracks"],
+            prepared["eval_seg"],
+            prepared["eval_tracks"],
+            lower_bound,
+            upper_bound,
+            reporter,
+            _start_thread=True,
+        )
+        worker._dock_progress_reporter = reporter
+
+        def _on_returned(result):
+            processing._stop_worker_progress_reporter(worker)
+            processing._reset_dock_progress(parent)
+            logger.info("Tracking evaluation finished.")
+            if result is None:
+                return
+            self._apply_tracking_eval_results(result)
+
+        def _on_errored(exc):
+            processing._stop_worker_progress_reporter(worker)
+            processing._reset_dock_progress(parent)
+            handle_exception(exc)
+
+        worker.returned.connect(_on_returned)
+        worker.errored.connect(_on_errored)
+
+    def _prepare_tracking_eval_arrays(
+        self,
+        gt_tracks,
+        gt_seg,
+        eval_tracks,
+        eval_seg,
+        lower_bound,
+        upper_bound,
+    ):
+        """Slice and re-index tracks/seg to the inclusive evaluation range."""
+        gt_tracks = np.asarray(gt_tracks).copy()
+        eval_tracks = np.asarray(eval_tracks).copy()
+        mask = (gt_tracks[:, 1] >= lower_bound) & (gt_tracks[:, 1] <= upper_bound)
+        gt_tracks = gt_tracks[mask]
+        gt_tracks[:, 1] -= lower_bound
+        gt_seg = np.asarray(gt_seg)[lower_bound : upper_bound + 1]
+        mask = (eval_tracks[:, 1] >= lower_bound) & (eval_tracks[:, 1] <= upper_bound)
+        eval_tracks = eval_tracks[mask]
+        eval_tracks[:, 1] -= lower_bound
+        eval_seg = np.asarray(eval_seg)[lower_bound : upper_bound + 1]
+        return {
+            "gt_tracks": gt_tracks,
+            "gt_seg": gt_seg,
+            "eval_tracks": eval_tracks,
+            "eval_seg": eval_seg,
+        }
+
+    def _worker_evaluate_tracking(
+        self,
+        gt_seg,
+        gt_tracks,
+        eval_seg,
+        eval_tracks,
+        lower_bound,
+        upper_bound,
+        reporter,
+    ):
+        """Compute tracking fault metrics; report progress via ``reporter``."""
+        fp = self.get_segmentation_fault(
+            gt_seg, eval_seg, get_false_positives, reporter=reporter
+        )
+        fn = self.get_segmentation_fault(
+            gt_seg, eval_seg, get_false_negatives, reporter=reporter
+        )
+        sc = self.get_segmentation_fault(
+            gt_seg, eval_seg, get_split_cells, reporter=reporter
+        )
+        de, ae = self.get_track_fault(gt_seg, gt_tracks, eval_seg, eval_tracks)
+        reporter.increment()
+        fv = fp + fn * 10 + sc * 5 + de + ae * 1.5
+        return {
+            "lower_bound": lower_bound,
+            "upper_bound": upper_bound,
+            "fp": fp,
+            "fn": fn,
+            "sc": sc,
+            "de": de,
+            "ae": ae,
+            "fv": fv,
+        }
+
+    def _apply_tracking_eval_results(self, result: dict):
+        """Update the tracking results table (main thread)."""
+        table = self.tracking_table
+        table.item(0, 1).setText(str(result["fp"]))
+        table.item(1, 1).setText(str(result["fn"]))
+        table.item(2, 1).setText(str(result["sc"]))
+        table.item(0, 4).setText(str(result["ae"]))
+        table.item(1, 4).setText(str(result["de"]))
+        table.item(4, 1).setText(str(result["fv"]))
+        table.item(4, 3).setText(
+            f"for slices {result['lower_bound']} - {result['upper_bound']}"
+        )
 
         content = self.layout().itemAt(0).widget()
         if not self.tracking_results.isVisible():
@@ -373,56 +563,37 @@ class EvaluationWindow(QWidget):
             self.tracking_results.show()
 
     def evaluate_curated_tracking(self, gt_tracks_layer, gt_seg, eval_tracks, eval_seg):
-        """Evaluate the curated ground truth tracking against the automatically generated tracking."""
-        try:
-            lower_bound = int(self.evaluation_limit_lower.text())
-        except ValueError:
-            lower_bound = 0
-        try:
-            upper_bound = int(self.evaluation_limit_upper.text())
-        except ValueError:
-            upper_bound = gt_seg.shape[0] - 1
-        if lower_bound > upper_bound:
-            lower_bound, upper_bound = upper_bound, lower_bound
-        if lower_bound < 0:
-            lower_bound = 0
-        if upper_bound >= gt_seg.shape[0]:
-            upper_bound = gt_seg.shape[0] - 1
-
-        if lower_bound == upper_bound:
+        """Evaluate curated GT vs auto tracking and update the results table."""
+        gt_seg = np.asarray(gt_seg)
+        bounds = self._parse_evaluation_bounds(gt_seg.shape[0])
+        if bounds is None:
             return
+        lower_bound, upper_bound = bounds
 
         self.adjust_centroids(gt_seg, gt_tracks_layer, (lower_bound, upper_bound))
+        prepared = self._prepare_tracking_eval_arrays(
+            gt_tracks_layer.data,
+            gt_seg,
+            eval_tracks,
+            eval_seg,
+            lower_bound,
+            upper_bound,
+        )
 
-        # Inclusive frame range [lower_bound, upper_bound]: seg slices and track
-        # points must share the same frames so the last edge (upper-1 → upper)
-        # can be evaluated.
-        gt_tracks = gt_tracks_layer.data
-        mask = (gt_tracks[:, 1] >= lower_bound) & (gt_tracks[:, 1] <= upper_bound)
-        gt_tracks = gt_tracks[mask]
-        gt_tracks[:, 1] -= lower_bound
-        gt_seg = gt_seg[lower_bound : upper_bound + 1]
-        mask = (eval_tracks[:, 1] >= lower_bound) & (eval_tracks[:, 1] <= upper_bound)
-        eval_tracks = eval_tracks[mask]
-        eval_tracks[:, 1] -= lower_bound
-        eval_seg = eval_seg[lower_bound : upper_bound + 1]
-        fp = self.get_segmentation_fault(gt_seg, eval_seg, get_false_positives)
-        fn = self.get_segmentation_fault(gt_seg, eval_seg, get_false_negatives)
-        sc = self.get_segmentation_fault(gt_seg, eval_seg, get_split_cells)
-        de, ae = self.get_track_fault(gt_seg, gt_tracks, eval_seg, eval_tracks)
+        class _NoopReporter:
+            def increment(self, step: int = 1):
+                return 0
 
-        fv = fp + fn * 10 + sc * 5 + de + ae * 1.5
-
-        ### Update the table
-        table = self.tracking_table
-        table.item(0, 1).setText(str(fp))
-        table.item(1, 1).setText(str(fn))
-        table.item(2, 1).setText(str(sc))
-        table.item(0, 4).setText(str(ae))
-        table.item(1, 4).setText(str(de))
-
-        table.item(4, 1).setText(str(fv))
-        table.item(4, 3).setText(f"for slices {lower_bound} - {upper_bound}")
+        result = self._worker_evaluate_tracking(
+            prepared["gt_seg"],
+            prepared["gt_tracks"],
+            prepared["eval_seg"],
+            prepared["eval_tracks"],
+            lower_bound,
+            upper_bound,
+            _NoopReporter(),
+        )
+        self._apply_tracking_eval_results(result)
 
     def adjust_centroids(self, segmentation, tracks_layer, bounds):
         """Adjust centroids in the inclusive frame range [bounds[0], bounds[1]]."""
@@ -446,22 +617,39 @@ class EvaluationWindow(QWidget):
         if filtered_graph:
             tracks_layer.graph = filtered_graph
 
-    def get_segmentation_fault(self, gt_seg, eval_seg, evaluation_function):
+    def get_segmentation_fault(
+        self, gt_seg, eval_seg, evaluation_function, reporter=None
+    ):
         """Calculate the segmentation fault value.
-        Designed for either false positives, false negatives or split cells."""
-        faults = 0
-        if np.array_equal(gt_seg, eval_seg):
-            return faults
-        amount_of_processes = self.parent.get_process_limit()
+        Designed for either false positives, false negatives or split cells.
 
-        slice_pairs = [(gt_seg[i], eval_seg[i]) for i in range(len(gt_seg))]
-        return sum(
-            starmap_parallel(
-                evaluation_function,
-                slice_pairs,
-                amount_of_processes,
+        If ``reporter`` is set, increments once per slice (or by ``len(gt_seg)``
+        on the identical-stack shortcut) for dock progress.
+        """
+        n_slices = len(gt_seg)
+        if np.array_equal(gt_seg, eval_seg):
+            if reporter is not None:
+                reporter.increment(n_slices)
+            return 0
+        amount_of_processes = self.parent.get_process_limit()
+        slice_pairs = [(gt_seg[i], eval_seg[i]) for i in range(n_slices)]
+
+        if reporter is None:
+            return sum(
+                starmap_parallel(
+                    evaluation_function,
+                    slice_pairs,
+                    amount_of_processes,
+                )
             )
-        )
+
+        faults = 0
+        for _, result in iter_starmap_as_completed(
+            evaluation_function, slice_pairs, amount_of_processes
+        ):
+            faults += result
+            reporter.increment()
+        return faults
 
     def get_track_fault(self, gt_seg, gt_tracks, eval_seg, eval_tracks):
         """

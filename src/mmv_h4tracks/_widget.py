@@ -32,7 +32,7 @@ from napari.layers.tracks.tracks import Tracks
 from ._assistant import AssistantWindow
 from ._analysis import AnalysisWindow
 from ._evaluation import EvaluationWindow
-from ._constants import DEFAULT_TRACKS_LAYER_NAME
+from ._constants import DEFAULT_TRACKS_LAYER_NAME, STATUS_READY
 from ._logger import choice_dialog, notify
 
 from ._reader import (
@@ -158,12 +158,16 @@ class MMVH4TRACKS(QWidget):
             self.combobox_tracks,
         ]
 
-        # Progress bar
+        # Progress bar + status (status below the bar)
         self.progress_bar = QProgressBar()
         self.progress_bar.setTextVisible(True)
-        self.progress_bar.setFormat("Dummy Loading %p%")
+        self.progress_bar.setFormat("")
         self.progress_bar.setMaximum(1)
-        # self.progress_bar.setValue(42)
+        self.progress_bar.setValue(0)
+
+        self.status_label = QLabel(STATUS_READY)
+        self.status_label.setWordWrap(True)
+        self.status_label.setStyleSheet("color: #aaaaaa;")
 
         # Horizontal lines
         line = QWidget()
@@ -265,6 +269,7 @@ class MMVH4TRACKS(QWidget):
         widget.layout().addWidget(h_spacer_5, 10, 0, 1, -1)
         widget.layout().addWidget(tabwidget, 11, 0, 1, -1)
         widget.layout().addWidget(self.progress_bar, 12, 0, 1, -1)
+        widget.layout().addWidget(self.status_label, 13, 0, 1, -1)
 
         # Scrollarea allows content to be larger than the assigned space (small monitor)
         scroll_area = QScrollArea()
@@ -1030,5 +1035,13 @@ class MMVH4TRACKS(QWidget):
         """
         self.progress_bar.setFormat(text + " %p%")
         self.progress_bar.setTextVisible(True)
+
+    def set_status_text(self, text: str):
+        """Set the status line below the progress bar."""
+        self.status_label.setText(text)
+
+    def clear_status(self):
+        """Reset the status line to the idle message."""
+        self.status_label.setText(STATUS_READY)
 
 
