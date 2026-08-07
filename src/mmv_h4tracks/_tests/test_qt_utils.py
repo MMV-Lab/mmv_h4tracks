@@ -15,6 +15,15 @@ class _FakeLayer:
 
 
 @pytest.mark.unit
+def test_layer_as_numpy_ignores_multiscale_flag_on_shaped_array():
+    """Truthy ``multiscale`` must not treat a TZYX/ZYX ndarray as pyramid levels."""
+    arr = np.arange(2 * 4 * 5).reshape(2, 4, 5)
+    out = layer_as_numpy(_FakeLayer(arr, multiscale=True))
+    assert out.shape == (2, 4, 5)
+    assert np.array_equal(out, arr)
+
+
+@pytest.mark.unit
 def test_layer_as_numpy_single_scale():
     arr = np.arange(12).reshape(3, 4)
     out = layer_as_numpy(_FakeLayer(arr))

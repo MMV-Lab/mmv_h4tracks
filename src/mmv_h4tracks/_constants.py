@@ -20,6 +20,7 @@ CONFIRM_TEXT = "Confirm"
 
 # Dock status line (below progress bar)
 STATUS_READY = "Ready"
+STATUS_LOADING_CELLPOSE = "Loading Cellpose…"
 STATUS_AWAITING_USER = "Waiting for user input…"
 STATUS_CLICK_TRACK_CELL = "Click a cell to track…"
 STATUS_CLICK_REMOVE_CELL = "Click a cell to remove…"

@@ -6,7 +6,6 @@ from datetime import datetime
 from pathlib import Path
 
 import numpy as np
-from cellpose import models, core
 from napari.qt.threading import create_worker
 from qtpy.QtCore import Qt, QThread, QObject, Signal
 from qtpy.QtWidgets import QApplication, QMessageBox
@@ -49,6 +48,43 @@ handler.setFormatter(
 logger.addHandler(handler)
 logger.debug("logger initialized")
 
+# Cellpose/torch are heavy; import only when needed (and optionally warm on a worker).
+_cellpose_models = None
+_cellpose_core = None
+_cellpose_import_lock = threading.Lock()
+
+
+def _get_cellpose():
+    """Return ``(models, core)``, importing Cellpose on first use."""
+    global _cellpose_models, _cellpose_core
+    if _cellpose_models is None:
+        with _cellpose_import_lock:
+            if _cellpose_models is None:
+                from cellpose import models, core
+
+                _cellpose_models = models
+                _cellpose_core = core
+    return _cellpose_models, _cellpose_core
+
+
+def _worker_warm_cellpose() -> bool:
+    """Import Cellpose and report GPU availability (runs off the GUI thread)."""
+    _, core = _get_cellpose()
+    try:
+        return bool(core.use_gpu())
+    except Exception:
+        return False
+
+
+def start_cellpose_warmup(*, on_finished) -> None:
+    """
+    Prefetch Cellpose/torch on a napari worker, then call ``on_finished(gpu_ok)``
+    on the GUI thread when done.
+    """
+    worker = create_worker(_worker_warm_cellpose)
+    worker.returned.connect(on_finished)
+    worker.start()
+
 
 def segment_slice_cpu(layer_slice, parameters):
     """
@@ -72,6 +108,7 @@ def segment_slice_cpu(layer_slice, parameters):
         + str(starttime)
     )
     logger.info("Segmentation process started")
+    models, _ = _get_cellpose()
     model = models.CellposeModel(gpu=False, pretrained_model=parameters["model_path"])
     eval_params = {k: v for k, v in parameters.items() if k != "model_path"}
     mask, _, _ = model.eval(layer_slice, **eval_params)
@@ -533,6 +570,7 @@ def run_demo_segmentation(widget):
 
 def _segmentation_progress(widget, exclude_frame_indices, demo: bool = False):
     """Build a dock progress dict for Cellpose (GPU or CPU)."""
+    _, core = _get_cellpose()
     use_gpu = core.use_gpu()
     desc = "Cellpose (GPU)" if use_gpu else "Cellpose (CPU)"
     try:
@@ -874,6 +912,7 @@ def _start_segmentation_worker(
 ):
     """Start Cellpose on a worker with dock progress (CPU and GPU)."""
     parent = widget.parent
+    _, core = _get_cellpose()
     progress = _segmentation_progress(widget, exclude_frame_indices, demo)
     worker_fn = _segment_image_gpu if core.use_gpu() else _segment_image_cpu
     backend = "GPU" if core.use_gpu() else "CPU"
@@ -1055,6 +1094,7 @@ def _segment_image_gpu(
     parameters = _get_parameters(widget, selected_model)
 
     logger.info("Using GPU for segmentation")
+    models, _ = _get_cellpose()
     model = models.CellposeModel(
         gpu=True, pretrained_model=parameters.pop("model_path")
     )
@@ -1366,7 +1406,8 @@ def _process_matches(matches):
 
 def scan_mmvh4tracks_training_temp_on_startup(main_widget) -> None:
     """
-    On plugin load: clean stale training temp dirs; offer to resume interrupted training.
+    After Cellpose warm-up: clean stale training temp dirs; offer to resume
+    interrupted training.
     """
     from ._train import (
         _safe_rmtree,

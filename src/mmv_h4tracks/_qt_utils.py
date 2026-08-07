@@ -114,13 +114,17 @@ def layer_as_numpy(layer) -> np.ndarray:
     levels = _iter_multiscale_levels(data)
     if levels is None and getattr(layer, "multiscale", False):
         # Flagged multiscale but unusual container — try indexing.
-        try:
-            levels = [data[i] for i in range(len(data))]
-        except Exception as exc:
-            raise ValueError(
-                f"Could not read multiscale levels from layer "
-                f"{getattr(layer, 'name', layer)!r}"
-            ) from exc
+        # Skip when ``data`` already has a ``shape`` (ndarray / dask / zarr): a
+        # truthy ``multiscale`` on mocks or mis-set flags must not treat T/Z as
+        # pyramid levels.
+        if not hasattr(data, "shape"):
+            try:
+                levels = [data[i] for i in range(len(data))]
+            except Exception as exc:
+                raise ValueError(
+                    f"Could not read multiscale levels from layer "
+                    f"{getattr(layer, 'name', layer)!r}"
+                ) from exc
 
     if levels is not None:
         if len(levels) == 0:

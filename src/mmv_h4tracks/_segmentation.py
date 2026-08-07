@@ -226,6 +226,13 @@ class SegmentationWindow(QWidget):
         content.layout().addWidget(v_spacer)
 
         self.layout().addWidget(content)
+        self.apply_cellpose_ready_state()
+
+    def apply_cellpose_ready_state(self) -> None:
+        """Enable/disable Cellpose actions based on parent warm-up flag."""
+        ready = bool(getattr(self.parent, "_cellpose_ready", False))
+        self.btn_train_cellpose_model.setEnabled(ready)
+        self.toggle_segmentation_button(self.combobox_cellpose_model.currentText())
 
     def segment(self):
         """
@@ -356,6 +363,9 @@ class SegmentationWindow(QWidget):
         text : str
             the text of the combobox
         """
+        if not getattr(self.parent, "_cellpose_ready", False):
+            self.btn_segment.setEnabled(False)
+            return
         if text == "selected model":
             self.btn_segment.setEnabled(False)
         else:

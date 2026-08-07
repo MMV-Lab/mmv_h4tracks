@@ -33,7 +33,7 @@ from napari.layers.tracks.tracks import Tracks
 from ._assistant import AssistantWindow
 from ._analysis import AnalysisWindow
 from ._evaluation import EvaluationWindow
-from ._constants import DEFAULT_TRACKS_LAYER_NAME, STATUS_READY
+from ._constants import DEFAULT_TRACKS_LAYER_NAME, STATUS_READY, STATUS_LOADING_CELLPOSE
 from ._logger import choice_dialog, notify, handle_exception
 
 from ._reader import (
@@ -104,6 +104,8 @@ class MMVH4TRACKS(QWidget):
         # session Cellpose models: display_name -> {training_masks_dir, layer_prefix, frames}
         self.session_trained_models: dict[str, dict] = {}
         self._session_trained_layer_ids_hooked: set[int] = set()
+        # False until Cellpose/torch warm-up finishes (gates Segment / Train).
+        self._cellpose_ready = False
 
         ### QObjects
 
@@ -215,19 +217,8 @@ class MMVH4TRACKS(QWidget):
         computation_mode.layout().addWidget(rb_heavy, 1, 1)
         computation_mode.layout().setColumnStretch(2, 1)
 
-        self.label_gpu_status = QLabel()
-        try:
-            from cellpose import core as _cellpose_core
-
-            _gpu_ok = bool(_cellpose_core.use_gpu())
-        except Exception:
-            _gpu_ok = False
-        if _gpu_ok:
-            self.label_gpu_status.setText("GPU: available")
-            self.label_gpu_status.setStyleSheet("color: #6a9e6a;")
-        else:
-            self.label_gpu_status.setText("GPU: not available")
-            self.label_gpu_status.setStyleSheet("color: #888888;")
+        self.label_gpu_status = QLabel("GPU: checking…")
+        self.label_gpu_status.setStyleSheet("color: #888888;")
         self.label_gpu_status.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         computation_mode.layout().addWidget(self.label_gpu_status, 1, 2)
 
@@ -321,10 +312,32 @@ class MMVH4TRACKS(QWidget):
                 combobox.addItem("")
         self.viewer.layers.events.moving.connect(self.reorder_entry_in_comboboxes)
 
-        QTimer.singleShot(
-            0,
-            lambda: mmv_processing.scan_mmvh4tracks_training_temp_on_startup(self),
-        )
+        # Import Cellpose/torch off the GUI thread after the dock is shown.
+        # Resume-interrupted-training scan runs only after warm-up finishes.
+        QTimer.singleShot(0, self._start_cellpose_warmup)
+
+    def _start_cellpose_warmup(self) -> None:
+        if getattr(self, "_cellpose_warmup_started", False):
+            return
+        self._cellpose_warmup_started = True
+        self._cellpose_ready = False
+        self.segmentation_window.apply_cellpose_ready_state()
+        if self.status_label.text() == STATUS_READY:
+            self.status_label.setText(STATUS_LOADING_CELLPOSE)
+        mmv_processing.start_cellpose_warmup(on_finished=self._on_cellpose_warmup_finished)
+
+    def _on_cellpose_warmup_finished(self, gpu_ok: bool) -> None:
+        if gpu_ok:
+            self.label_gpu_status.setText("GPU: available")
+            self.label_gpu_status.setStyleSheet("color: #6a9e6a;")
+        else:
+            self.label_gpu_status.setText("GPU: not available")
+            self.label_gpu_status.setStyleSheet("color: #888888;")
+        self._cellpose_ready = True
+        self.segmentation_window.apply_cellpose_ready_state()
+        if self.status_label.text() == STATUS_LOADING_CELLPOSE:
+            self.status_label.setText(STATUS_READY)
+        mmv_processing.scan_mmvh4tracks_training_temp_on_startup(self)
 
     def selected_image_layer(self):
         """Return the Image layer named in combobox_image. Raises ValueError if blank/missing."""

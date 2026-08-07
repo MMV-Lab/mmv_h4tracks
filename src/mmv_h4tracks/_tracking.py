@@ -1400,7 +1400,7 @@ class TrackingWindow(QWidget):
             parent.align_cache = label_data
             notify("Centroids updated.")
 
-        processing.run_with_dock_progress(
+        return processing.run_with_dock_progress(
             parent,
             self._worker_update_all_centroids,
             label_data,

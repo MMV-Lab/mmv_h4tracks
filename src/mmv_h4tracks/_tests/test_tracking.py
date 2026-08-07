@@ -1115,13 +1115,19 @@ def test_update_centroid_medoid(widget_with_seg_trk):
 
 @pytest.mark.integration
 @pytest.mark.misc
-def test_update_all_centroids_manual(widget_with_seg_trk):
+@patch("mmv_h4tracks._tracking.notify")
+def test_update_all_centroids_manual(mock_notify, widget_with_seg_trk, qtbot):
     widget = widget_with_seg_trk
     window = widget.tracking_window
 
-    # run update_all_centroids
-    window.update_all_centroids()
-    assert True
+    worker = window.update_all_centroids()
+    assert worker is not None
+    with qtbot.waitSignal(worker.returned, timeout=60000):
+        pass
+    # ``on_returned`` (and thus notify) may be posted to the GUI thread after
+    # the raw worker ``returned`` signal.
+    qtbot.waitUntil(lambda: mock_notify.called, timeout=10000)
+    mock_notify.assert_called_with("Centroids updated.")
 
 # @pytest.mark.integration
 # @pytest.mark.misc
