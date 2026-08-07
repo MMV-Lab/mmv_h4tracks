@@ -31,7 +31,7 @@ from ._custom_models import (
 from ._grabber import grab_layer
 from ._session_trained_models import overlap_training_frames_with_stack
 from ._logger import handle_exception, notify
-from ._qt_utils import layer_as_numpy, _iter_multiscale_levels
+from ._qt_utils import layer_as_numpy, _iter_multiscale_levels, awaiting_user_dialog
 from ._train import CELLPOSE_TRAIN_N_EPOCHS_DEFAULT, _sanitize_model_name_fragment
 
 logger = logging.getLogger(__name__)
@@ -498,13 +498,14 @@ def _prompt_exclude_training_frames_if_applicable(
         "(Yes: predict only other frames; training frames are filled from disk. "
         "No: run Cellpose on the full stack.)"
     )
-    reply = QMessageBox.question(
-        widget,
-        "napari",
-        text,
-        QMessageBox.Yes | QMessageBox.No,
-        QMessageBox.Yes,
-    )
+    with awaiting_user_dialog(widget):
+        reply = QMessageBox.question(
+            widget,
+            "napari",
+            text,
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.Yes,
+        )
     if reply != QMessageBox.Yes:
         return None
     masks_dir = Path(meta["training_masks_dir"])
@@ -1389,14 +1390,15 @@ def scan_mmvh4tracks_training_temp_on_startup(main_widget) -> None:
         mtime = datetime.fromtimestamp(d.stat().st_mtime)
         day_str = mtime.strftime("%Y-%m-%d %H:%M")
         fragment = parse_model_fragment_from_train_dir_name(d.name) or d.name
-        reply = QMessageBox.question(
-            main_widget,
-            "napari",
-            f"It seems training on data {fragment} on {day_str} was interrupted.\n\n"
-            "Would you like to try again?",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No,
-        )
+        with awaiting_user_dialog(main_widget):
+            reply = QMessageBox.question(
+                main_widget,
+                "napari",
+                f"It seems training on data {fragment} on {day_str} was interrupted.\n\n"
+                "Would you like to try again?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
         if reply != QMessageBox.Yes:
             _safe_rmtree(d)
             continue

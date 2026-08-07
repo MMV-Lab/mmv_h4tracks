@@ -20,7 +20,7 @@ from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from skimage import measure
 
 from ._concurrency import starmap_parallel
-from ._qt_utils import apply_napari_dark_theme
+from ._qt_utils import apply_napari_dark_theme, awaiting_user_dialog
 
 from mmv_h4tracks._logger import handle_exception
 from ._selector import Selector
@@ -880,7 +880,8 @@ class AnalysisWindow(QWidget):
             )
             msg.addButton("Display all && export", QMessageBox.AcceptRole)
             msg.addButton(QMessageBox.Cancel)
-            retval = msg.exec()
+            with awaiting_user_dialog(self.parent):
+                retval = msg.exec()
             if retval != 0:
                 return
             self.parent.tracking_window.display_cached_tracks()
@@ -889,18 +890,21 @@ class AnalysisWindow(QWidget):
             msg = QMessageBox()
             msg.setWindowTitle("napari")
             msg.setText("Please select at least one metric to export!")
-            msg.exec()
+            with awaiting_user_dialog(self.parent):
+                msg.exec()
             return
 
         if self.parent.combobox_tracks.currentText() == "":
             msg = QMessageBox()
             msg.setWindowTitle("napari")
             msg.setText("No label layer to extract metrics found!")
-            msg.exec()
+            with awaiting_user_dialog(self.parent):
+                msg.exec()
             return
 
         dialog = QFileDialog()
-        file = dialog.getSaveFileName(filter="*.csv")
+        with awaiting_user_dialog(self.parent):
+            file = dialog.getSaveFileName(filter="*.csv")
         if file[0] == "":
             return
 

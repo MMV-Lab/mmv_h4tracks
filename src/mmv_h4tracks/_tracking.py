@@ -1,3 +1,5 @@
+import logging
+
 import numpy as np
 import pandas as pd
 from napari.qt.threading import thread_worker
@@ -24,11 +26,16 @@ from ._constants import (
     MIN_TRACK_LENGTH,
     MIN_OVERLAP,
     DEFAULT_TRACKS_LAYER_NAME,
+    STATUS_CLICK_TRACK_CELL,
+    STATUS_CLICK_LINK_CELLS,
+    STATUS_CLICK_UNLINK_CELLS,
 )
 from ._logger import notify, choice_dialog, handle_exception
 from ._utils import preserve_and_filter_graph
-from ._qt_utils import apply_napari_dark_theme, layer_as_numpy
+from ._qt_utils import apply_napari_dark_theme, awaiting_user_dialog, layer_as_numpy
 import mmv_h4tracks._processing as processing
+
+logger = logging.getLogger(__name__)
 
 
 class TrackingWindow(QWidget):
@@ -58,6 +65,7 @@ class TrackingWindow(QWidget):
         self.cached_tracks = None
         self.cached_graph = None
         self.selected_cells = []
+        self._selection_frame_history = []
 
         ### QObjects
 
@@ -318,6 +326,7 @@ class TrackingWindow(QWidget):
             self._overlap_tracking_click_callback
         )
         QApplication.setOverrideCursor(Qt.CrossCursor)
+        self.parent.set_status_text(STATUS_CLICK_TRACK_CELL)
 
     def single_overlap_tracking_on_click(self, *_):
         """Button path: wait for the next click on a cell to track."""
@@ -335,6 +344,7 @@ class TrackingWindow(QWidget):
             self._overlap_tracking_click_callback
         )
         QApplication.setOverrideCursor(Qt.CrossCursor)
+        self.parent.set_status_text(STATUS_CLICK_TRACK_CELL)
 
     def _overlap_tracking_click_callback(self, _, event):
         """One-shot mouse callback: overlap-track the clicked label."""
@@ -506,10 +516,11 @@ class TrackingWindow(QWidget):
         """
         tracks = tracks_layer.data
         tracks[tracks[:, 0] == old_id, 0] = new_id
+
         df = pd.DataFrame(tracks, columns=["ID", "Z", "Y", "X"])
         df.sort_values(["ID", "Z"], ascending=True, inplace=True)
         updated_tracks = df.values
-        
+
         # Get the current graph and update it BEFORE filtering
         graph = getattr(tracks_layer, 'graph', {}) or {}
         updated_graph = {}
@@ -522,16 +533,16 @@ class TrackingWindow(QWidget):
                 updated_graph[new_id] = updated_parents
             else:
                 updated_graph[track_id_int] = updated_parents
-        
+
         # Now filter the updated graph based on the new tracks data
         # Create a temporary tracks_layer-like object with the updated graph
         class TempTracksLayer:
             def __init__(self, graph):
                 self.graph = graph
-        
+
         temp_layer = TempTracksLayer(updated_graph)
         filtered_graph = preserve_and_filter_graph(temp_layer, updated_tracks)
-        
+
         tracks_layer.data = updated_tracks
         if filtered_graph:
             tracks_layer.graph = filtered_graph
@@ -580,6 +591,10 @@ class TrackingWindow(QWidget):
                 if cell not in self.selected_cells:
                     self.selected_cells.append(cell)
                     self.selected_cells.sort()
+                    self._selection_frame_history.append(int(cell[0]))
+                    self.parent.set_status_text(
+                        f"Last selected frame: {self._selection_frame_history[-1]}"
+                    )
             except ValueError as exc:
                 handle_exception(exc)
                 self.parent.callback_handler.remove_callback_viewer()
@@ -595,17 +610,20 @@ class TrackingWindow(QWidget):
                 )
                 msg.addButton("Display all", QMessageBox.AcceptRole)
                 msg.addButton(QMessageBox.Cancel)
-                retval = msg.exec()
+                with awaiting_user_dialog(self.parent):
+                    retval = msg.exec()
                 if retval != 0:
                     return
                 self.parent.tracking_window.display_cached_tracks()
             self.reset_button_labels()
             self.selected_cells = []
+            self._selection_frame_history = []
             self.btn_insert_correspondence.setText(CONFIRM_TEXT)
             self.parent.callback_handler.add_callback_viewer(
                 store_cell_for_link, keep_tracking=True
             )
             QApplication.setOverrideCursor(Qt.CrossCursor)
+            self.parent.set_status_text(STATUS_CLICK_LINK_CELLS)
         else:
             self.reset_button_labels()
             self.parent.callback_handler.remove_callback_viewer(keep_tracking=True)
@@ -617,7 +635,8 @@ class TrackingWindow(QWidget):
                 )
                 msg.addButton("Display all", QMessageBox.AcceptRole)
                 msg.addButton(QMessageBox.Cancel)
-                retval = msg.exec()
+                with awaiting_user_dialog(self.parent):
+                    retval = msg.exec()
                 if retval != 0:
                     return
                 self.parent.tracking_window.display_cached_tracks()
@@ -631,28 +650,42 @@ class TrackingWindow(QWidget):
         if len(self.selected_cells) < 2:
             notify("Please select more than one cell to connect!")
             return
-        
+
         tracks_layer = self.get_tracks_layer()
+
         # check which tracks have been clicked
         track_id_matches = []
-        for cell in self.selected_cells:
-            if tracks_layer is None:
-                break
-            for track_line in tracks_layer.data:
-                if np.all(track_line[1:4] == cell):
-                    track_id_matches.append(int(track_line[0]))
+        if tracks_layer is not None and len(tracks_layer.data) > 0:
+            position_to_track_id = {
+                (int(z), int(y), int(x)): int(tid)
+                for tid, z, y, x in tracks_layer.data[:, :4]
+            }
+            for cell in self.selected_cells:
+                track_id = position_to_track_id.get(
+                    (int(cell[0]), int(cell[1]), int(cell[2]))
+                )
+                if track_id is not None:
+                    track_id_matches.append(track_id)
 
         track_id_matches = sorted(list(set(track_id_matches)))
         selected_cells_array = np.array(self.selected_cells)
 
         # auto select all cells from those tracks
         if len(track_id_matches) > 0:
+            selected_positions = {
+                (int(z), int(y), int(x)) for z, y, x in self.selected_cells
+            }
             for track_id in track_id_matches:
                 track = tracks_layer.data[tracks_layer.data[:, 0] == track_id]
                 for track_line in track:
-                    # avoid adding duplicates
-                    if not np.any(np.all(track_line[1:4] == selected_cells_array, axis=1)):
-                        self.selected_cells.append(track_line[1:4].astype(int).tolist())
+                    pos = (
+                        int(track_line[1]),
+                        int(track_line[2]),
+                        int(track_line[3]),
+                    )
+                    if pos not in selected_positions:
+                        selected_positions.add(pos)
+                        self.selected_cells.append(list(pos))
 
         self.selected_cells = sorted(self.selected_cells, key=lambda x: x[0])
         selected_cells_array = np.array(self.selected_cells)
@@ -666,7 +699,7 @@ class TrackingWindow(QWidget):
                 f"Looks like you selected multiple cells in slice {most_common_value}. You can only connect cells from different slices."
             )
             return
-        
+
         # assure there is no gap in z between the selected cells
         if (
             np.max(np.asarray(self.selected_cells)[:, 0])
@@ -694,21 +727,21 @@ class TrackingWindow(QWidget):
 
         entries_to_add = []
         # check which clicked cells are not already in the tracks
-        for cell in self.selected_cells:
-            if tracks_layer is None:
-                entries_to_add = self.selected_cells
-                break
-            tracked = False
-            for track_line in tracks_layer.data:
-                if np.all(track_line[1:4] == cell):
-                    tracked = True
-                    break
-            if not tracked:
-                entries_to_add.append(cell)
-                
+        if tracks_layer is None:
+            entries_to_add = list(self.selected_cells)
+        else:
+            tracked_positions = {
+                (int(z), int(y), int(x))
+                for z, y, x in tracks_layer.data[:, 1:4]
+            }
+            entries_to_add = [
+                cell
+                for cell in self.selected_cells
+                if (int(cell[0]), int(cell[1]), int(cell[2])) not in tracked_positions
+            ]
+
         # determine the track id to use
         # either use lowest id of clicked tracks or lowest missing id
-
         if tracks_layer is not None:
             track_ids = set(track_line[0] for track_line in tracks_layer.data)
         else:
@@ -717,6 +750,7 @@ class TrackingWindow(QWidget):
         while lowest_missing_id in track_ids:
             lowest_missing_id += 1
         track_id = track_id_matches[0] if len(track_id_matches) > 0 else lowest_missing_id
+
         if len(entries_to_add) > 0:
             self.add_entries_to_tracks(entries_to_add, track_id)
 
@@ -757,6 +791,16 @@ class TrackingWindow(QWidget):
                 if cell not in self.selected_cells:
                     self.selected_cells.append(cell)
                     self.selected_cells.sort(key=lambda x: x[0])
+                    self._selection_frame_history.append(int(cell[0]))
+                    recent = self._selection_frame_history[-2:]
+                    if len(recent) == 1:
+                        self.parent.set_status_text(
+                            f"Last selected frames: {recent[0]}"
+                        )
+                    else:
+                        self.parent.set_status_text(
+                            f"Last selected frames: {recent[0]}, {recent[1]}"
+                        )
             except ValueError as exc:
                 handle_exception(exc)
                 self.parent.callback_handler.remove_callback_viewer()
@@ -766,11 +810,13 @@ class TrackingWindow(QWidget):
         if self.btn_remove_correspondence.text() == UNLINK_TEXT:
             self.reset_button_labels()
             self.selected_cells = []
+            self._selection_frame_history = []
             self.btn_remove_correspondence.setText(CONFIRM_TEXT)
             self.parent.callback_handler.add_callback_viewer(
                 store_cell_for_unlink, keep_tracking=True
             )
             QApplication.setOverrideCursor(Qt.CrossCursor)
+            self.parent.set_status_text(STATUS_CLICK_UNLINK_CELLS)
         else:
             self.reset_button_labels()
             self.parent.callback_handler.remove_callback_viewer(keep_tracking=True)
@@ -984,7 +1030,8 @@ class TrackingWindow(QWidget):
                 )
                 msg.setWindowTitle("Delete all displayed tracks")
                 msg.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
-                ret = msg.exec_()
+                with awaiting_user_dialog(self.parent):
+                    ret = msg.exec_()
                 if ret == QMessageBox.Yes:
                     self.viewer.layers.remove(tracks_layer.name)
                     self.viewer.layers.select_next()
@@ -1043,7 +1090,8 @@ class TrackingWindow(QWidget):
             )
             msg.setWindowTitle("Delete all tracks")
             msg.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
-            ret = msg.exec_()
+            with awaiting_user_dialog(self.parent):
+                ret = msg.exec_()
             if ret == QMessageBox.No:
                 return
             self.viewer.layers.remove(tracks_layer.name)
@@ -1216,7 +1264,8 @@ class TrackingWindow(QWidget):
             msg.setText("All selected cells are already tracked.")
             msg.setWindowTitle("No cells to add.")
             msg.setStandardButtons(QMessageBox.Ok)
-            msg.exec_()
+            with awaiting_user_dialog(self.parent):
+                msg.exec_()
             return
 
         # assume that a track is being reassigned if cache exists

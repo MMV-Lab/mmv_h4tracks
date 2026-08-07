@@ -8,6 +8,7 @@ import zarr
 from ome_zarr.io import parse_url
 from ome_zarr.writer import write_image, write_labels
 from ._logger import notify
+from ._qt_utils import awaiting_user_dialog
 
 
 def save_dialog(parent, filetype="*.ome.zarr", directory=""):
@@ -31,11 +32,12 @@ def save_dialog(parent, filetype="*.ome.zarr", directory=""):
     dialog = QFileDialog()
     dialog.setNameFilter(filetype)
     filetype_name = filetype[2:].capitalize()
-    filepath = dialog.getSaveFileName(
-        parent,
-        f"Select location for {filetype_name}-File to be created",
-        directory,
-    )
+    with awaiting_user_dialog(parent):
+        filepath = dialog.getSaveFileName(
+            parent,
+            f"Select location for {filetype_name}-File to be created",
+            directory,
+        )
     return filepath
 
 def write_zarr_data(file, raw_image, segmentation, tracks, reporter=None):

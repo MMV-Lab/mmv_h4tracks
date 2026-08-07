@@ -52,6 +52,7 @@ from ._session_trained_models import (
     register_session_trained_model as _register_session_trained_model_store,
 )
 from ._utils import CallbackHandler
+from ._qt_utils import awaiting_user_dialog, register_dock_status_host
 
 import mmv_h4tracks._processing as mmv_processing
 
@@ -169,6 +170,7 @@ class MMVH4TRACKS(QWidget):
         self.status_label = QLabel(STATUS_READY)
         self.status_label.setWordWrap(True)
         self.status_label.setStyleSheet("color: #aaaaaa;")
+        register_dock_status_host(self)
 
         # Horizontal lines
         line = QWidget()
@@ -389,9 +391,10 @@ class MMVH4TRACKS(QWidget):
             return
         
         # Open file dialog filtered to .txt files
-        retval = QFileDialog().getOpenFileName(
-            self, "Select Lineage File", "", "Text files (*.txt)"
-        )
+        with awaiting_user_dialog(self):
+            retval = QFileDialog().getOpenFileName(
+                self, "Select Lineage File", "", "Text files (*.txt)"
+            )
         filepath = retval[0]
         
         # Return early if user canceled
@@ -675,7 +678,8 @@ class MMVH4TRACKS(QWidget):
                 msg.addButton(QMessageBox.Yes)
                 msg.addButton(QMessageBox.YesToAll)
                 msg.addButton(QMessageBox.Cancel)
-                ret = msg.exec()
+                with awaiting_user_dialog(self):
+                    ret = msg.exec()
 
                 # Cancel
                 if ret == QMessageBox.Cancel:
@@ -989,7 +993,8 @@ class MMVH4TRACKS(QWidget):
             notify("Some tracks are not displayed, not saving")
             return
         dialog = QFileDialog()
-        path = f"{dialog.getSaveFileName()[0]}"
+        with awaiting_user_dialog(self):
+            path = f"{dialog.getSaveFileName()[0]}"
         if not path.endswith(".zarr"):
             path += ".zarr"
         if path == ".zarr":

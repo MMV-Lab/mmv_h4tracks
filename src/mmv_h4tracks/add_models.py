@@ -15,7 +15,7 @@ from qtpy.QtGui import QRegularExpressionValidator
 import mmv_h4tracks._processing as processing
 from mmv_h4tracks._constants import CUSTOM_MODEL_PREFIX
 from mmv_h4tracks._logger import notify
-from mmv_h4tracks._qt_utils import apply_napari_dark_theme
+from mmv_h4tracks._qt_utils import apply_napari_dark_theme, awaiting_user_dialog
 
 SHOW_OPTIONS_TEXT = "Show advanced options"
 HIDE_OPTIONS_TEXT = "Hide advanced options"
@@ -171,7 +171,8 @@ class ModelWindow(QWidget):
         """
         Opens a file dialog to select a custom Cellpose model
         """
-        retval = QFileDialog().getOpenFileName(self, "Select Cellpose Model")
+        with awaiting_user_dialog(self.parent):
+            retval = QFileDialog().getOpenFileName(self, "Select Cellpose Model")
         if retval[0] == "":
             return
         self.model_path = retval[0]

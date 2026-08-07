@@ -1,5 +1,7 @@
 from qtpy.QtWidgets import QMessageBox, QApplication
 
+from ._qt_utils import awaiting_user_dialog
+
 
 def notify(text):
     """
@@ -10,10 +12,11 @@ def notify(text):
     text : str
         The text displayed as the notification
     """
-    msg = QMessageBox()
-    msg.setWindowTitle("napari")
-    msg.setText(text)
-    msg.exec()
+    with awaiting_user_dialog():
+        msg = QMessageBox()
+        msg.setWindowTitle("napari")
+        msg.setText(text)
+        msg.exec()
 
 
 def choice_dialog(text, choices):
@@ -27,15 +30,16 @@ def choice_dialog(text, choices):
     choices : list of tuple or types of buttons
         Tuples of the potential choices, consisting of ("button text", "button type") or button types
     """
-    msg = QMessageBox()
-    msg.setWindowTitle("napari")
-    msg.setText(text)
-    for choice in choices:
-        if type(choice) is tuple:
-            msg.addButton(choice[0], choice[1])
-        else:
-            msg.addButton(choice)
-    return msg.exec()
+    with awaiting_user_dialog():
+        msg = QMessageBox()
+        msg.setWindowTitle("napari")
+        msg.setText(text)
+        for choice in choices:
+            if type(choice) is tuple:
+                msg.addButton(choice[0], choice[1])
+            else:
+                msg.addButton(choice)
+        return msg.exec()
 
 
 def handle_exception(exception):

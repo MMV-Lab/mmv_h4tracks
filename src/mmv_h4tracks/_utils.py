@@ -9,6 +9,8 @@ import numpy as np
 from qtpy.QtWidgets import QApplication
 from napari.layers import Labels
 
+from ._constants import STATUS_READY
+
 if TYPE_CHECKING:
     from typing import Callable
     from qtpy.QtWidgets import QWidget
@@ -67,11 +69,16 @@ class CallbackHandler:
             # Reset the tracking stage
             self.reset_tracking_stage()
         QApplication.restoreOverrideCursor()
+        if hasattr(self.widget, "clear_status"):
+            self.widget.clear_status()
+        elif hasattr(self.widget, "set_status_text"):
+            self.widget.set_status_text(STATUS_READY)
 
     def reset_tracking_stage(self) -> None:
         """Resets the buttons and cached cells"""
         self.widget.tracking_window.reset_button_labels()
         self.widget.tracking_window.selected_cells = []
+        self.widget.tracking_window._selection_frame_history = []
 
     def _add_callback(self, layer: Layer, callback: Callable) -> None:
         """Adds a callback to a given layer."""

@@ -3,11 +3,66 @@
 from __future__ import annotations
 
 import logging
+from contextlib import contextmanager
 
 import napari
 import numpy as np
 
+from ._constants import STATUS_AWAITING_USER, STATUS_READY
+
 logger = logging.getLogger(__name__)
+
+_dock_status_host = None
+
+
+def register_dock_status_host(widget) -> None:
+    """Register the main dock widget used for progress/status updates."""
+    global _dock_status_host
+    _dock_status_host = widget
+
+
+def resolve_dock_status_host(widget=None):
+    """Return a widget with ``set_status_text``, if available."""
+    candidates = []
+    if widget is not None:
+        candidates.append(widget)
+        parent_attr = getattr(widget, "parent", None)
+        if callable(parent_attr):
+            try:
+                candidates.append(parent_attr())
+            except TypeError:
+                pass
+        elif parent_attr is not None:
+            candidates.append(parent_attr)
+    candidates.append(_dock_status_host)
+    for candidate in candidates:
+        if candidate is not None and hasattr(candidate, "set_status_text"):
+            return candidate
+    return None
+
+
+@contextmanager
+def awaiting_user_dialog(host=None):
+    """
+    Set the dock status label to ``STATUS_AWAITING_USER`` for a modal dialog.
+
+    Restores the previous status text when the dialog closes.
+    """
+    status_host = resolve_dock_status_host(host)
+    if status_host is None:
+        yield
+        return
+    label = getattr(status_host, "status_label", None)
+    previous = label.text() if label is not None else STATUS_READY
+    status_host.set_status_text(STATUS_AWAITING_USER)
+    if label is not None:
+        label.repaint()
+    try:
+        yield
+    finally:
+        status_host.set_status_text(previous)
+        if label is not None:
+            label.repaint()
 
 
 def apply_napari_dark_theme(widget) -> None:
