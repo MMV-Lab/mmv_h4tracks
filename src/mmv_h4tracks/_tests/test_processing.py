@@ -139,6 +139,7 @@ def test_track_segmentation_schema(widget_with_segmentation, qtbot, monkeypatch)
     assert isinstance(layer, napari.layers.Labels)
 
     worker = processing._track_segmentation(tracking_widget)
+    assert worker is not None
     trk_data = None
 
     def capture_result(result):

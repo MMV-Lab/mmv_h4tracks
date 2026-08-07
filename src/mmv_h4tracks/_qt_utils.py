@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import logging
+
 import napari
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 
 def apply_napari_dark_theme(widget) -> None:
@@ -14,16 +18,80 @@ def apply_napari_dark_theme(widget) -> None:
         widget.setStyleSheet(napari.qt.get_stylesheet(theme_id="dark"))
 
 
+def _materialize_array(data) -> np.ndarray:
+    """Convert layer level data to a concrete numpy array (handles dask/zarr)."""
+    if hasattr(data, "compute"):
+        try:
+            data = data.compute()
+        except Exception:
+            pass
+    return np.asarray(data)
+
+
+def _spatial_pixel_count(arr: np.ndarray) -> int:
+    """Score for picking the highest-resolution pyramid level (YX plane size)."""
+    if arr.ndim >= 2:
+        return int(np.prod(arr.shape[-2:]))
+    return int(arr.size)
+
+
+def _iter_multiscale_levels(data):
+    """Yield level arrays from a list/tuple or napari-like multiscale sequence."""
+    if isinstance(data, (list, tuple)):
+        return list(data)
+    # Duck-type napari MultiScaleData / similar (has len + getitem, no ndarray shape)
+    if hasattr(data, "__getitem__") and hasattr(data, "__len__") and not hasattr(
+        data, "shape"
+    ):
+        return [data[i] for i in range(len(data))]
+    return None
+
+
 def layer_as_numpy(layer) -> np.ndarray:
     """
-    Return layer ``.data`` as a numpy array.
+    Return layer ``.data`` as a concrete numpy array.
 
-    Multiscale / pyramid layers store a list or tuple of levels; the highest
-    resolution (first) level is used.
+    Multiscale / pyramid layers store several resolutions. The level with the
+    largest spatial (Y×X) size is used so Cellpose never silently runs on a
+    coarse pyramid level when level ordering differs from ``data[0]``.
     """
     data = layer.data
-    if isinstance(data, (list, tuple)):
-        if len(data) == 0:
+    levels = _iter_multiscale_levels(data)
+    if levels is None and getattr(layer, "multiscale", False):
+        # Flagged multiscale but unusual container — try indexing.
+        try:
+            levels = [data[i] for i in range(len(data))]
+        except Exception as exc:
+            raise ValueError(
+                f"Could not read multiscale levels from layer "
+                f"{getattr(layer, 'name', layer)!r}"
+            ) from exc
+
+    if levels is not None:
+        if len(levels) == 0:
             raise ValueError("Layer has empty multiscale data")
-        data = data[0]
-    return np.asarray(data)
+        materialized = [_materialize_array(level) for level in levels]
+        scores = [_spatial_pixel_count(level) for level in materialized]
+        chosen_idx = int(np.argmax(scores))
+        chosen = materialized[chosen_idx]
+        shapes = [tuple(level.shape) for level in materialized]
+        logger.info(
+            "layer_as_numpy multiscale: layer=%r levels=%s chose_index=%s "
+            "chose_shape=%s (yx=%s)",
+            getattr(layer, "name", None),
+            shapes,
+            chosen_idx,
+            tuple(chosen.shape),
+            chosen.shape[-2:] if chosen.ndim >= 2 else chosen.shape,
+        )
+        return np.array(chosen, copy=True)
+
+    out = np.array(_materialize_array(data), copy=True)
+    logger.debug(
+        "layer_as_numpy: layer=%r shape=%s dtype=%s yx=%s",
+        getattr(layer, "name", None),
+        tuple(out.shape),
+        out.dtype,
+        out.shape[-2:] if out.ndim >= 2 else out.shape,
+    )
+    return out

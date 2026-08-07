@@ -17,6 +17,7 @@ from qtpy.QtWidgets import (
     QTabWidget,
     QSizePolicy,
     QProgressBar,
+    QAbstractButton,
 )
 from qtpy.QtCore import Qt, QTimer
 from qtpy.QtGui import QImage, QPixmap
@@ -32,19 +33,18 @@ from napari.layers.tracks.tracks import Tracks
 from ._assistant import AssistantWindow
 from ._analysis import AnalysisWindow
 from ._evaluation import EvaluationWindow
-from ._constants import DEFAULT_TRACKS_LAYER_NAME
-from ._logger import choice_dialog, notify
+from ._constants import DEFAULT_TRACKS_LAYER_NAME, STATUS_READY
+from ._logger import choice_dialog, notify, handle_exception
 
 from ._reader import (
     open_dialog,
     napari_get_reader,
-    check_multiscale_image,
     load_zarr_data,
     load_ome_zarr_data,
 )
 from ._segmentation import SegmentationWindow
 from ._tracking import TrackingWindow, calculate_medoid
-from ._writer import save_ome_zarr, save_zarr
+from ._writer import save_ome_zarr, write_zarr_data
 from ._grabber import grab_layer
 from ._session_trained_models import (
     remove_entries_for_layer,
@@ -158,12 +158,17 @@ class MMVH4TRACKS(QWidget):
             self.combobox_tracks,
         ]
 
-        # Progress bar
+        # Progress bar + status (status below the bar)
         self.progress_bar = QProgressBar()
         self.progress_bar.setTextVisible(True)
-        self.progress_bar.setFormat("Dummy Loading %p%")
+        self.progress_bar.setFormat("")
         self.progress_bar.setMaximum(1)
-        # self.progress_bar.setValue(42)
+        self.progress_bar.setValue(0)
+        self._busy_widget_states = None
+
+        self.status_label = QLabel(STATUS_READY)
+        self.status_label.setWordWrap(True)
+        self.status_label.setStyleSheet("color: #aaaaaa;")
 
         # Horizontal lines
         line = QWidget()
@@ -265,6 +270,7 @@ class MMVH4TRACKS(QWidget):
         widget.layout().addWidget(h_spacer_5, 10, 0, 1, -1)
         widget.layout().addWidget(tabwidget, 11, 0, 1, -1)
         widget.layout().addWidget(self.progress_bar, 12, 0, 1, -1)
+        widget.layout().addWidget(self.status_label, 13, 0, 1, -1)
 
         # Scrollarea allows content to be larger than the assigned space (small monitor)
         scroll_area = QScrollArea()
@@ -683,24 +689,16 @@ class MMVH4TRACKS(QWidget):
                             self.viewer.layers.remove(name)
                         except ValueError:
                             pass
+                    return True
 
                 # Yes -> Remove this layer
                 self.viewer.layers.remove(layer_name)
         return True
 
-    def _load_zarr(self, zarr_file):
-        # check all layer names
-        layernames = [
-            layer.name for layer in self.viewer.layers if isinstance(layer, (Image, Labels, Tracks))
-        ]
-        if not self._clear_layers(layernames):
-            # user canceled the operation
-            return
+    def _apply_loaded_zarr(self, result, zarr_file, filepath):
+        raw_levels, segmentation, filtered_tracks, is_multiscale = result
+        self.is_multiscale = is_multiscale
 
-        # Load data from zarr file
-        raw_levels, segmentation, filtered_tracks, self.is_multiscale = load_zarr_data(zarr_file)
-        
-        # Add layers to viewer
         contrast_limits = (
             float(raw_levels[0].min()),
             float(raw_levels[0].max()),
@@ -714,7 +712,6 @@ class MMVH4TRACKS(QWidget):
         self.viewer.add_labels(segmentation, name="Segmentation Data")
         self.viewer.add_tracks(filtered_tracks, name=DEFAULT_TRACKS_LAYER_NAME)
 
-        # Set widget state
         self.align_cache = copy.deepcopy(segmentation)
         self.eval_cache = [
             copy.deepcopy(segmentation),
@@ -723,22 +720,17 @@ class MMVH4TRACKS(QWidget):
         self.combobox_image.setCurrentText("Raw Image")
         self.combobox_segmentation.setCurrentText("Segmentation Data")
         self.combobox_tracks.setCurrentText(DEFAULT_TRACKS_LAYER_NAME)
+        self.zarr = zarr_file
+        self.file_interaction.setTitle(Path(filepath).name)
 
-    def _load_ome_zarr(self, zarr_file, zarr_path=None):
-        # Load data from OME-Zarr file
-        try:
-            raw_levels, segmentation, metadata, self.is_multiscale, tracks = load_ome_zarr_data(zarr_file, zarr_path=zarr_path)
-        except ValueError as e:
-            print(f"Error loading OME-Zarr file: {e}")
-            return
-        
-        # Clear layers if they exist
-        layernames = ["Raw Image", "Segmentation Data"]
+    def _apply_loaded_ome_zarr(self, result, zarr_file, filepath):
+        raw_levels, segmentation, metadata, is_multiscale, tracks = result
+        self.is_multiscale = is_multiscale
+
+        layernames = ["Raw Image", "Segmentation Data", DEFAULT_TRACKS_LAYER_NAME]
         if not self._clear_layers(layernames):
-            # user canceled the operation
             return
-        
-        # Add layers to viewer
+
         contrast_limits = (
             float(raw_levels[0].min()),
             float(raw_levels[0].max()),
@@ -749,38 +741,75 @@ class MMVH4TRACKS(QWidget):
             multiscale=True,
             contrast_limits=contrast_limits,
         )
-        self.viewer.add_labels(segmentation[:], name="Segmentation Data")
+        self.viewer.add_labels(segmentation, name="Segmentation Data")
 
-        # Load tracks from file if it exists, otherwise create implicit tracks if needed
         if tracks is not None:
-            # Load tracks from tracks.npy file (without scale)
             self.viewer.add_tracks(tracks, name=DEFAULT_TRACKS_LAYER_NAME)
             self.eval_cache[1] = copy.deepcopy(tracks)
             self.combobox_tracks.setCurrentText(DEFAULT_TRACKS_LAYER_NAME)
         elif metadata.get("implied_tracks", False):
-            # Only create implicit tracks if no tracks.npy exists
             filtered_tracks = self.create_implicit_tracks()
-            
-            # Check if raw image layer has a scale attribute and pass it to add_tracks
+
             scale = None
             try:
-                if hasattr(raw_layer, 'scale') and isinstance(raw_layer.scale, np.ndarray):
+                if hasattr(raw_layer, "scale") and isinstance(raw_layer.scale, np.ndarray):
                     scale = raw_layer.scale
             except (AttributeError, TypeError):
                 pass
-            
+
             if scale is not None:
-                self.viewer.add_tracks(filtered_tracks, name=DEFAULT_TRACKS_LAYER_NAME, scale=scale)
+                self.viewer.add_tracks(
+                    filtered_tracks, name=DEFAULT_TRACKS_LAYER_NAME, scale=scale
+                )
             else:
                 self.viewer.add_tracks(filtered_tracks, name=DEFAULT_TRACKS_LAYER_NAME)
             self.eval_cache[1] = copy.deepcopy(filtered_tracks)
-        
-        # Add metadata to layers
-        raw_layer.metadata["raw_metadata"] = f"frames={metadata['frames']}\nunit={metadata['unit']}"
-        
-        # Set alignment cache
+
+        raw_layer.metadata["raw_metadata"] = (
+            f"frames={metadata['frames']}\nunit={metadata['unit']}"
+        )
+
         self.align_cache = copy.deepcopy(segmentation)
         self.eval_cache[0] = copy.deepcopy(segmentation)
+        self.combobox_image.setCurrentText("Raw Image")
+        self.combobox_segmentation.setCurrentText("Segmentation Data")
+        self.zarr = zarr_file
+        self.file_interaction.setTitle(Path(filepath).name)
+
+    def _start_zarr_load(self, zarr_file, filepath):
+        layernames = [
+            layer.name
+            for layer in self.viewer.layers
+            if isinstance(layer, (Image, Labels, Tracks))
+        ]
+        if not self._clear_layers(layernames):
+            return
+
+        mmv_processing.run_with_dock_progress(
+            self,
+            load_zarr_data,
+            zarr_file,
+            desc="Loading zarr",
+            total=4,
+            on_returned=lambda result: self._apply_loaded_zarr(
+                result, zarr_file, filepath
+            ),
+            finish_desc="Adding layers to viewer",
+        )
+
+    def _start_ome_zarr_load(self, zarr_file, filepath):
+        mmv_processing.run_with_dock_progress(
+            self,
+            load_ome_zarr_data,
+            zarr_file,
+            filepath,
+            desc="Loading OME-zarr",
+            total=3,
+            on_returned=lambda result: self._apply_loaded_ome_zarr(
+                result, zarr_file, filepath
+            ),
+            finish_desc="Adding layers to viewer",
+        )
 
     def create_implicit_tracks(self):
         """
@@ -876,34 +905,44 @@ class MMVH4TRACKS(QWidget):
         Opens a dialog for the user to choose an (ome-)zarr file to open. Passes the file for loading.
         """
         self.callback_handler.remove_callback_viewer()
-        QApplication.setOverrideCursor(Qt.WaitCursor)
         filepath = open_dialog(self)
+        if not filepath:
+            return
         if filepath.endswith(".ome.zarr"):
             from importlib.metadata import version
             if int(version("zarr").split(".")[0]) < 3:
-                QApplication.restoreOverrideCursor()
-                choice = choice_dialog(f"Installed zarr version is {version('zarr')}, we recommed at least version 3.0.8. Loading could irrecoverably alter the loaded file. Are you sure you want to continue?", [("Yes", QMessageBox.YesRole), ("No", QMessageBox.NoRole)])
+                choice = choice_dialog(
+                    f"Installed zarr version is {version('zarr')}, we recommed at least version 3.0.8. Loading could irrecoverably alter the loaded file. Are you sure you want to continue?",
+                    [("Yes", QMessageBox.YesRole), ("No", QMessageBox.NoRole)],
+                )
                 if choice == QMessageBox.NoRole:
                     return
-                QApplication.setOverrideCursor(Qt.WaitCursor)
         file_reader = napari_get_reader(filepath)
+        if file_reader is None:
+            return
 
         try:
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
                 zarr_file, is_ome = file_reader(filepath)
         except TypeError:
-            QApplication.restoreOverrideCursor()
             return
 
         if is_ome:
-            # Pass filepath in case store path inference fails
-            self._load_ome_zarr(zarr_file, zarr_path=filepath)
+            self._start_ome_zarr_load(zarr_file, filepath)
         else:
-            self._load_zarr(zarr_file)
-        self.zarr = zarr_file
-        self.file_interaction.setTitle(Path(filepath).name)
-        QApplication.restoreOverrideCursor()
+            self._start_zarr_load(zarr_file, filepath)
+
+    def _layer_arrays_for_save(self):
+        """Snapshot layer arrays on the GUI thread for a save worker."""
+        raw_layer = self.selected_image_layer()
+        segmentation_layer = self.selected_labels_layer()
+        tracks_layer = self.selected_tracks_layer()
+        if raw_layer.multiscale:
+            raw_image = raw_layer.data[0]
+        else:
+            raw_image = raw_layer.data
+        return raw_image, segmentation_layer.data, tracks_layer.data
 
     def _save(self):
         """
@@ -913,9 +952,6 @@ class MMVH4TRACKS(QWidget):
         if self.tracking_window.cached_tracks is not None:
             notify("Some tracks are not displayed, not saving")
             return
-        # create new file if no file was opened
-        # or the file is not an OME-zarr file
-        # if not hasattr(self, "zarr") or not "multiscales" in self.zarr.attrs:
         if not hasattr(self, "zarr"):
             print("Calling save_as")
             self.save_as()
@@ -925,18 +961,24 @@ class MMVH4TRACKS(QWidget):
             self.save_as()
             return
         self.callback_handler.remove_callback_viewer()
-        QApplication.setOverrideCursor(Qt.WaitCursor)
-        # self.tracking_window.update_all_centroids()
-        layers = [
-            self.selected_image_layer(),
-            self.selected_labels_layer(),
-            self.selected_tracks_layer(),
-        ]
+        try:
+            raw_image, segmentation, tracks = self._layer_arrays_for_save()
+        except ValueError as exc:
+            handle_exception(exc)
+            return
 
-        # self.assistant_window.align_ids_on_click(saving=True)
-        save_zarr(self.zarr, layers)
-        # save_ome_zarr(self.zarr, layers, is_multiscale=self.is_multiscale)
-        QApplication.restoreOverrideCursor()
+        target = self.zarr
+        mmv_processing.run_with_dock_progress(
+            self,
+            write_zarr_data,
+            target,
+            raw_image,
+            segmentation,
+            tracks,
+            desc="Saving zarr",
+            total=3,
+            on_returned=lambda _root: notify("Zarr file has been saved."),
+        )
 
     def save_as(self):
         """
@@ -947,38 +989,30 @@ class MMVH4TRACKS(QWidget):
             notify("Some tracks are not displayed, not saving")
             return
         dialog = QFileDialog()
-        QApplication.setOverrideCursor(Qt.WaitCursor)
         path = f"{dialog.getSaveFileName()[0]}"
-        # If user tries to save a zarr file without the .ome.zarr extension, we add it
-        # if path.endswith(".zarr") and not path.endswith(".ome.zarr"):
-        #     path = path[: -len(".zarr")] + ".ome.zarr"
-        # if not path.endswith(".ome.zarr"):
-        #     path += ".ome.zarr"
-        # if path == ".ome.zarr":
-        #     QApplication.restoreOverrideCursor()
-        #     return
         if not path.endswith(".zarr"):
             path += ".zarr"
         if path == ".zarr":
-            QApplication.restoreOverrideCursor()
             return
 
         self.callback_handler.remove_callback_viewer()
-        # self.tracking_window.update_all_centroids()
-        raw_layer = self.selected_image_layer()
-        segmentation_layer = self.selected_labels_layer()
-        tracks_layer = self.selected_tracks_layer()
+        try:
+            raw_image, segmentation, tracks = self._layer_arrays_for_save()
+        except ValueError as exc:
+            handle_exception(exc)
+            return
 
-        # layers = [raw_layer, segmentation_layer]
-        layers = [raw_layer, segmentation_layer, tracks_layer]
-
-        # self.assistant_window.align_ids_on_click(saving=True)
-        # save_ome_zarr(
-        #     path,
-        #     layers,
-        #     is_multiscale=self.is_multiscale)
-        save_zarr(path, layers)
-        QApplication.restoreOverrideCursor()
+        mmv_processing.run_with_dock_progress(
+            self,
+            write_zarr_data,
+            path,
+            raw_image,
+            segmentation,
+            tracks,
+            desc="Saving zarr",
+            total=3,
+            on_returned=lambda _root: notify(f"{path} has been saved."),
+        )
 
     def get_process_limit(self):
         """
@@ -1030,5 +1064,44 @@ class MMVH4TRACKS(QWidget):
         """
         self.progress_bar.setFormat(text + " %p%")
         self.progress_bar.setTextVisible(True)
+
+    def set_status_text(self, text: str):
+        """Set the status line below the progress bar."""
+        self.status_label.setText(text)
+
+    def clear_status(self):
+        """Reset the status line to the idle message."""
+        self.status_label.setText(STATUS_READY)
+
+    def set_plugin_busy(self, busy: bool):
+        """
+        Disable or restore plugin buttons and comboboxes while a progress-tracked
+        job runs.
+
+        Saves prior enabled states on ``busy=True`` and restores them on
+        ``busy=False``. Nested ``busy=True`` calls are ignored.
+        """
+        if busy:
+            if getattr(self, "_busy_widget_states", None) is not None:
+                return
+            states = {}
+            for widget in (
+                *self.findChildren(QAbstractButton),
+                *self.findChildren(QComboBox),
+            ):
+                states[widget] = widget.isEnabled()
+                widget.setEnabled(False)
+            self._busy_widget_states = states
+            return
+
+        states = getattr(self, "_busy_widget_states", None)
+        if states is None:
+            return
+        for widget, was_enabled in states.items():
+            try:
+                widget.setEnabled(was_enabled)
+            except RuntimeError:
+                pass
+        self._busy_widget_states = None
 
 

@@ -160,15 +160,25 @@ def build_multiscale(image: np.ndarray):
     return levels
 
 
-def load_zarr_data(zarr_file):
+def _progress_increment(reporter) -> None:
+    if reporter is not None:
+        reporter.increment()
+
+
+def load_zarr_data(zarr_file, reporter=None):
     """
     Load raw image, segmentation, and tracking data from a zarr file.
-    
+
+    Optional ``reporter`` receives one increment per coarse phase (raw read,
+    multiscale build, segmentation, tracks) for dock progress UI.
+
     Parameters
     ----------
     zarr_file : zarr.Group
         The zarr file/group to load from
-        
+    reporter : optional
+        Progress reporter with ``increment()`` (e.g. DockProgressReporter)
+
     Returns
     -------
     tuple
@@ -180,13 +190,15 @@ def load_zarr_data(zarr_file):
     """
     # Non-OME zarr files never have multiscale raw data
     is_multiscale = False
-    raw_data_source = zarr_file["raw_data"]
-    # Original was single array
-    raw_data = raw_data_source[:]
+    raw_data = zarr_file["raw_data"][:]
+    _progress_increment(reporter)
+
     raw_levels = build_multiscale(raw_data)
-    
+    _progress_increment(reporter)
+
     segmentation = zarr_file["segmentation_data"][:]
-    
+    _progress_increment(reporter)
+
     # Load and filter tracks
     tracks = zarr_file["tracking_data"][:]
     # Filter track ids of tracks that just occur once
@@ -194,28 +206,34 @@ def load_zarr_data(zarr_file):
     filtered_track_ids = np.delete(
         count_of_track_ids, count_of_track_ids[1] == 1, 1
     )
-    
+
     # Remove tracks that only exist in one slice
     filtered_tracks = np.delete(
         tracks,
         np.where(np.isin(tracks[:, 0], filtered_track_ids[0, :], invert=True)),
         0,
     )
-    
+    _progress_increment(reporter)
+
     return raw_levels, segmentation, filtered_tracks, is_multiscale
 
 
-def load_ome_zarr_data(zarr_file, zarr_path=None):
+def load_ome_zarr_data(zarr_file, zarr_path=None, reporter=None):
     """
     Load raw image, segmentation, and metadata from an OME-Zarr file.
-    
+
+    Optional ``reporter`` receives one increment per coarse phase (raw,
+    segmentation, tracks) for dock progress UI.
+
     Parameters
     ----------
     zarr_file : zarr.Group
         The OME-Zarr file/group to load from
     zarr_path : str, optional
         Filesystem path to the zarr file (used if store path cannot be inferred)
-    
+    reporter : optional
+        Progress reporter with ``increment()`` (e.g. DockProgressReporter)
+
     Returns
     -------
     tuple
@@ -231,13 +249,13 @@ def load_ome_zarr_data(zarr_file, zarr_path=None):
         labels_metadata = dict(zarr_file.get("labels").attrs)
     except AttributeError:
         raise ValueError("No labels found in OME-Zarr file.")
-    
+
     label_value = labels_metadata.get("labels", "TrackedCells")
     label_name = label_value[0] if isinstance(label_value, (list, tuple)) else label_value
-    
+
     # Check if original was multiscale first
     is_multiscale = check_multiscale_image(zarr_file)
-    
+
     # Read raw image metadata - for multiscale, it's on root; for single, it's on "0"
     if is_multiscale:
         # Multiscale: metadata is on root group
@@ -247,7 +265,7 @@ def load_ome_zarr_data(zarr_file, zarr_path=None):
                 print(f"Warning: root attrs is empty. Available keys in root: {list(zarr_file.keys())}")
         except AttributeError:
             raise ValueError("No image metadata found in OME-Zarr file.")
-        
+
         # Original was multiscale - read all levels
         if "multiscales" not in img_metadata or len(img_metadata["multiscales"]) == 0:
             print("Warning: multiscales metadata not found in root, trying to infer from available datasets")
@@ -269,14 +287,18 @@ def load_ome_zarr_data(zarr_file, zarr_path=None):
             raise ValueError("No image metadata found in OME-Zarr file.")
         # Original was single resolution
         raw_levels = build_multiscale(raw_image[:])
-    
+    _progress_increment(reporter)
+
     # Read segmentation
     segmentation = zarr_file.get(f"labels/{label_name}/0")
+    if segmentation is not None:
+        segmentation = segmentation[:]
     try:
         seg_metadata = dict(zarr_file.get(f"labels/{label_name}").attrs)
     except AttributeError:
         seg_metadata = dict()
-    
+    _progress_increment(reporter)
+
     # Extract metadata
     frames = generic_metadata.get("Frames", None)
     # Try to get unit from multiscales metadata if available
@@ -286,16 +308,16 @@ def load_ome_zarr_data(zarr_file, zarr_path=None):
             (ax.get("unit", "unit") for ax in img_metadata["multiscales"][0].get("axes", []) if ax.get("name") in ["z", "y", "x"]),
             "unit"
         )
-    
+
     implied_tracks = seg_metadata.get("implied_tracks", False)
-    
+
     metadata = {
         "frames": frames,
         "unit": unit,
         "implied_tracks": implied_tracks,
         "img_metadata": img_metadata,
     }
-    
+
     # Try to infer filesystem path from zarr store
     if zarr_path is None:
         try:
@@ -310,7 +332,7 @@ def load_ome_zarr_data(zarr_file, zarr_path=None):
                 zarr_path = store.root
         except (AttributeError, TypeError):
             pass
-    
+
     # Try to load tracks from tables/tracks/tracks.npy if it exists
     tracks = None
     if zarr_path:
@@ -320,5 +342,6 @@ def load_ome_zarr_data(zarr_file, zarr_path=None):
                 tracks = np.load(tracks_path)
             except Exception as e:
                 print(f"Warning: Could not load tracks.npy: {e}")
-    
+    _progress_increment(reporter)
+
     return raw_levels, segmentation, metadata, is_multiscale, tracks

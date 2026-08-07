@@ -32,7 +32,6 @@ dependencies = [
     "napari",
     "zarr>=3.0.8",
     "cellpose<4",
-    "tqdm>=4.0",
     "matplotlib",
     "bioio",
     "scipy>=1.11.0",

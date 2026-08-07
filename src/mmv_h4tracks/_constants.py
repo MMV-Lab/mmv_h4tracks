@@ -18,6 +18,9 @@ LINK_TEXT = "Link tracks"
 UNLINK_TEXT = "Unlink tracks"
 CONFIRM_TEXT = "Confirm"
 
+# Dock status line (below progress bar)
+STATUS_READY = "Ready"
+
 # Default napari Tracks layer name when creating/replacing tracks
 DEFAULT_TRACKS_LAYER_NAME = "Tracks"
 

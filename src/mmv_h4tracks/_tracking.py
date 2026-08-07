@@ -1,4 +1,3 @@
-from tqdm import tqdm
 import numpy as np
 import pandas as pd
 from napari.qt.threading import thread_worker
@@ -200,8 +199,10 @@ class TrackingWindow(QWidget):
         if not self._confirm_replace_tracks_if_needed():
             return
 
-        worker = processing._track_segmentation(self)
-        worker.returned.connect(self.process_new_tracks)
+        parent = self.parent
+        processing._track_segmentation(
+            self, on_returned=self.process_new_tracks
+        )
 
     def overlap_tracking_on_click(self):
         """
@@ -210,15 +211,36 @@ class TrackingWindow(QWidget):
         self.parent.callback_handler.remove_callback_viewer()
         if not self._confirm_replace_tracks_if_needed():
             return
-        worker = self.worker_overlap_tracking()
-        worker.returned.connect(self.process_new_tracks)
 
-    @thread_worker(connect={"errored": handle_exception})
-    def worker_overlap_tracking(self):
+        try:
+            label_layer = self.parent.selected_labels_layer()
+            segmentation = layer_as_numpy(label_layer)
+        except ValueError as exc:
+            handle_exception(exc)
+            return
+
+        n_steps = max(0, int(segmentation.shape[0]) - MIN_TRACK_LENGTH)
+        progress = (
+            {"total": n_steps, "desc": "Overlap tracking"} if n_steps else None
+        )
+        processing.run_with_dock_progress(
+            self.parent,
+            self.worker_overlap_tracking,
+            segmentation,
+            mode="yield",
+            progress=progress,
+            idle_status="Running overlap-based tracking…",
+            on_returned=self.process_new_tracks,
+            on_errored=lambda _exc: QApplication.restoreOverrideCursor(),
+        )
+
+    def worker_overlap_tracking(self, segmentation):
+        """
+        Overlap-track all cells. Yields once per start slice for progress UI;
+        returns a tracks array or ``None``.
+        """
         QApplication.setOverrideCursor(Qt.WaitCursor)
         self.reset_button_labels()
-        label_layer = self.parent.selected_labels_layer()
-        segmentation = layer_as_numpy(label_layer)
 
         n_workers = self.parent.get_process_limit()
 
@@ -266,7 +288,10 @@ class TrackingWindow(QWidget):
                         tracks = np.array([[track_id] + line])
                 track_id += 1
 
+            yield start_slice
+
         if len(tracks.shape) == 0:
+            QApplication.restoreOverrideCursor()
             return None
 
         tracks = np.array(tracks)
@@ -1056,6 +1081,7 @@ class TrackingWindow(QWidget):
         """
         if tracks is None:
             QApplication.restoreOverrideCursor()
+            self.parent.clear_status()
             return
         assert isinstance(tracks, np.ndarray), "Tracks are not numpy array."
         self.cached_tracks = None
@@ -1071,6 +1097,7 @@ class TrackingWindow(QWidget):
                 tracks_layer.graph = filtered_graph
         self.parent.eval_cache[1] = tracks
         QApplication.restoreOverrideCursor()
+        self.parent.clear_status()
 
     def remove_entries_from_tracks(self, cells: list):
         """
@@ -1266,52 +1293,106 @@ class TrackingWindow(QWidget):
 
     def update_all_centroids(self):
         """
-        Updates all centroids to account for changed segmentation
+        Updates all centroids to account for changed segmentation.
+        Runs on a worker with determinate dock progress over track entries.
         """
         self.parent.callback_handler.remove_callback_viewer()
-        label_layer = self.parent.selected_labels_layer()
+        try:
+            label_layer = self.parent.selected_labels_layer()
+        except ValueError as exc:
+            handle_exception(exc)
+            return
         tracks_layer = self.get_tracks_layer()
         if tracks_layer is None:
+            notify("Please select a valid tracks layer.")
             return
 
-        label_data = np.array(label_layer.data)
-        tracks = np.array(tracks_layer.data)
-        original_label_data = np.array(self.parent.align_cache)
+        label_data = layer_as_numpy(label_layer)
+        tracks = np.asarray(tracks_layer.data)
+        if tracks.size == 0:
+            return
 
-        frames_to_update = []
-
-        try:
-            for z in tqdm(range(len(label_data))):
-                frame_o = original_label_data[z]
-                frame = label_data[z]
-                if not np.array_equal(frame_o[frame_o > 0], frame[frame > 0]):
-                    frames_to_update.append(z)
-        except IndexError:
-            # If no original label data is available, update all frames
+        align_cache = self.parent.align_cache
+        if align_cache is None:
             frames_to_update = list(range(len(label_data)))
+        else:
+            original_label_data = np.asarray(align_cache)
+            frames_to_update = []
+            try:
+                for z in range(len(label_data)):
+                    frame_o = original_label_data[z]
+                    frame = label_data[z]
+                    if not np.array_equal(frame_o[frame_o > 0], frame[frame > 0]):
+                        frames_to_update.append(z)
+            except (IndexError, TypeError):
+                frames_to_update = list(range(len(label_data)))
 
-        tracks_to_update = [track for track in tracks if track[1] in frames_to_update]
-        unchanged_tracks = [
-            track for track in tracks if track[1] not in frames_to_update
-        ]
-        updated_tracks = []
-        for track in tracks_to_update:
-            updated_track = update_centroid(label_data, tracks, track)
-            updated_tracks.append(updated_track)
+        frames_set = set(frames_to_update)
+        if tracks.ndim != 2 or tracks.shape[1] < 4:
+            notify("Tracks layer has unexpected shape.")
+            return
+        n_tracks = int(tracks.shape[0])
+        # Cap UI updates (~100); one yield per track flooded the event loop.
+        yield_step = max(1, n_tracks // 100)
+        progress = {
+            "total": n_tracks,
+            "desc": "Update centroids",
+            "absolute": True,
+        }
+        parent = self.parent
 
-        updated_tracks = [track for track in updated_tracks if track is not None]
-        updated_tracks.extend(unchanged_tracks)
-        df = pd.DataFrame(updated_tracks, columns=["ID", "Z", "Y", "X"])
-        df.sort_values(["ID", "Z"], ascending=True, inplace=True)
-        updated_tracks = df.values
-        updated_tracks = processing.split_noncontinuous_tracks(updated_tracks)
-        updated_tracks = processing.remove_dot_tracks(updated_tracks)
-        # Preserve and filter graph from existing layer
-        filtered_graph = preserve_and_filter_graph(tracks_layer, updated_tracks)
-        tracks_layer.data = updated_tracks
-        if filtered_graph:
-            tracks_layer.graph = filtered_graph
-        self.parent.align_cache = label_data
+        def _on_returned(updated_tracks):
+            if updated_tracks is None:
+                return
+            filtered_graph = preserve_and_filter_graph(tracks_layer, updated_tracks)
+            tracks_layer.data = updated_tracks
+            if filtered_graph:
+                tracks_layer.graph = filtered_graph
+            parent.align_cache = label_data
+            notify("Centroids updated.")
+
+        processing.run_with_dock_progress(
+            parent,
+            self._worker_update_all_centroids,
+            label_data,
+            tracks,
+            frames_set,
+            yield_step,
+            mode="yield",
+            progress=progress,
+            on_returned=_on_returned,
+            on_errored=lambda _exc: QApplication.restoreOverrideCursor(),
+        )
+
+    def _worker_update_all_centroids(
+        self, label_data, tracks, frames_set, yield_step: int = 1
+    ):
+        """Yield periodically for dock progress; return the updated tracks array."""
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            updated_tracks = []
+            n_tracks = int(tracks.shape[0])
+            step = max(1, int(yield_step))
+            for i, track in enumerate(tracks):
+                if int(track[1]) in frames_set:
+                    updated = update_centroid(label_data, tracks, track)
+                    if updated is not None:
+                        updated_tracks.append(updated)
+                else:
+                    updated_tracks.append(track)
+                if (i + 1) % step == 0 or i + 1 == n_tracks:
+                    yield i + 1
+
+            if not updated_tracks:
+                return None
+            df = pd.DataFrame(updated_tracks, columns=["ID", "Z", "Y", "X"])
+            df.sort_values(["ID", "Z"], ascending=True, inplace=True)
+            updated_tracks = df.values
+            updated_tracks = processing.split_noncontinuous_tracks(updated_tracks)
+            updated_tracks = processing.remove_dot_tracks(updated_tracks)
+            return updated_tracks
+        finally:
+            QApplication.restoreOverrideCursor()
 
     def update_single_centroid(self, track_id: int, frame: int):
         """
@@ -1331,7 +1412,8 @@ class TrackingWindow(QWidget):
             filter_values = np.unique(self.cached_tracks[:, 0])
             tracks = self.cached_tracks
 
-        updated_entry = update_centroid(label_layer.data, tracks, track_entry)
+        label_data = layer_as_numpy(label_layer)
+        updated_entry = update_centroid(label_data, tracks, track_entry)
         if updated_entry is None:
             tracks = processing.remove_frame_from_track(tracks, track_entry)
         else:
@@ -1351,92 +1433,6 @@ class TrackingWindow(QWidget):
             tracks_layer.data = tracks
             if filtered_graph:
                 tracks_layer.graph = filtered_graph
-
-    def update_all_centroids(self):
-        """
-        Updates all centroids to account for changed segmentation
-        """
-        label_layer = grab_layer(
-            self.viewer, self.parent.combobox_segmentation.currentText()
-        )
-        if label_layer is None:
-            return
-        tracks_layer = self.get_tracks_layer()
-        if tracks_layer is None:
-            return
-
-        label_data = np.array(label_layer.data)
-        tracks = np.array(tracks_layer.data)
-        original_label_data = np.array(self.parent.initial_layers[0])
-
-        frames_to_update = []
-
-        for z in range(len(label_data)):
-            frame_o = original_label_data[z]
-            frame = label_data[z]
-            if not np.array_equal(frame_o[frame_o > 0], frame[frame > 0]):
-                frames_to_update.append(z)
-
-        tracks_to_update = [track for track in tracks if track[1] in frames_to_update]
-        unchanged_tracks = [
-            track for track in tracks if track[1] not in frames_to_update
-        ]
-        updated_tracks = []
-        for track in tracks_to_update:
-            updated_track = update_centroid(label_data, tracks, track)
-            updated_tracks.append(updated_track)
-
-        updated_tracks = [track for track in updated_tracks if track is not None]
-        updated_tracks.extend(unchanged_tracks)
-        df = pd.DataFrame(updated_tracks, columns=["ID", "Z", "Y", "X"])
-        df.sort_values(["ID", "Z"], ascending=True, inplace=True)
-        updated_tracks = df.values
-        updated_tracks = processing.split_noncontinuous_tracks(updated_tracks)
-        updated_tracks = processing.remove_dot_tracks(updated_tracks)
-        tracks_layer.data = updated_tracks
-
-    def update_single_centroid(self, track_id: int, frame: int):
-        """
-        Updates a single centroid to account for changed segmentation
-        """
-        # starttime = time.time()
-        label_layer = grab_layer(
-            self.viewer, self.parent.combobox_segmentation.currentText()
-        )
-        if label_layer is None:
-            return
-        tracks_layer = self.get_tracks_layer()
-        if tracks_layer is None:
-            return
-        tracks = tracks_layer.data
-        track_entry = [
-            entry for entry in tracks if entry[0] == track_id and entry[1] == frame
-        ][0]
-
-        filter_values = None
-        if self.cached_tracks is not None:
-            filter_values = np.unique(self.cached_tracks[:, 0])
-            tracks = self.cached_tracks
-
-        updated_entry = update_centroid(track_entry, label_layer.data[frame], tracks)
-        if updated_entry is None:
-            tracks = processing.remove_frame_from_track(tracks, track_entry)
-        else:
-            index = np.where(np.all(tracks == track_entry, axis=1))[0]
-            tracks[index] = updated_entry
-
-        df = pd.DataFrame(tracks, columns=["ID", "Z", "Y", "X"])
-        df.sort_values(["ID", "Z"], ascending=True, inplace=True)
-        tracks = df.values
-
-        if filter_values is not None:
-            self.cached_tracks = tracks
-            self.display_selected_tracks(filter_values)
-        else:
-            tracks_layer.data = tracks
-
-        # endtime = time.time()
-        # print(f"Updating single centroid took {endtime - starttime} seconds.")
 
 
 def track_by_overlap(

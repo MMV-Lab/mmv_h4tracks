@@ -15,6 +15,7 @@ import shutil
 import sys
 import tempfile
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 import numpy as np
@@ -22,8 +23,9 @@ import numpy as np
 from ._grabber import grab_layer
 from ._qt_utils import layer_as_numpy
 
-# Cellpose CLI writes trained weights under ``models/`` with names like ``cellpose_<epoch>.<step>`` (optional extra extension).
-_CELLPOSE_CLI_WEIGHTS_RE = re.compile(r"^cellpose_\d+\.\d+(?:\.[^.]+)?$")
+# Cellpose CLI writes trained weights under ``models/`` (timestamp names like
+# ``cellpose_1712345678.901234``, or older architecture-style names).
+_CELLPOSE_CLI_WEIGHTS_RE = re.compile(r"^cellpose_.+")
 
 # Deterministic temp export dirs (scanned on plugin start).
 MMV_TRAIN_DIR_PREFIX = "mmv_h4tracks_train_"
@@ -31,6 +33,11 @@ MMV_TRAIN_DIR_PREFIX = "mmv_h4tracks_train_"
 # Cellpose CLI ``--n_epochs`` (plugin defaults).
 CELLPOSE_TRAIN_N_EPOCHS_DEFAULT = 200
 CELLPOSE_TRAIN_N_EPOCHS_LONG = 1000
+# Cellpose logs sparsely (``iepoch == 5 or iepoch % 10 == 0``); one dock
+# progress step maps to this many epochs.
+CELLPOSE_TRAIN_PROGRESS_EPOCH_STRIDE = 10
+# ``cellpose.train`` logs: ``"{iepoch}, train_loss=..., test_loss=..., ..."``
+_CELLPOSE_EPOCH_LOG_RE = re.compile(r"(\d+),\s*train_loss=")
 _MASK_STEM_FRAME_RE = re.compile(r"^(.+)_frame_(\d{5})_masks$")
 
 # --- Export layout (Cellpose CLI-style: ``image.tif`` + ``image_masks.tif``, ``--mask_filter _masks``)
@@ -296,27 +303,54 @@ class CellposeCliTrainingResult:
     diam_mean: float
 
 
-def find_cellpose_cli_weights(export_dir: Path) -> Path:
+def cellpose_train_model_name_out(when: datetime | None = None) -> str:
+    """
+    Basename passed to Cellpose ``--model_name_out``.
+
+    Format ``YYYY_MM_DD_HH_MM_SS`` with no extension; Cellpose may append its own
+    suffix when writing under ``models/``.
+    """
+    when = datetime.now() if when is None else when
+    return when.strftime("%Y_%m_%d_%H_%M_%S")
+
+
+def find_cellpose_cli_weights(
+    export_dir: Path, model_name: str | None = None
+) -> Path:
     """
     Return the newest Cellpose CLI weights under ``export_dir/models``.
 
-    Filenames match ``cellpose_<digits>.<digits>``; an optional file extension after
-    that (e.g. ``.pth``) is accepted if present.
+    If ``model_name`` is given (``--model_name_out`` basename), prefer files whose
+    name or stem matches that basename (Cellpose may add an extension). Otherwise
+    prefer ``cellpose*`` names, then fall back to the newest regular file.
     """
     models_dir = Path(export_dir) / "models"
     if not models_dir.is_dir():
         raise FileNotFoundError(
             f"No models/ directory under training export {export_dir} — did training run?"
         )
-    candidates = sorted(
-        (p for p in models_dir.iterdir() if p.is_file() and _CELLPOSE_CLI_WEIGHTS_RE.match(p.name)),
-        key=lambda p: p.stat().st_mtime,
-    )
-    if not candidates:
+    files = [
+        p
+        for p in models_dir.iterdir()
+        if p.is_file() and not p.name.startswith(".")
+    ]
+    if not files:
         raise FileNotFoundError(
-            f"No cellpose_<n>.<n> weights found in {models_dir} after Cellpose training."
+            f"No weight files found in {models_dir} after Cellpose training."
         )
-    return candidates[-1]
+    if model_name:
+        named = [
+            p
+            for p in files
+            if p.name == model_name
+            or p.stem == model_name
+            or p.name.startswith(f"{model_name}.")
+        ]
+        if named:
+            return max(named, key=lambda p: p.stat().st_mtime)
+    preferred = [p for p in files if _CELLPOSE_CLI_WEIGHTS_RE.match(p.name)]
+    pool = preferred or files
+    return max(pool, key=lambda p: p.stat().st_mtime)
 
 
 def _is_cellpose_training_mask_export_file(path: Path) -> bool:
@@ -377,6 +411,46 @@ def _diameter_hint_from_cellpose_checkpoint(weights_path: Path) -> float:
     return 30.0
 
 
+def cellpose_train_progress_steps(
+    n_epochs: int, stride: int = CELLPOSE_TRAIN_PROGRESS_EPOCH_STRIDE
+) -> int:
+    """Number of dock progress steps for ``n_epochs`` (one step per ``stride`` epochs)."""
+    return max(1, int(n_epochs) // max(1, int(stride)))
+
+
+def epoch_from_cellpose_train_log(message: str) -> int | None:
+    """Parse an epoch index from a ``cellpose.train`` loss log line, or None."""
+    match = _CELLPOSE_EPOCH_LOG_RE.search(str(message).strip())
+    if match is None:
+        return None
+    return int(match.group(1))
+
+
+class CellposeEpochProgressHandler(logging.Handler):
+    """Push Cellpose epoch log lines into a ``DockProgressReporter`` (1 step / stride epochs)."""
+
+    def __init__(
+        self,
+        reporter,
+        n_epochs: int,
+        stride: int = CELLPOSE_TRAIN_PROGRESS_EPOCH_STRIDE,
+    ):
+        super().__init__(level=logging.INFO)
+        self.reporter = reporter
+        self.stride = max(1, int(stride))
+        self.total_steps = cellpose_train_progress_steps(n_epochs, self.stride)
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            epoch = epoch_from_cellpose_train_log(record.getMessage())
+            if epoch is None:
+                return
+            step = min(self.total_steps, int(epoch) // self.stride)
+            self.reporter.set_n(step)
+        except Exception:
+            pass
+
+
 def _cellpose_stderr_logger_setup(*_args, **_kwargs):
     """
     Drop-in replacement for ``cellpose.io.logger_setup`` when training from napari.
@@ -414,16 +488,60 @@ def _cellpose_stderr_logger_setup(*_args, **_kwargs):
     return io_logger, None
 
 
-def train_cellpose(export_dir: Path, *, n_epochs: int = CELLPOSE_TRAIN_N_EPOCHS_DEFAULT) -> CellposeCliTrainingResult:
+def _ensure_tifffile_imsave_alias() -> None:
+    """
+    Cellpose ``<4`` still calls ``tifffile.imsave`` when writing flow TIFFs.
+    Newer tifffile removed that name in favor of ``imwrite``.
+    """
+    try:
+        import tifffile
+    except ImportError:
+        return
+    if not hasattr(tifffile, "imsave") and hasattr(tifffile, "imwrite"):
+        tifffile.imsave = tifffile.imwrite
+
+
+def rename_cellpose_weights(
+    weights_path: Path, model_basename: str
+) -> Path:
+    """
+    Rename ``weights_path`` to ``model_basename`` plus the original suffix (if any).
+
+    Cellpose older than ``--model_name_out`` writes long default names; we normalize
+    after training. Returns the final path.
+    """
+    weights_path = Path(weights_path)
+    dest = weights_path.with_name(f"{model_basename}{weights_path.suffix}")
+    if dest.resolve() == weights_path.resolve():
+        return weights_path
+    if dest.exists():
+        dest.unlink()
+    weights_path.replace(dest)
+    return dest
+
+
+def train_cellpose(
+    export_dir: Path,
+    *,
+    n_epochs: int = CELLPOSE_TRAIN_N_EPOCHS_DEFAULT,
+    reporter=None,
+) -> CellposeCliTrainingResult:
     """
     Run ``python -m cellpose`` training on ``export_dir`` (must match plugin export layout).
 
     ``n_epochs`` is passed to Cellpose as ``--n_epochs`` (default ``CELLPOSE_TRAIN_N_EPOCHS_DEFAULT``).
 
-    After success, reads the newest weights under ``models/`` and a diameter hint from the checkpoint.
+    Optional ``reporter`` receives coarse progress from Cellpose epoch log lines
+    (one step per ``CELLPOSE_TRAIN_PROGRESS_EPOCH_STRIDE`` epochs).
+
+    After success, the newest weights under ``models/`` are renamed to
+    ``YYYY_MM_DD_HH_MM_SS`` (keeping Cellpose's file extension, if any).
     """
     export_dir = Path(export_dir)
+    _ensure_tifffile_imsave_alias()
+    model_basename = cellpose_train_model_name_out()
 
+    # Older Cellpose CLIs (no ``--model_name_out``) are common with ``cellpose<4``.
     sys.argv = [
         "cellpose",
         "--dir", str(export_dir),
@@ -440,14 +558,38 @@ def train_cellpose(export_dir: Path, *, n_epochs: int = CELLPOSE_TRAIN_N_EPOCHS_
     import cellpose.io as _cellpose_io
 
     _saved_logger_setup = _cellpose_io.logger_setup
-    _cellpose_io.logger_setup = _cellpose_stderr_logger_setup
+    progress_handler = None
+    if reporter is not None:
+        progress_handler = CellposeEpochProgressHandler(reporter, n_epochs)
+
+    def _logger_setup_with_progress(*args, **kwargs):
+        # Attach after Cellpose/our stderr setup so ``basicConfig(force=True)``
+        # cannot leave us without a live handler on the train logger.
+        result = _cellpose_stderr_logger_setup(*args, **kwargs)
+        if progress_handler is not None:
+            train_logger = logging.getLogger("cellpose.train")
+            if progress_handler not in train_logger.handlers:
+                train_logger.addHandler(progress_handler)
+            # Also catch epoch lines if they propagate only via the root logger.
+            root = logging.getLogger()
+            if progress_handler not in root.handlers:
+                root.addHandler(progress_handler)
+        return result
+
+    _cellpose_io.logger_setup = _logger_setup_with_progress
     try:
         cellpose_main = importlib.import_module("cellpose.__main__")
         cellpose_main.main()
     finally:
+        if progress_handler is not None:
+            for name in ("cellpose.train", ""):
+                log = logging.getLogger(name)
+                if progress_handler in log.handlers:
+                    log.removeHandler(progress_handler)
         _cellpose_io.logger_setup = _saved_logger_setup
 
     weights = find_cellpose_cli_weights(export_dir)
+    weights = rename_cellpose_weights(weights, model_basename)
     diam = _diameter_hint_from_cellpose_checkpoint(weights)
     return CellposeCliTrainingResult(
         export_dir=export_dir.resolve(),
