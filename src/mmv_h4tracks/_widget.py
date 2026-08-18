@@ -184,23 +184,6 @@ class MMVH4TRACKS(QWidget):
         line2.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         line2.setStyleSheet("background-color: #c0c0c0")
 
-        # Spacers
-        h_spacer_1 = QWidget()
-        h_spacer_1.setFixedHeight(0)
-        h_spacer_1.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        h_spacer_2 = QWidget()
-        h_spacer_2.setFixedHeight(4)
-        h_spacer_2.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        h_spacer_3 = QWidget()
-        h_spacer_3.setFixedHeight(0)
-        h_spacer_3.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        h_spacer_4 = QWidget()
-        h_spacer_4.setFixedHeight(4)
-        h_spacer_4.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        h_spacer_5 = QWidget()
-        h_spacer_5.setFixedHeight(4)
-        h_spacer_5.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-
         # QGroupBoxes
         computation_mode = QGroupBox("Computation mode")
         computation_mode_tooltip = (
@@ -211,23 +194,27 @@ class MMVH4TRACKS(QWidget):
             "</ul>"
         )
         computation_mode.setToolTip(computation_mode_tooltip)
-        computation_mode.setLayout(QGridLayout())
-        computation_mode.layout().addWidget(h_spacer_1, 0, 0, 1, -1)
-        computation_mode.layout().addWidget(self.rb_eco, 1, 0)
-        computation_mode.layout().addWidget(rb_heavy, 1, 1)
+        computation_mode_layout = QGridLayout()
+        computation_mode_layout.setContentsMargins(6, 11, 6, 6)
+        computation_mode_layout.setVerticalSpacing(4)
+        computation_mode.setLayout(computation_mode_layout)
+        computation_mode.layout().addWidget(self.rb_eco, 0, 0)
+        computation_mode.layout().addWidget(rb_heavy, 0, 1)
         computation_mode.layout().setColumnStretch(2, 1)
 
         self.label_gpu_status = QLabel("GPU: checking…")
         self.label_gpu_status.setStyleSheet("color: #888888;")
         self.label_gpu_status.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        computation_mode.layout().addWidget(self.label_gpu_status, 1, 2)
+        computation_mode.layout().addWidget(self.label_gpu_status, 0, 2)
 
         self.file_interaction = QGroupBox()
-        self.file_interaction.setLayout(QGridLayout())
-        self.file_interaction.layout().addWidget(h_spacer_3, 0, 0, 1, -1)
-        self.file_interaction.layout().addWidget(btn_load, 1, 0)
-        self.file_interaction.layout().addWidget(btn_save, 1, 1)
-        self.file_interaction.layout().addWidget(btn_save_as, 1, 2)
+        file_layout = QGridLayout()
+        file_layout.setContentsMargins(6, 6, 6, 6)
+        file_layout.setSpacing(4)
+        self.file_interaction.setLayout(file_layout)
+        self.file_interaction.layout().addWidget(btn_load, 0, 0)
+        self.file_interaction.layout().addWidget(btn_save, 0, 1)
+        self.file_interaction.layout().addWidget(btn_save_as, 0, 2)
 
         # QTabwidget
         tabwidget = QTabWidget()
@@ -245,25 +232,28 @@ class MMVH4TRACKS(QWidget):
         ### Organize objects via widgets
         # widget: parent widget of all content
         widget = QWidget()
-        widget.setLayout(QGridLayout())
+        main_layout = QGridLayout()
+        # Keep spacing small: default (~11px × many rows) made the dock overflow.
+        # 4px restores breathing room between layer comboboxes without the old height.
+        main_layout.setVerticalSpacing(4)
+        main_layout.setHorizontalSpacing(6)
+        main_layout.setContentsMargins(4, 4, 4, 4)
+        widget.setLayout(main_layout)
         widget.layout().addWidget(logo_label, 0, 0, 1, 2)
         widget.layout().addWidget(title, 0, 2)
         widget.layout().addWidget(computation_mode, 1, 0, 1, -1)
-        widget.layout().addWidget(h_spacer_2, 2, 0, 1, -1)
-        widget.layout().addWidget(self.file_interaction, 3, 0, 1, -1)
-        widget.layout().addWidget(h_spacer_4, 4, 0, 1, -1)
-        widget.layout().addWidget(line, 5, 0, 1, -1)
-        widget.layout().addWidget(label_image, 6, 0)
-        widget.layout().addWidget(self.combobox_image, 6, 1, 1, 2)
-        widget.layout().addWidget(label_segmentation, 7, 0)
-        widget.layout().addWidget(self.combobox_segmentation, 7, 1, 1, 2)
-        widget.layout().addWidget(label_tracks, 8, 0)
-        widget.layout().addWidget(self.combobox_tracks, 8, 1, 1, 2)
-        widget.layout().addWidget(line2, 9, 0, 1, -1)
-        widget.layout().addWidget(h_spacer_5, 10, 0, 1, -1)
-        widget.layout().addWidget(tabwidget, 11, 0, 1, -1)
-        widget.layout().addWidget(self.progress_bar, 12, 0, 1, -1)
-        widget.layout().addWidget(self.status_label, 13, 0, 1, -1)
+        widget.layout().addWidget(self.file_interaction, 2, 0, 1, -1)
+        widget.layout().addWidget(line, 3, 0, 1, -1)
+        widget.layout().addWidget(label_image, 4, 0)
+        widget.layout().addWidget(self.combobox_image, 4, 1, 1, 2)
+        widget.layout().addWidget(label_segmentation, 5, 0)
+        widget.layout().addWidget(self.combobox_segmentation, 5, 1, 1, 2)
+        widget.layout().addWidget(label_tracks, 6, 0)
+        widget.layout().addWidget(self.combobox_tracks, 6, 1, 1, 2)
+        widget.layout().addWidget(line2, 7, 0, 1, -1)
+        widget.layout().addWidget(tabwidget, 8, 0, 1, -1)
+        widget.layout().addWidget(self.progress_bar, 9, 0, 1, -1)
+        widget.layout().addWidget(self.status_label, 10, 0, 1, -1)
 
         # Scrollarea allows content to be larger than the assigned space (small monitor)
         scroll_area = QScrollArea()
@@ -271,10 +261,12 @@ class MMVH4TRACKS(QWidget):
         scroll_area.setWidgetResizable(True)
 
         self.setLayout(QVBoxLayout())
+        self.layout().setContentsMargins(0, 0, 0, 0)
+        self.layout().setSpacing(0)
         self.layout().addWidget(scroll_area)
 
         self.setMinimumWidth(540)
-        self.setMinimumHeight(900)
+        self.setMinimumHeight(400)
 
         custom_binds = [
             ("W", self.hotkey_next_free),

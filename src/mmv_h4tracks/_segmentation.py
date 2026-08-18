@@ -132,9 +132,6 @@ class SegmentationWindow(QWidget):
         self.checkbox_preview = QCheckBox("Preview")
 
         # Spacer
-        v_spacer = QWidget()
-        v_spacer.setFixedWidth(4)
-        v_spacer.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
         h_spacer_1 = QWidget()
         h_spacer_1.setFixedHeight(0)
         h_spacer_1.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
@@ -223,7 +220,7 @@ class SegmentationWindow(QWidget):
         content.setLayout(QVBoxLayout())
         content.layout().addWidget(automatic_segmentation)
         content.layout().addWidget(segmentation_correction)
-        content.layout().addWidget(v_spacer)
+        content.layout().addStretch(1)
 
         self.layout().addWidget(content)
         self.apply_cellpose_ready_state()

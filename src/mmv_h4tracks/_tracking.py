@@ -132,9 +132,6 @@ class TrackingWindow(QWidget):
         self.lineedit_filter.returnPressed.connect(self.filter_tracks_on_click)
 
         # Spacers
-        v_spacer = QWidget()
-        v_spacer.setFixedWidth(4)
-        v_spacer.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
         h_spacer_1 = QWidget()
         h_spacer_1.setFixedHeight(0)
         h_spacer_1.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
@@ -183,7 +180,7 @@ class TrackingWindow(QWidget):
         content.layout().addWidget(tracking_correction)
         content.layout().addWidget(filter_tracks)
         content.layout().addWidget(btn_update_centroids)
-        content.layout().addWidget(v_spacer)
+        content.layout().addStretch(1)
 
         self.layout().addWidget(content)
 
