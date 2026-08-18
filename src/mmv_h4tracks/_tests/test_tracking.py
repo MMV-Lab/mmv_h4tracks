@@ -9,8 +9,10 @@ from mmv_h4tracks import MMVH4TRACKS
 from mmv_h4tracks._constants import (
     LINK_TEXT,
     UNLINK_TEXT,
+    CONFIRM_TEXT,
     MIN_TRACK_LENGTH,
     DEFAULT_TRACKS_LAYER_NAME,
+    LINK_STATUS_MAX_SELECTED_FRAMES,
 )
 from mmv_h4tracks._reader import build_multiscale
 import mmv_h4tracks._tracking as tracking
@@ -125,6 +127,41 @@ def test_reset_button_labels(create_widget):
     window.reset_button_labels()
     assert window.btn_insert_correspondence.text() == LINK_TEXT
     assert window.btn_remove_correspondence.text() == UNLINK_TEXT
+
+
+@pytest.mark.unit
+@pytest.mark.misc
+@patch("mmv_h4tracks._tracking.choice_dialog")
+def test_link_status_long_list_does_not_open_replace_dialog(mock_choice, create_widget):
+    """A shortened selected/missed list must not open the replace-tracks popup."""
+    from qtpy.QtCore import QSize
+    from qtpy.QtGui import QResizeEvent
+    from qtpy.QtWidgets import QApplication
+
+    widget = create_widget
+    widget.viewer.add_tracks(
+        np.array([[0, 0, 1, 1], [0, 1, 1, 1]]),
+        name=DEFAULT_TRACKS_LAYER_NAME,
+    )
+    widget.combobox_tracks.setCurrentText(DEFAULT_TRACKS_LAYER_NAME)
+    window = widget.tracking_window
+    window.btn_insert_correspondence.setText(CONFIRM_TEXT)
+    n_selected = LINK_STATUS_MAX_SELECTED_FRAMES + 5
+    gap_end = n_selected + LINK_STATUS_MAX_SELECTED_FRAMES + 4
+    frames = list(range(n_selected)) + [gap_end]
+    window.selected_cells = [[z, 1, 1] for z in frames]
+
+    window._refresh_link_status()
+    label = widget.status_label
+    QApplication.sendEvent(
+        label,
+        QResizeEvent(QSize(180, label.height()), QSize(540, label.height())),
+    )
+    QApplication.processEvents()
+
+    mock_choice.assert_not_called()
+    assert "Selected frames:" in label.text()
+    assert "..." in label.text()
 
 
 @pytest.mark.unit

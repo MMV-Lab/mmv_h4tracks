@@ -3,7 +3,7 @@ import logging
 import numpy as np
 import pandas as pd
 from napari.qt.threading import thread_worker
-from qtpy.QtCore import Qt
+from qtpy.QtCore import Qt, QEvent
 from qtpy.QtWidgets import (
     QApplication,
     QGridLayout,
@@ -29,6 +29,8 @@ from ._constants import (
     STATUS_CLICK_TRACK_CELL,
     STATUS_CLICK_LINK_CELLS,
     STATUS_CLICK_UNLINK_CELLS,
+    STATUS_LINK_SELECT_MISSING,
+    LINK_STATUS_MAX_SELECTED_FRAMES,
 )
 from ._logger import notify, choice_dialog, handle_exception
 from ._utils import preserve_and_filter_graph
@@ -36,6 +38,88 @@ from ._qt_utils import apply_napari_dark_theme, awaiting_user_dialog, layer_as_n
 import mmv_h4tracks._processing as processing
 
 logger = logging.getLogger(__name__)
+
+
+def _unique_sorted_frames(selected_cells) -> list[int]:
+    return sorted({int(cell[0]) for cell in selected_cells})
+
+
+def _text_width(metrics, text: str) -> int:
+    advance = getattr(metrics, "horizontalAdvance", None)
+    if callable(advance):
+        return int(advance(text))
+    return int(metrics.width(text))
+
+
+def _format_frame_list(frames: list[int], head: int, sep: str = ",") -> str:
+    """``1,2,3,4,...,10`` — keep the last frame; ``head`` leading values before ellipsis."""
+    if not frames:
+        return ""
+    if head >= len(frames) - 1:
+        return sep.join(str(f) for f in frames)
+    prefix = sep.join(str(f) for f in frames[:head])
+    return f"{prefix}{sep}...{sep}{frames[-1]}"
+
+
+def _status_label_inner_width(label) -> int:
+    if label is None:
+        return 0
+    width = label.contentsRect().width()
+    if width <= 1:
+        width = label.width()
+    return max(0, int(width))
+
+
+def _fit_missed_list(missed: list[int], label) -> str:
+    """``Missed: …`` line, shortened after 6 numbers (and again if it still overflows)."""
+    prefix = "Missed: "
+    if not missed:
+        return ""
+    max_head = LINK_STATUS_MAX_SELECTED_FRAMES - 1
+    capped = prefix + _format_frame_list(missed, max_head, sep=", ")
+    max_width = _status_label_inner_width(label)
+    if label is None or max_width <= 1:
+        return capped
+    metrics = label.fontMetrics()
+    if _text_width(metrics, capped) <= max_width:
+        return capped
+    lo, hi, best = 1, max_head, 1
+    while lo <= hi:
+        mid = (lo + hi) // 2
+        text = prefix + _format_frame_list(missed, mid, sep=", ")
+        if _text_width(metrics, text) <= max_width:
+            best = mid
+            lo = mid + 1
+        else:
+            hi = mid - 1
+    return prefix + _format_frame_list(missed, best, sep=", ")
+
+
+def _status_link_frames(selected_cells, status_label=None) -> str:
+    clicked = _unique_sorted_frames(selected_cells)
+    if not clicked:
+        return STATUS_CLICK_LINK_CELLS
+    missed = []
+    if clicked[-1] > clicked[0]:
+        have = set(clicked)
+        missed = [f for f in range(clicked[0], clicked[-1] + 1) if f not in have]
+    shown = _format_frame_list(
+        clicked, LINK_STATUS_MAX_SELECTED_FRAMES - 1, sep=", "
+    )
+    lines = [f"Selected frames: {shown}"]
+    if missed:
+        lines.append(_fit_missed_list(missed, status_label))
+        lines.append(STATUS_LINK_SELECT_MISSING)
+    return "\n".join(lines)
+
+
+def _status_unlink_frames(selected_cells) -> str:
+    frames = _unique_sorted_frames(selected_cells)
+    if not frames:
+        return STATUS_CLICK_UNLINK_CELLS
+    if len(frames) == 1:
+        return f"Selected frames: {frames[0]}"
+    return f"Selected frames: {frames[0]}, {frames[-1]}"
 
 
 class TrackingWindow(QWidget):
@@ -66,6 +150,7 @@ class TrackingWindow(QWidget):
         self.cached_graph = None
         self.selected_cells = []
         self._selection_frame_history = []
+        self._updating_link_status = False
 
         ### QObjects
 
@@ -183,8 +268,32 @@ class TrackingWindow(QWidget):
         content.layout().addStretch(1)
 
         self.layout().addWidget(content)
+        self.parent.status_label.installEventFilter(self)
 
-    def _confirm_replace_tracks_if_needed(self) -> bool:
+    def eventFilter(self, obj, event):
+        if (
+            obj is getattr(self.parent, "status_label", None)
+            and event.type() == QEvent.Resize
+        ):
+            self._refresh_link_status()
+        return super().eventFilter(obj, event)
+
+    def _refresh_link_status(self) -> None:
+        if getattr(self, "_updating_link_status", False):
+            return
+        if self.btn_insert_correspondence.text() != CONFIRM_TEXT:
+            return
+        if not self.selected_cells:
+            return
+        self._updating_link_status = True
+        try:
+            self.parent.set_status_text(
+                _status_link_frames(self.selected_cells, self.parent.status_label)
+            )
+        finally:
+            self._updating_link_status = False
+
+    def _confirm_replace_tracks_if_needed(self):
         """Ask to replace an existing tracks layer. Return False if the user declines."""
         _, collision = processing._check_for_tracks_layer(self)
         if not collision:
@@ -226,7 +335,7 @@ class TrackingWindow(QWidget):
 
         n_steps = max(0, int(segmentation.shape[0]) - MIN_TRACK_LENGTH)
         progress = (
-            {"total": n_steps, "desc": "Overlap tracking"} if n_steps else None
+            {"total": n_steps, "desc": "Finding tracks…"} if n_steps else None
         )
         processing.run_with_dock_progress(
             self.parent,
@@ -234,7 +343,7 @@ class TrackingWindow(QWidget):
             segmentation,
             mode="yield",
             progress=progress,
-            idle_status="Running overlap-based tracking…",
+            idle_status="Finding tracks…",
             on_returned=self.process_new_tracks,
             on_errored=lambda _exc: QApplication.restoreOverrideCursor(),
         )
@@ -590,7 +699,9 @@ class TrackingWindow(QWidget):
                     self.selected_cells.sort()
                     self._selection_frame_history.append(int(cell[0]))
                     self.parent.set_status_text(
-                        f"Last selected frame: {self._selection_frame_history[-1]}"
+                        _status_link_frames(
+                            self.selected_cells, self.parent.status_label
+                        )
                     )
             except ValueError as exc:
                 handle_exception(exc)
@@ -789,15 +900,9 @@ class TrackingWindow(QWidget):
                     self.selected_cells.append(cell)
                     self.selected_cells.sort(key=lambda x: x[0])
                     self._selection_frame_history.append(int(cell[0]))
-                    recent = self._selection_frame_history[-2:]
-                    if len(recent) == 1:
-                        self.parent.set_status_text(
-                            f"Last selected frames: {recent[0]}"
-                        )
-                    else:
-                        self.parent.set_status_text(
-                            f"Last selected frames: {recent[0]}, {recent[1]}"
-                        )
+                    self.parent.set_status_text(
+                        _status_unlink_frames(self.selected_cells)
+                    )
             except ValueError as exc:
                 handle_exception(exc)
                 self.parent.callback_handler.remove_callback_viewer()
@@ -1382,7 +1487,7 @@ class TrackingWindow(QWidget):
         yield_step = max(1, n_tracks // 100)
         progress = {
             "total": n_tracks,
-            "desc": "Update centroids",
+            "desc": "Updating cell positions…",
             "absolute": True,
         }
         parent = self.parent

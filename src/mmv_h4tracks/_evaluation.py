@@ -226,7 +226,7 @@ class EvaluationWindow(QWidget):
             eval_seg,
             lower_bound,
             upper_bound,
-            desc="Seg evaluation",
+            desc="Evaluating segmentation…",
             total=total,
             on_returned=_on_returned,
         )
@@ -448,7 +448,7 @@ class EvaluationWindow(QWidget):
             eval_tracks,
             lower_bound,
             upper_bound,
-            desc="Track evaluation",
+            desc="Evaluating tracking…",
             total=total,
             on_returned=_on_returned,
         )

@@ -315,7 +315,7 @@ def start_cellpose_training_worker(
         _worker_train_cellpose,
         Path(export_dir),
         ne,
-        desc="Training Cellpose",
+        desc="Training…",
         total=steps,
         on_returned=on_returned,
     )
@@ -329,26 +329,19 @@ def _load_segmentation_image_data(widget, demo: bool):
     layer = widget.parent.selected_image_layer()
 
     raw = layer.data
-    levels = None
-    if isinstance(raw, (list, tuple)) or getattr(layer, "multiscale", False):
-        try:
-            levels = _iter_multiscale_levels(raw)
-            if levels is None and hasattr(raw, "__len__"):
-                levels = [raw[i] for i in range(len(raw))]
-        except Exception:
-            levels = None
-        if levels is not None:
-            shapes = []
-            for level in levels:
-                try:
-                    shapes.append(tuple(np.asarray(level).shape))
-                except Exception:
-                    shapes.append(None)
-            logger.info(
-                "Segmentation image %r is multiscale; level shapes=%s",
-                getattr(layer, "name", None),
-                shapes,
-            )
+    levels = _iter_multiscale_levels(raw)
+    if levels is not None:
+        shapes = []
+        for level in levels:
+            try:
+                shapes.append(tuple(np.asarray(level).shape))
+            except Exception:
+                shapes.append(None)
+        logger.info(
+            "Segmentation image %r is multiscale; level shapes=%s",
+            getattr(layer, "name", None),
+            shapes,
+        )
 
     data = layer_as_numpy(layer)
 
@@ -569,10 +562,8 @@ def run_demo_segmentation(widget):
 
 
 def _segmentation_progress(widget, exclude_frame_indices, demo: bool = False):
-    """Build a dock progress dict for Cellpose (GPU or CPU)."""
-    _, core = _get_cellpose()
-    use_gpu = core.use_gpu()
-    desc = "Cellpose (GPU)" if use_gpu else "Cellpose (CPU)"
+    """Build a dock progress dict for automatic segmentation."""
+    desc = "Segmenting…"
     try:
         data = np.squeeze(layer_as_numpy(widget.parent.selected_image_layer()))
     except Exception:
@@ -915,7 +906,6 @@ def _start_segmentation_worker(
     _, core = _get_cellpose()
     progress = _segmentation_progress(widget, exclude_frame_indices, demo)
     worker_fn = _segment_image_gpu if core.use_gpu() else _segment_image_cpu
-    backend = "GPU" if core.use_gpu() else "CPU"
     return run_with_dock_progress(
         parent,
         worker_fn,
@@ -927,7 +917,7 @@ def _start_segmentation_worker(
         excluded_frames_layer_prefix,
         mode="yield",
         progress=progress,
-        idle_status=f"Cellpose ({backend}) — running…",
+        idle_status="Segmenting…",
         on_returned=_add_segmentation_to_viewer,
     )
 
@@ -1197,7 +1187,7 @@ def _track_segmentation(widget, on_returned=None):
         _worker_track_segmentation,
         widget,
         data,
-        desc="Coordinate tracking",
+        desc="Finding tracks…",
         total=total,
         on_returned=on_returned,
     )

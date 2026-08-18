@@ -33,7 +33,7 @@ from napari.layers.tracks.tracks import Tracks
 from ._assistant import AssistantWindow
 from ._analysis import AnalysisWindow
 from ._evaluation import EvaluationWindow
-from ._constants import DEFAULT_TRACKS_LAYER_NAME, STATUS_READY, STATUS_LOADING_CELLPOSE
+from ._constants import DEFAULT_TRACKS_LAYER_NAME, STATUS_READY, STATUS_INITIALIZING
 from ._logger import choice_dialog, notify, handle_exception
 
 from ._reader import (
@@ -170,8 +170,17 @@ class MMVH4TRACKS(QWidget):
         self._busy_widget_states = None
 
         self.status_label = QLabel(STATUS_READY)
-        self.status_label.setWordWrap(True)
-        self.status_label.setStyleSheet("color: #aaaaaa;")
+        self.status_label.setWordWrap(False)
+        self.status_label.setAlignment(Qt.AlignLeft | Qt.AlignTop)
+        self.status_label.setTextFormat(Qt.PlainText)
+        # Ignore sizeHint so long status text cannot widen the dock.
+        self.status_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+        self.status_label.setMinimumWidth(0)
+        self.status_label.setStyleSheet(
+            "color: #aaaaaa; background-color: #000000; padding: 4px 6px;"
+        )
+        line_h = self.status_label.fontMetrics().lineSpacing()
+        self.status_label.setFixedHeight(line_h * 3 + 8)
         register_dock_status_host(self)
 
         # Horizontal lines
@@ -209,7 +218,7 @@ class MMVH4TRACKS(QWidget):
 
         self.file_interaction = QGroupBox()
         file_layout = QGridLayout()
-        file_layout.setContentsMargins(6, 6, 6, 6)
+        file_layout.setContentsMargins(6, 11, 6, 6)
         file_layout.setSpacing(4)
         self.file_interaction.setLayout(file_layout)
         self.file_interaction.layout().addWidget(btn_load, 0, 0)
@@ -315,7 +324,7 @@ class MMVH4TRACKS(QWidget):
         self._cellpose_ready = False
         self.segmentation_window.apply_cellpose_ready_state()
         if self.status_label.text() == STATUS_READY:
-            self.status_label.setText(STATUS_LOADING_CELLPOSE)
+            self.status_label.setText(STATUS_INITIALIZING)
         mmv_processing.start_cellpose_warmup(on_finished=self._on_cellpose_warmup_finished)
 
     def _on_cellpose_warmup_finished(self, gpu_ok: bool) -> None:
@@ -327,7 +336,7 @@ class MMVH4TRACKS(QWidget):
             self.label_gpu_status.setStyleSheet("color: #888888;")
         self._cellpose_ready = True
         self.segmentation_window.apply_cellpose_ready_state()
-        if self.status_label.text() == STATUS_LOADING_CELLPOSE:
+        if self.status_label.text() == STATUS_INITIALIZING:
             self.status_label.setText(STATUS_READY)
         mmv_processing.scan_mmvh4tracks_training_temp_on_startup(self)
 
@@ -798,12 +807,12 @@ class MMVH4TRACKS(QWidget):
             self,
             load_zarr_data,
             zarr_file,
-            desc="Loading zarr",
+            desc="Loading (zarr)…",
             total=4,
             on_returned=lambda result: self._apply_loaded_zarr(
                 result, zarr_file, filepath
             ),
-            finish_desc="Adding layers to viewer",
+            finish_desc="Showing data…",
         )
 
     def _start_ome_zarr_load(self, zarr_file, filepath):
@@ -812,12 +821,12 @@ class MMVH4TRACKS(QWidget):
             load_ome_zarr_data,
             zarr_file,
             filepath,
-            desc="Loading OME-zarr",
+            desc="Loading (OME-zarr)…",
             total=3,
             on_returned=lambda result: self._apply_loaded_ome_zarr(
                 result, zarr_file, filepath
             ),
-            finish_desc="Adding layers to viewer",
+            finish_desc="Showing data…",
         )
 
     def create_implicit_tracks(self):
@@ -984,7 +993,7 @@ class MMVH4TRACKS(QWidget):
             raw_image,
             segmentation,
             tracks,
-            desc="Saving zarr",
+            desc="Saving (zarr)…",
             total=3,
             on_returned=lambda _root: notify("Zarr file has been saved."),
         )
@@ -1019,7 +1028,7 @@ class MMVH4TRACKS(QWidget):
             raw_image,
             segmentation,
             tracks,
-            desc="Saving zarr",
+            desc="Saving (zarr)…",
             total=3,
             on_returned=lambda _root: notify(f"{path} has been saved."),
         )
@@ -1077,6 +1086,8 @@ class MMVH4TRACKS(QWidget):
 
     def set_status_text(self, text: str):
         """Set the status line below the progress bar."""
+        if self.status_label.text() == text:
+            return
         self.status_label.setText(text)
 
     def clear_status(self):
