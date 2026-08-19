@@ -6,6 +6,8 @@ import numpy as np
 from pathlib import Path
 from qtpy.QtWidgets import QFileDialog
 
+from ._qt_utils import awaiting_user_dialog
+
 
 def open_dialog(parent, filetype="*.zarr", directory=""):
     """
@@ -28,9 +30,10 @@ def open_dialog(parent, filetype="*.zarr", directory=""):
     dialog = QFileDialog()
     dialog.setNameFilter(filetype)
     filetype_name = filetype[2:].capitalize()
-    filepath = dialog.getExistingDirectory(
-        parent, f"Select {filetype_name}-File", directory=directory
-    )
+    with awaiting_user_dialog(parent):
+        filepath = dialog.getExistingDirectory(
+            parent, f"Select {filetype_name}-File", directory=directory
+        )
     return filepath
 
 

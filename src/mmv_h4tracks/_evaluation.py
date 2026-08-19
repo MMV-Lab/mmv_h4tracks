@@ -16,6 +16,7 @@ from qtpy.QtWidgets import (
     QAbstractScrollArea,
 )
 from qtpy.QtGui import QIntValidator
+from qtpy.QtCore import Qt
 from scipy import ndimage
 from scipy.optimize import linear_sum_assignment
 from numba import jit
@@ -113,59 +114,62 @@ class EvaluationWindow(QWidget):
         self.tracking_table.setItem(4, 1, QTableWidgetItem())
         self.tracking_table.setItem(4, 3, QTableWidgetItem())
 
-        # Spacer
-        self.v_spacer = QWidget()
-        self.v_spacer.setFixedWidth(4)
-        self.v_spacer.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
-        h_spacer_1 = QWidget()
-        h_spacer_1.setFixedHeight(0)
-        h_spacer_1.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        h_spacer_2 = QWidget()
-        h_spacer_2.setFixedHeight(0)
-        h_spacer_2.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        h_spacer_3 = QWidget()
-        h_spacer_3.setFixedHeight(0)
-        h_spacer_3.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-
-        # QGroupBoxes
+        # QGroupBoxes — Maximum vertical size so a tall tab page does not
+        # stretch the grid rows apart (QTabWidget is sized to the largest tab).
         evaluation = QGroupBox("_________")
+        evaluation.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
         evaluation_layout = QGridLayout()
-        evaluation_layout.addWidget(h_spacer_1, 0, 0, 1, -1)
-        evaluation_layout.addWidget(evaluation_label, 1, 0)
-        evaluation_layout.addWidget(self.evaluation_limit_lower, 1, 1)
-        evaluation_layout.addWidget(QLabel("-"), 1, 2)
-        evaluation_layout.addWidget(self.evaluation_limit_upper, 1, 3)
-        evaluation_layout.addWidget(evaluate_segmentation, 2, 0)
-        evaluation_layout.addWidget(evaluate_tracking, 2, 1, 1, -1)
+        evaluation_layout.setContentsMargins(6, 6, 6, 6)
+        evaluation_layout.setHorizontalSpacing(6)
+        evaluation_layout.setVerticalSpacing(4)
+        evaluation_layout.addWidget(evaluation_label, 0, 0)
+        evaluation_layout.addWidget(self.evaluation_limit_lower, 0, 1)
+        evaluation_layout.addWidget(QLabel("-"), 0, 2)
+        evaluation_layout.addWidget(self.evaluation_limit_upper, 0, 3)
+        evaluation_layout.addWidget(evaluate_segmentation, 1, 0)
+        evaluation_layout.addWidget(evaluate_tracking, 1, 1, 1, -1)
 
         evaluation.setLayout(evaluation_layout)
 
         self.segmentation_results = QGroupBox("Segmentation Results")
+        self.segmentation_results.setSizePolicy(
+            QSizePolicy.Preferred, QSizePolicy.Maximum
+        )
         self.segmentation_results.hide()
         segmentation_results_layout = QGridLayout()
-        segmentation_results_layout.addWidget(h_spacer_2, 0, 0)
-        segmentation_results_layout.addWidget(self.segmentation_table, 1, 0)
+        segmentation_results_layout.setContentsMargins(6, 6, 6, 6)
+        segmentation_results_layout.addWidget(self.segmentation_table, 0, 0)
 
         self.segmentation_results.setLayout(segmentation_results_layout)
 
         self.tracking_results = QGroupBox("Tracking Results")
+        self.tracking_results.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
         self.tracking_results.hide()
         tracking_results_layout = QGridLayout()
-        tracking_results_layout.addWidget(h_spacer_3, 0, 0)
-        tracking_results_layout.addWidget(self.tracking_table, 1, 0)
+        tracking_results_layout.setContentsMargins(6, 6, 6, 6)
+        tracking_results_layout.addWidget(self.tracking_table, 0, 0)
 
         self.tracking_results.setLayout(tracking_results_layout)
 
-        # Build the main layout
+        # Build the main layout — stretch keeps controls top-aligned in the tall tab.
+        # Default QVBoxLayout margins match the other tabs (inset from the tab frame).
         content = QWidget()
         content_layout = QVBoxLayout()
-        content_layout.addWidget(evaluation)
-        content_layout.addWidget(self.v_spacer)
+        content_layout.setAlignment(Qt.AlignTop)
+        content_layout.addWidget(evaluation, 0, Qt.AlignTop)
+        content_layout.addStretch(1)
 
         content.setLayout(content_layout)
         layout = QVBoxLayout()
+        layout.setAlignment(Qt.AlignTop)
         layout.addWidget(content)
         self.setLayout(layout)
+
+    @staticmethod
+    def _insert_results_before_stretch(content: QWidget, results_widget: QWidget) -> None:
+        """Insert a results group above the trailing stretch (keeps controls top-packed)."""
+        layout = content.layout()
+        layout.insertWidget(max(layout.count() - 1, 0), results_widget, 0, Qt.AlignTop)
 
     def update_limits(self, name):
         """
@@ -222,7 +226,7 @@ class EvaluationWindow(QWidget):
             eval_seg,
             lower_bound,
             upper_bound,
-            desc="Seg evaluation",
+            desc="Evaluating segmentation…",
             total=total,
             on_returned=_on_returned,
         )
@@ -292,8 +296,7 @@ class EvaluationWindow(QWidget):
 
         content = self.layout().itemAt(0).widget()
         if not self.segmentation_results.isVisible():
-            content.layout().replaceWidget(self.v_spacer, self.segmentation_results)
-            content.layout().addWidget(self.v_spacer)
+            self._insert_results_before_stretch(content, self.segmentation_results)
             self.segmentation_results.show()
 
     def evaluate_curated_segmentation(self, gt_seg, eval_seg):
@@ -445,7 +448,7 @@ class EvaluationWindow(QWidget):
             eval_tracks,
             lower_bound,
             upper_bound,
-            desc="Track evaluation",
+            desc="Evaluating tracking…",
             total=total,
             on_returned=_on_returned,
         )
@@ -559,8 +562,7 @@ class EvaluationWindow(QWidget):
 
         content = self.layout().itemAt(0).widget()
         if not self.tracking_results.isVisible():
-            content.layout().replaceWidget(self.v_spacer, self.tracking_results)
-            content.layout().addWidget(self.v_spacer)
+            self._insert_results_before_stretch(content, self.tracking_results)
             self.tracking_results.show()
 
     def evaluate_curated_tracking(self, gt_tracks_layer, gt_seg, eval_tracks, eval_seg):

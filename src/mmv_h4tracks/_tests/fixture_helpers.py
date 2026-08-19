@@ -29,6 +29,8 @@ def reset_plugin_state(widget: MMVH4TRACKS) -> None:
     widget.is_multiscale = False
     widget.session_trained_models.clear()
     widget._session_trained_layer_ids_hooked.clear()
+    widget._cellpose_ready = True
+    widget.segmentation_window.apply_cellpose_ready_state()
     if hasattr(widget, "zarr"):
         delattr(widget, "zarr")
 

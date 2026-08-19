@@ -13,9 +13,13 @@ from qtpy.QtCore import Qt, QRegularExpression
 from qtpy.QtGui import QRegularExpressionValidator
 
 import mmv_h4tracks._processing as processing
-from mmv_h4tracks._constants import CUSTOM_MODEL_PREFIX
+from mmv_h4tracks._constants import CUSTOM_MODEL_PREFIX, STATUS_ADDING_CUSTOM_MODEL, STATUS_READY
 from mmv_h4tracks._logger import notify
-from mmv_h4tracks._qt_utils import apply_napari_dark_theme
+from mmv_h4tracks._qt_utils import (
+    apply_napari_dark_theme,
+    awaiting_user_dialog,
+    resolve_dock_status_host,
+)
 
 SHOW_OPTIONS_TEXT = "Show advanced options"
 HIDE_OPTIONS_TEXT = "Hide advanced options"
@@ -166,12 +170,23 @@ class ModelWindow(QWidget):
         self.layout().addWidget(btn_cancel, 18, 3, 1, 3)
 
         [widget.hide() for widget in self.advanced_options]
+        self._set_dock_status(STATUS_ADDING_CUSTOM_MODEL)
+
+    def _set_dock_status(self, text: str) -> None:
+        host = resolve_dock_status_host(self.parent)
+        if host is not None:
+            host.set_status_text(text)
+
+    def closeEvent(self, event):
+        self._set_dock_status(STATUS_READY)
+        super().closeEvent(event)
 
     def select_file(self):
         """
         Opens a file dialog to select a custom Cellpose model
         """
-        retval = QFileDialog().getOpenFileName(self, "Select Cellpose Model")
+        with awaiting_user_dialog(self.parent):
+            retval = QFileDialog().getOpenFileName(self, "Select Cellpose Model")
         if retval[0] == "":
             return
         self.model_path = retval[0]

@@ -111,9 +111,9 @@ def test_export_cellpose_training_pairs_writes_tiffs(tmp_path, monkeypatch):
 
     def fake_grab(v, name):
         if name == "R":
-            return Mock(data=raw_vol)
+            return Mock(data=raw_vol, multiscale=False, name="R")
         if name == "S":
-            return Mock(data=seg_vol)
+            return Mock(data=seg_vol, multiscale=False, name="S")
         raise AssertionError(name)
 
     def fake_prepare(model_name: str):

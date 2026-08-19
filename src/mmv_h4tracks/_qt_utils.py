@@ -3,11 +3,66 @@
 from __future__ import annotations
 
 import logging
+from contextlib import contextmanager
 
 import napari
 import numpy as np
 
+from ._constants import STATUS_AWAITING_USER, STATUS_READY
+
 logger = logging.getLogger(__name__)
+
+_dock_status_host = None
+
+
+def register_dock_status_host(widget) -> None:
+    """Register the main dock widget used for progress/status updates."""
+    global _dock_status_host
+    _dock_status_host = widget
+
+
+def resolve_dock_status_host(widget=None):
+    """Return a widget with ``set_status_text``, if available."""
+    candidates = []
+    if widget is not None:
+        candidates.append(widget)
+        parent_attr = getattr(widget, "parent", None)
+        if callable(parent_attr):
+            try:
+                candidates.append(parent_attr())
+            except TypeError:
+                pass
+        elif parent_attr is not None:
+            candidates.append(parent_attr)
+    candidates.append(_dock_status_host)
+    for candidate in candidates:
+        if candidate is not None and hasattr(candidate, "set_status_text"):
+            return candidate
+    return None
+
+
+@contextmanager
+def awaiting_user_dialog(host=None):
+    """
+    Set the dock status label to ``STATUS_AWAITING_USER`` for a modal dialog.
+
+    Restores the previous status text when the dialog closes.
+    """
+    status_host = resolve_dock_status_host(host)
+    if status_host is None:
+        yield
+        return
+    label = getattr(status_host, "status_label", None)
+    previous = label.text() if label is not None else STATUS_READY
+    status_host.set_status_text(STATUS_AWAITING_USER)
+    if label is not None:
+        label.repaint()
+    try:
+        yield
+    finally:
+        status_host.set_status_text(previous)
+        if label is not None:
+            label.repaint()
 
 
 def apply_napari_dark_theme(widget) -> None:
@@ -35,15 +90,53 @@ def _spatial_pixel_count(arr: np.ndarray) -> int:
     return int(arr.size)
 
 
+def _index_sequence_levels(data):
+    """Return ``data[0] … data[n-1]`` if ``data`` is a sequence of length ≥ 2."""
+    try:
+        n = len(data)
+    except Exception:
+        return None
+    if n < 2:
+        return None
+    try:
+        return [data[i] for i in range(n)]
+    except Exception:
+        return None
+
+
+def _is_pyramid_levels(levels) -> bool:
+    """True if indexed items are different spatial resolutions (not a time series)."""
+    if not levels or len(levels) < 2:
+        return False
+    try:
+        sizes = [_spatial_pixel_count(_materialize_array(level)) for level in levels]
+    except Exception:
+        return False
+    return max(sizes) > min(sizes)
+
+
 def _iter_multiscale_levels(data):
-    """Yield level arrays from a list/tuple or napari-like multiscale sequence."""
+    """Return pyramid level arrays, or ``None`` if ``data`` is a single volume.
+
+    Napari ``MultiScaleData`` often has a ``.shape`` of the *currently displayed*
+    (sometimes coarsest) level. Indexing ``data[i]`` still yields every pyramid
+    level. A numpy/dask/zarr volume also has ``.shape`` and ``len``, but
+    ``data[i]`` is a time/z slice of the *same* Y×X — those must not be treated
+    as a pyramid.
+    """
+    if isinstance(data, np.ndarray):
+        return None
     if isinstance(data, (list, tuple)):
         return list(data)
-    # Duck-type napari MultiScaleData / similar (has len + getitem, no ndarray shape)
-    if hasattr(data, "__getitem__") and hasattr(data, "__len__") and not hasattr(
-        data, "shape"
-    ):
-        return [data[i] for i in range(len(data))]
+    if not (hasattr(data, "__getitem__") and hasattr(data, "__len__")):
+        return None
+    levels = _index_sequence_levels(data)
+    if levels is None:
+        return None
+    if not hasattr(data, "shape"):
+        return levels
+    if _is_pyramid_levels(levels):
+        return levels
     return None
 
 
@@ -53,19 +146,24 @@ def layer_as_numpy(layer) -> np.ndarray:
 
     Multiscale / pyramid layers store several resolutions. The level with the
     largest spatial (Y×X) size is used so Cellpose never silently runs on a
-    coarse pyramid level when level ordering differs from ``data[0]``.
+    coarse pyramid level when level ordering differs from ``data[0]``, and so
+    ``np.asarray(layer.data)`` cannot pick the displayed (often coarsest) level.
     """
     data = layer.data
     levels = _iter_multiscale_levels(data)
     if levels is None and getattr(layer, "multiscale", False):
         # Flagged multiscale but unusual container — try indexing.
-        try:
-            levels = [data[i] for i in range(len(data))]
-        except Exception as exc:
-            raise ValueError(
-                f"Could not read multiscale levels from layer "
-                f"{getattr(layer, 'name', layer)!r}"
-            ) from exc
+        # Skip when ``data`` already has a ``shape`` (ndarray / dask / zarr): a
+        # truthy ``multiscale`` on mocks or mis-set flags must not treat T/Z as
+        # pyramid levels. Real napari pyramids are handled above via varying Y×X.
+        if not hasattr(data, "shape"):
+            try:
+                levels = [data[i] for i in range(len(data))]
+            except Exception as exc:
+                raise ValueError(
+                    f"Could not read multiscale levels from layer "
+                    f"{getattr(layer, 'name', layer)!r}"
+                ) from exc
 
     if levels is not None:
         if len(levels) == 0:

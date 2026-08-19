@@ -21,7 +21,14 @@ from qtpy.QtGui import QRegularExpressionValidator
 from scipy import ndimage
 import pandas as pd
 
-from ._constants import CUSTOM_MODEL_PREFIX
+from ._constants import (
+    CUSTOM_MODEL_PREFIX,
+    STATUS_CLICK_MERGE_FIRST,
+    STATUS_CLICK_MERGE_SECOND,
+    STATUS_CLICK_REMOVE_CELL,
+    STATUS_CLICK_SELECT_ID,
+    STATUS_CLICK_SEPARATE,
+)
 from ._logger import notify, handle_exception
 from ._train import (
     CELLPOSE_TRAIN_N_EPOCHS_LONG,
@@ -33,7 +40,7 @@ from pathlib import Path
 import shutil
 
 from ._utils import preserve_and_filter_graph
-from ._qt_utils import apply_napari_dark_theme
+from ._qt_utils import apply_napari_dark_theme, awaiting_user_dialog
 import mmv_h4tracks._processing as processing
 from .add_models import ModelWindow
 
@@ -125,9 +132,6 @@ class SegmentationWindow(QWidget):
         self.checkbox_preview = QCheckBox("Preview")
 
         # Spacer
-        v_spacer = QWidget()
-        v_spacer.setFixedWidth(4)
-        v_spacer.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
         h_spacer_1 = QWidget()
         h_spacer_1.setFixedHeight(0)
         h_spacer_1.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
@@ -216,9 +220,16 @@ class SegmentationWindow(QWidget):
         content.setLayout(QVBoxLayout())
         content.layout().addWidget(automatic_segmentation)
         content.layout().addWidget(segmentation_correction)
-        content.layout().addWidget(v_spacer)
+        content.layout().addStretch(1)
 
         self.layout().addWidget(content)
+        self.apply_cellpose_ready_state()
+
+    def apply_cellpose_ready_state(self) -> None:
+        """Enable/disable Cellpose actions based on parent warm-up flag."""
+        ready = bool(getattr(self.parent, "_cellpose_ready", False))
+        self.btn_train_cellpose_model.setEnabled(ready)
+        self.toggle_segmentation_button(self.combobox_cellpose_model.currentText())
 
     def segment(self):
         """
@@ -302,12 +313,13 @@ class SegmentationWindow(QWidget):
             "as a .pth file (this is required to register the custom model)."
         )
         default_path = str(Path.home() / f"{model_name}.pth")
-        path, _ = QFileDialog.getSaveFileName(
-            self,
-            "Save trained model",
-            default_path,
-            "PyTorch weights (*.pth)",
-        )
+        with awaiting_user_dialog(self.parent):
+            path, _ = QFileDialog.getSaveFileName(
+                self,
+                "Save trained model",
+                default_path,
+                "PyTorch weights (*.pth)",
+            )
         if not path:
             _safe_rmtree(result.export_dir)
             notify("Save cancelled; training export removed and model not registered.")
@@ -348,6 +360,9 @@ class SegmentationWindow(QWidget):
         text : str
             the text of the combobox
         """
+        if not getattr(self.parent, "_cellpose_ready", False):
+            self.btn_segment.setEnabled(False)
+            return
         if text == "selected model":
             self.btn_segment.setEnabled(False)
         else:
@@ -382,6 +397,7 @@ class SegmentationWindow(QWidget):
 
         self.parent.callback_handler.add_callback_viewer(_remove_label)
         QApplication.setOverrideCursor(Qt.CrossCursor)
+        self.parent.set_status_text(STATUS_CLICK_REMOVE_CELL)
 
     def _remove_label(self, event):
         """
@@ -529,6 +545,7 @@ class SegmentationWindow(QWidget):
 
         self.parent.callback_handler.add_callback_viewer(_select_label)
         QApplication.setOverrideCursor(Qt.CrossCursor)
+        self.parent.set_status_text(STATUS_CLICK_SELECT_ID)
 
     def _set_label_id(self, id=0):
         """
@@ -601,6 +618,7 @@ class SegmentationWindow(QWidget):
 
         self.parent.callback_handler.add_callback_viewer(_replace_label)
         QApplication.setOverrideCursor(Qt.CrossCursor)
+        self.parent.set_status_text(STATUS_CLICK_SEPARATE)
         # Previous napari callback style (replaced by callback_handler):
         # for layer in self.viewer.layers:
         #     @layer.mouse_drag_callbacks.append
@@ -656,9 +674,11 @@ class SegmentationWindow(QWidget):
 
             self.parent.callback_handler.add_callback_viewer(_assimilate_label)
             QApplication.setOverrideCursor(Qt.CrossCursor)
+            self.parent.set_status_text(STATUS_CLICK_MERGE_SECOND)
 
         self.parent.callback_handler.add_callback_viewer(_pick_merge_label)
         QApplication.setOverrideCursor(Qt.CrossCursor)
+        self.parent.set_status_text(STATUS_CLICK_MERGE_FIRST)
 
     def _replace_label(self, event, id=-1):
         """

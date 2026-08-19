@@ -126,9 +126,6 @@ class AssistantWindow(QWidget):
         line.setStyleSheet("background-color: #c0c0c0")
 
         # Spacers
-        v_spacer = QWidget()
-        v_spacer.setFixedWidth(4)
-        v_spacer.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
         h_spacer = QWidget()
         h_spacer.setFixedHeight(10)
         h_spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
@@ -169,7 +166,7 @@ class AssistantWindow(QWidget):
         content.setLayout(QVBoxLayout())
         content.layout().addWidget(filters)
         content.layout().addWidget(segmentation_adaptation)
-        content.layout().addWidget(v_spacer)
+        content.layout().addStretch(1)
         self.layout().addWidget(content)
 
     def show_speed_outliers_on_click(self):

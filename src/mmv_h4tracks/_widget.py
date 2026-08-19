@@ -33,7 +33,7 @@ from napari.layers.tracks.tracks import Tracks
 from ._assistant import AssistantWindow
 from ._analysis import AnalysisWindow
 from ._evaluation import EvaluationWindow
-from ._constants import DEFAULT_TRACKS_LAYER_NAME, STATUS_READY
+from ._constants import DEFAULT_TRACKS_LAYER_NAME, STATUS_READY, STATUS_INITIALIZING
 from ._logger import choice_dialog, notify, handle_exception
 
 from ._reader import (
@@ -52,6 +52,7 @@ from ._session_trained_models import (
     register_session_trained_model as _register_session_trained_model_store,
 )
 from ._utils import CallbackHandler
+from ._qt_utils import awaiting_user_dialog, register_dock_status_host
 
 import mmv_h4tracks._processing as mmv_processing
 
@@ -103,6 +104,8 @@ class MMVH4TRACKS(QWidget):
         # session Cellpose models: display_name -> {training_masks_dir, layer_prefix, frames}
         self.session_trained_models: dict[str, dict] = {}
         self._session_trained_layer_ids_hooked: set[int] = set()
+        # False until Cellpose/torch warm-up finishes (gates Segment / Train).
+        self._cellpose_ready = False
 
         ### QObjects
 
@@ -167,8 +170,18 @@ class MMVH4TRACKS(QWidget):
         self._busy_widget_states = None
 
         self.status_label = QLabel(STATUS_READY)
-        self.status_label.setWordWrap(True)
-        self.status_label.setStyleSheet("color: #aaaaaa;")
+        self.status_label.setWordWrap(False)
+        self.status_label.setAlignment(Qt.AlignLeft | Qt.AlignTop)
+        self.status_label.setTextFormat(Qt.PlainText)
+        # Ignore sizeHint so long status text cannot widen the dock.
+        self.status_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+        self.status_label.setMinimumWidth(0)
+        self.status_label.setStyleSheet(
+            "color: #aaaaaa; background-color: #000000; padding: 4px 6px;"
+        )
+        line_h = self.status_label.fontMetrics().lineSpacing()
+        self.status_label.setFixedHeight(line_h * 3 + 8)
+        register_dock_status_host(self)
 
         # Horizontal lines
         line = QWidget()
@@ -180,23 +193,6 @@ class MMVH4TRACKS(QWidget):
         line2.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         line2.setStyleSheet("background-color: #c0c0c0")
 
-        # Spacers
-        h_spacer_1 = QWidget()
-        h_spacer_1.setFixedHeight(0)
-        h_spacer_1.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        h_spacer_2 = QWidget()
-        h_spacer_2.setFixedHeight(4)
-        h_spacer_2.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        h_spacer_3 = QWidget()
-        h_spacer_3.setFixedHeight(0)
-        h_spacer_3.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        h_spacer_4 = QWidget()
-        h_spacer_4.setFixedHeight(4)
-        h_spacer_4.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        h_spacer_5 = QWidget()
-        h_spacer_5.setFixedHeight(4)
-        h_spacer_5.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-
         # QGroupBoxes
         computation_mode = QGroupBox("Computation mode")
         computation_mode_tooltip = (
@@ -207,34 +203,27 @@ class MMVH4TRACKS(QWidget):
             "</ul>"
         )
         computation_mode.setToolTip(computation_mode_tooltip)
-        computation_mode.setLayout(QGridLayout())
-        computation_mode.layout().addWidget(h_spacer_1, 0, 0, 1, -1)
-        computation_mode.layout().addWidget(self.rb_eco, 1, 0)
-        computation_mode.layout().addWidget(rb_heavy, 1, 1)
+        computation_mode_layout = QGridLayout()
+        computation_mode_layout.setContentsMargins(6, 11, 6, 6)
+        computation_mode_layout.setVerticalSpacing(4)
+        computation_mode.setLayout(computation_mode_layout)
+        computation_mode.layout().addWidget(self.rb_eco, 0, 0)
+        computation_mode.layout().addWidget(rb_heavy, 0, 1)
         computation_mode.layout().setColumnStretch(2, 1)
 
-        self.label_gpu_status = QLabel()
-        try:
-            from cellpose import core as _cellpose_core
-
-            _gpu_ok = bool(_cellpose_core.use_gpu())
-        except Exception:
-            _gpu_ok = False
-        if _gpu_ok:
-            self.label_gpu_status.setText("GPU: available")
-            self.label_gpu_status.setStyleSheet("color: #6a9e6a;")
-        else:
-            self.label_gpu_status.setText("GPU: not available")
-            self.label_gpu_status.setStyleSheet("color: #888888;")
+        self.label_gpu_status = QLabel("GPU: checking…")
+        self.label_gpu_status.setStyleSheet("color: #888888;")
         self.label_gpu_status.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        computation_mode.layout().addWidget(self.label_gpu_status, 1, 2)
+        computation_mode.layout().addWidget(self.label_gpu_status, 0, 2)
 
         self.file_interaction = QGroupBox()
-        self.file_interaction.setLayout(QGridLayout())
-        self.file_interaction.layout().addWidget(h_spacer_3, 0, 0, 1, -1)
-        self.file_interaction.layout().addWidget(btn_load, 1, 0)
-        self.file_interaction.layout().addWidget(btn_save, 1, 1)
-        self.file_interaction.layout().addWidget(btn_save_as, 1, 2)
+        file_layout = QGridLayout()
+        file_layout.setContentsMargins(6, 11, 6, 6)
+        file_layout.setSpacing(4)
+        self.file_interaction.setLayout(file_layout)
+        self.file_interaction.layout().addWidget(btn_load, 0, 0)
+        self.file_interaction.layout().addWidget(btn_save, 0, 1)
+        self.file_interaction.layout().addWidget(btn_save_as, 0, 2)
 
         # QTabwidget
         tabwidget = QTabWidget()
@@ -252,25 +241,28 @@ class MMVH4TRACKS(QWidget):
         ### Organize objects via widgets
         # widget: parent widget of all content
         widget = QWidget()
-        widget.setLayout(QGridLayout())
+        main_layout = QGridLayout()
+        # Keep spacing small: default (~11px × many rows) made the dock overflow.
+        # 4px restores breathing room between layer comboboxes without the old height.
+        main_layout.setVerticalSpacing(4)
+        main_layout.setHorizontalSpacing(6)
+        main_layout.setContentsMargins(4, 4, 4, 4)
+        widget.setLayout(main_layout)
         widget.layout().addWidget(logo_label, 0, 0, 1, 2)
         widget.layout().addWidget(title, 0, 2)
         widget.layout().addWidget(computation_mode, 1, 0, 1, -1)
-        widget.layout().addWidget(h_spacer_2, 2, 0, 1, -1)
-        widget.layout().addWidget(self.file_interaction, 3, 0, 1, -1)
-        widget.layout().addWidget(h_spacer_4, 4, 0, 1, -1)
-        widget.layout().addWidget(line, 5, 0, 1, -1)
-        widget.layout().addWidget(label_image, 6, 0)
-        widget.layout().addWidget(self.combobox_image, 6, 1, 1, 2)
-        widget.layout().addWidget(label_segmentation, 7, 0)
-        widget.layout().addWidget(self.combobox_segmentation, 7, 1, 1, 2)
-        widget.layout().addWidget(label_tracks, 8, 0)
-        widget.layout().addWidget(self.combobox_tracks, 8, 1, 1, 2)
-        widget.layout().addWidget(line2, 9, 0, 1, -1)
-        widget.layout().addWidget(h_spacer_5, 10, 0, 1, -1)
-        widget.layout().addWidget(tabwidget, 11, 0, 1, -1)
-        widget.layout().addWidget(self.progress_bar, 12, 0, 1, -1)
-        widget.layout().addWidget(self.status_label, 13, 0, 1, -1)
+        widget.layout().addWidget(self.file_interaction, 2, 0, 1, -1)
+        widget.layout().addWidget(line, 3, 0, 1, -1)
+        widget.layout().addWidget(label_image, 4, 0)
+        widget.layout().addWidget(self.combobox_image, 4, 1, 1, 2)
+        widget.layout().addWidget(label_segmentation, 5, 0)
+        widget.layout().addWidget(self.combobox_segmentation, 5, 1, 1, 2)
+        widget.layout().addWidget(label_tracks, 6, 0)
+        widget.layout().addWidget(self.combobox_tracks, 6, 1, 1, 2)
+        widget.layout().addWidget(line2, 7, 0, 1, -1)
+        widget.layout().addWidget(tabwidget, 8, 0, 1, -1)
+        widget.layout().addWidget(self.progress_bar, 9, 0, 1, -1)
+        widget.layout().addWidget(self.status_label, 10, 0, 1, -1)
 
         # Scrollarea allows content to be larger than the assigned space (small monitor)
         scroll_area = QScrollArea()
@@ -278,10 +270,12 @@ class MMVH4TRACKS(QWidget):
         scroll_area.setWidgetResizable(True)
 
         self.setLayout(QVBoxLayout())
+        self.layout().setContentsMargins(0, 0, 0, 0)
+        self.layout().setSpacing(0)
         self.layout().addWidget(scroll_area)
 
         self.setMinimumWidth(540)
-        self.setMinimumHeight(900)
+        self.setMinimumHeight(400)
 
         custom_binds = [
             ("W", self.hotkey_next_free),
@@ -319,10 +313,32 @@ class MMVH4TRACKS(QWidget):
                 combobox.addItem("")
         self.viewer.layers.events.moving.connect(self.reorder_entry_in_comboboxes)
 
-        QTimer.singleShot(
-            0,
-            lambda: mmv_processing.scan_mmvh4tracks_training_temp_on_startup(self),
-        )
+        # Import Cellpose/torch off the GUI thread after the dock is shown.
+        # Resume-interrupted-training scan runs only after warm-up finishes.
+        QTimer.singleShot(0, self._start_cellpose_warmup)
+
+    def _start_cellpose_warmup(self) -> None:
+        if getattr(self, "_cellpose_warmup_started", False):
+            return
+        self._cellpose_warmup_started = True
+        self._cellpose_ready = False
+        self.segmentation_window.apply_cellpose_ready_state()
+        if self.status_label.text() == STATUS_READY:
+            self.status_label.setText(STATUS_INITIALIZING)
+        mmv_processing.start_cellpose_warmup(on_finished=self._on_cellpose_warmup_finished)
+
+    def _on_cellpose_warmup_finished(self, gpu_ok: bool) -> None:
+        if gpu_ok:
+            self.label_gpu_status.setText("GPU: available")
+            self.label_gpu_status.setStyleSheet("color: #6a9e6a;")
+        else:
+            self.label_gpu_status.setText("GPU: not available")
+            self.label_gpu_status.setStyleSheet("color: #888888;")
+        self._cellpose_ready = True
+        self.segmentation_window.apply_cellpose_ready_state()
+        if self.status_label.text() == STATUS_INITIALIZING:
+            self.status_label.setText(STATUS_READY)
+        mmv_processing.scan_mmvh4tracks_training_temp_on_startup(self)
 
     def selected_image_layer(self):
         """Return the Image layer named in combobox_image. Raises ValueError if blank/missing."""
@@ -389,9 +405,10 @@ class MMVH4TRACKS(QWidget):
             return
         
         # Open file dialog filtered to .txt files
-        retval = QFileDialog().getOpenFileName(
-            self, "Select Lineage File", "", "Text files (*.txt)"
-        )
+        with awaiting_user_dialog(self):
+            retval = QFileDialog().getOpenFileName(
+                self, "Select Lineage File", "", "Text files (*.txt)"
+            )
         filepath = retval[0]
         
         # Return early if user canceled
@@ -675,7 +692,8 @@ class MMVH4TRACKS(QWidget):
                 msg.addButton(QMessageBox.Yes)
                 msg.addButton(QMessageBox.YesToAll)
                 msg.addButton(QMessageBox.Cancel)
-                ret = msg.exec()
+                with awaiting_user_dialog(self):
+                    ret = msg.exec()
 
                 # Cancel
                 if ret == QMessageBox.Cancel:
@@ -789,12 +807,12 @@ class MMVH4TRACKS(QWidget):
             self,
             load_zarr_data,
             zarr_file,
-            desc="Loading zarr",
+            desc="Loading (zarr)…",
             total=4,
             on_returned=lambda result: self._apply_loaded_zarr(
                 result, zarr_file, filepath
             ),
-            finish_desc="Adding layers to viewer",
+            finish_desc="Showing data…",
         )
 
     def _start_ome_zarr_load(self, zarr_file, filepath):
@@ -803,12 +821,12 @@ class MMVH4TRACKS(QWidget):
             load_ome_zarr_data,
             zarr_file,
             filepath,
-            desc="Loading OME-zarr",
+            desc="Loading (OME-zarr)…",
             total=3,
             on_returned=lambda result: self._apply_loaded_ome_zarr(
                 result, zarr_file, filepath
             ),
-            finish_desc="Adding layers to viewer",
+            finish_desc="Showing data…",
         )
 
     def create_implicit_tracks(self):
@@ -975,7 +993,7 @@ class MMVH4TRACKS(QWidget):
             raw_image,
             segmentation,
             tracks,
-            desc="Saving zarr",
+            desc="Saving (zarr)…",
             total=3,
             on_returned=lambda _root: notify("Zarr file has been saved."),
         )
@@ -989,7 +1007,8 @@ class MMVH4TRACKS(QWidget):
             notify("Some tracks are not displayed, not saving")
             return
         dialog = QFileDialog()
-        path = f"{dialog.getSaveFileName()[0]}"
+        with awaiting_user_dialog(self):
+            path = f"{dialog.getSaveFileName()[0]}"
         if not path.endswith(".zarr"):
             path += ".zarr"
         if path == ".zarr":
@@ -1009,7 +1028,7 @@ class MMVH4TRACKS(QWidget):
             raw_image,
             segmentation,
             tracks,
-            desc="Saving zarr",
+            desc="Saving (zarr)…",
             total=3,
             on_returned=lambda _root: notify(f"{path} has been saved."),
         )
@@ -1067,6 +1086,8 @@ class MMVH4TRACKS(QWidget):
 
     def set_status_text(self, text: str):
         """Set the status line below the progress bar."""
+        if self.status_label.text() == text:
+            return
         self.status_label.setText(text)
 
     def clear_status(self):

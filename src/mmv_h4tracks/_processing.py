@@ -6,7 +6,6 @@ from datetime import datetime
 from pathlib import Path
 
 import numpy as np
-from cellpose import models, core
 from napari.qt.threading import create_worker
 from qtpy.QtCore import Qt, QThread, QObject, Signal
 from qtpy.QtWidgets import QApplication, QMessageBox
@@ -31,7 +30,7 @@ from ._custom_models import (
 from ._grabber import grab_layer
 from ._session_trained_models import overlap_training_frames_with_stack
 from ._logger import handle_exception, notify
-from ._qt_utils import layer_as_numpy, _iter_multiscale_levels
+from ._qt_utils import layer_as_numpy, _iter_multiscale_levels, awaiting_user_dialog
 from ._train import CELLPOSE_TRAIN_N_EPOCHS_DEFAULT, _sanitize_model_name_fragment
 
 logger = logging.getLogger(__name__)
@@ -48,6 +47,43 @@ handler.setFormatter(
 )
 logger.addHandler(handler)
 logger.debug("logger initialized")
+
+# Cellpose/torch are heavy; import only when needed (and optionally warm on a worker).
+_cellpose_models = None
+_cellpose_core = None
+_cellpose_import_lock = threading.Lock()
+
+
+def _get_cellpose():
+    """Return ``(models, core)``, importing Cellpose on first use."""
+    global _cellpose_models, _cellpose_core
+    if _cellpose_models is None:
+        with _cellpose_import_lock:
+            if _cellpose_models is None:
+                from cellpose import models, core
+
+                _cellpose_models = models
+                _cellpose_core = core
+    return _cellpose_models, _cellpose_core
+
+
+def _worker_warm_cellpose() -> bool:
+    """Import Cellpose and report GPU availability (runs off the GUI thread)."""
+    _, core = _get_cellpose()
+    try:
+        return bool(core.use_gpu())
+    except Exception:
+        return False
+
+
+def start_cellpose_warmup(*, on_finished) -> None:
+    """
+    Prefetch Cellpose/torch on a napari worker, then call ``on_finished(gpu_ok)``
+    on the GUI thread when done.
+    """
+    worker = create_worker(_worker_warm_cellpose)
+    worker.returned.connect(on_finished)
+    worker.start()
 
 
 def segment_slice_cpu(layer_slice, parameters):
@@ -72,6 +108,7 @@ def segment_slice_cpu(layer_slice, parameters):
         + str(starttime)
     )
     logger.info("Segmentation process started")
+    models, _ = _get_cellpose()
     model = models.CellposeModel(gpu=False, pretrained_model=parameters["model_path"])
     eval_params = {k: v for k, v in parameters.items() if k != "model_path"}
     mask, _, _ = model.eval(layer_slice, **eval_params)
@@ -278,7 +315,7 @@ def start_cellpose_training_worker(
         _worker_train_cellpose,
         Path(export_dir),
         ne,
-        desc="Training Cellpose",
+        desc="Training…",
         total=steps,
         on_returned=on_returned,
     )
@@ -292,26 +329,19 @@ def _load_segmentation_image_data(widget, demo: bool):
     layer = widget.parent.selected_image_layer()
 
     raw = layer.data
-    levels = None
-    if isinstance(raw, (list, tuple)) or getattr(layer, "multiscale", False):
-        try:
-            levels = _iter_multiscale_levels(raw)
-            if levels is None and hasattr(raw, "__len__"):
-                levels = [raw[i] for i in range(len(raw))]
-        except Exception:
-            levels = None
-        if levels is not None:
-            shapes = []
-            for level in levels:
-                try:
-                    shapes.append(tuple(np.asarray(level).shape))
-                except Exception:
-                    shapes.append(None)
-            logger.info(
-                "Segmentation image %r is multiscale; level shapes=%s",
-                getattr(layer, "name", None),
-                shapes,
-            )
+    levels = _iter_multiscale_levels(raw)
+    if levels is not None:
+        shapes = []
+        for level in levels:
+            try:
+                shapes.append(tuple(np.asarray(level).shape))
+            except Exception:
+                shapes.append(None)
+        logger.info(
+            "Segmentation image %r is multiscale; level shapes=%s",
+            getattr(layer, "name", None),
+            shapes,
+        )
 
     data = layer_as_numpy(layer)
 
@@ -498,13 +528,14 @@ def _prompt_exclude_training_frames_if_applicable(
         "(Yes: predict only other frames; training frames are filled from disk. "
         "No: run Cellpose on the full stack.)"
     )
-    reply = QMessageBox.question(
-        widget,
-        "napari",
-        text,
-        QMessageBox.Yes | QMessageBox.No,
-        QMessageBox.Yes,
-    )
+    with awaiting_user_dialog(widget):
+        reply = QMessageBox.question(
+            widget,
+            "napari",
+            text,
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.Yes,
+        )
     if reply != QMessageBox.Yes:
         return None
     masks_dir = Path(meta["training_masks_dir"])
@@ -531,9 +562,8 @@ def run_demo_segmentation(widget):
 
 
 def _segmentation_progress(widget, exclude_frame_indices, demo: bool = False):
-    """Build a dock progress dict for Cellpose (GPU or CPU)."""
-    use_gpu = core.use_gpu()
-    desc = "Cellpose (GPU)" if use_gpu else "Cellpose (CPU)"
+    """Build a dock progress dict for automatic segmentation."""
+    desc = "Segmenting…"
     try:
         data = np.squeeze(layer_as_numpy(widget.parent.selected_image_layer()))
     except Exception:
@@ -873,9 +903,9 @@ def _start_segmentation_worker(
 ):
     """Start Cellpose on a worker with dock progress (CPU and GPU)."""
     parent = widget.parent
+    _, core = _get_cellpose()
     progress = _segmentation_progress(widget, exclude_frame_indices, demo)
     worker_fn = _segment_image_gpu if core.use_gpu() else _segment_image_cpu
-    backend = "GPU" if core.use_gpu() else "CPU"
     return run_with_dock_progress(
         parent,
         worker_fn,
@@ -887,7 +917,7 @@ def _start_segmentation_worker(
         excluded_frames_layer_prefix,
         mode="yield",
         progress=progress,
-        idle_status=f"Cellpose ({backend}) — running…",
+        idle_status="Segmenting…",
         on_returned=_add_segmentation_to_viewer,
     )
 
@@ -1054,6 +1084,7 @@ def _segment_image_gpu(
     parameters = _get_parameters(widget, selected_model)
 
     logger.info("Using GPU for segmentation")
+    models, _ = _get_cellpose()
     model = models.CellposeModel(
         gpu=True, pretrained_model=parameters.pop("model_path")
     )
@@ -1156,7 +1187,7 @@ def _track_segmentation(widget, on_returned=None):
         _worker_track_segmentation,
         widget,
         data,
-        desc="Coordinate tracking",
+        desc="Finding tracks…",
         total=total,
         on_returned=on_returned,
     )
@@ -1365,7 +1396,8 @@ def _process_matches(matches):
 
 def scan_mmvh4tracks_training_temp_on_startup(main_widget) -> None:
     """
-    On plugin load: clean stale training temp dirs; offer to resume interrupted training.
+    After Cellpose warm-up: clean stale training temp dirs; offer to resume
+    interrupted training.
     """
     from ._train import (
         _safe_rmtree,
@@ -1389,14 +1421,15 @@ def scan_mmvh4tracks_training_temp_on_startup(main_widget) -> None:
         mtime = datetime.fromtimestamp(d.stat().st_mtime)
         day_str = mtime.strftime("%Y-%m-%d %H:%M")
         fragment = parse_model_fragment_from_train_dir_name(d.name) or d.name
-        reply = QMessageBox.question(
-            main_widget,
-            "napari",
-            f"It seems training on data {fragment} on {day_str} was interrupted.\n\n"
-            "Would you like to try again?",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No,
-        )
+        with awaiting_user_dialog(main_widget):
+            reply = QMessageBox.question(
+                main_widget,
+                "napari",
+                f"It seems training on data {fragment} on {day_str} was interrupted.\n\n"
+                "Would you like to try again?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
         if reply != QMessageBox.Yes:
             _safe_rmtree(d)
             continue
