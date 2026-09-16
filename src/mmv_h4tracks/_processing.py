@@ -1116,6 +1116,115 @@ def _segment_image_gpu(
     )
 
 
+def segment_volume(data, parameters, n_processes, progress_cb=None):
+    """
+    Segment a 2D/3D volume without a viewer (batch path).
+
+    Uses the GPU when Cellpose reports one, otherwise a CPU process pool.
+
+    Parameters
+    ----------
+    data : nd array
+        Raw image data, 2D or 3D after squeezing trivial dimensions
+    parameters : dict
+        Model parameters as returned by :func:`_get_parameters`
+    n_processes : int
+        Process budget for the CPU path
+    progress_cb : callable, optional
+        Called once per segmented frame
+
+    Returns
+    -------
+    nd array
+        The segmentation mask, same shape as the squeezed input
+    """
+    data = np.squeeze(np.asarray(data))
+    if data.ndim not in (2, 3):
+        raise ValueError(
+            "Data must be 2D or 3D after removing trivial dimensions, "
+            f"got shape {data.shape}"
+        )
+    frames = data[np.newaxis] if data.ndim == 2 else data
+    mask = np.zeros(frames.shape, dtype=np.int32)
+
+    models, core = _get_cellpose()
+    if core.use_gpu():
+        logger.info("Using GPU for segmentation")
+        eval_params = dict(parameters)
+        model = models.CellposeModel(
+            gpu=True, pretrained_model=eval_params.pop("model_path")
+        )
+        for i in range(len(frames)):
+            frame_mask, _, _ = model.eval(frames[i], **eval_params)
+            mask[i] = frame_mask
+            if progress_cb is not None:
+                progress_cb()
+    else:
+        logger.info("Using CPU for segmentation")
+        tasks = [(frames[i], parameters) for i in range(len(frames))]
+        for task_i, frame_mask in iter_starmap_as_completed(
+            segment_slice_cpu, tasks, n_processes
+        ):
+            mask[task_i] = frame_mask
+            if progress_cb is not None:
+                progress_cb()
+
+    return mask[0] if data.ndim == 2 else mask
+
+
+def track_by_coordinates(segmentation, n_workers, progress_cb=None):
+    """
+    Coordinate-based tracking of a label volume.
+
+    ``progress_cb`` is called once per frame (centroids) and once per frame
+    pair (matching), matching the step count used by the dock progress bar.
+
+    Parameters
+    ----------
+    segmentation : nd array
+        3D label volume (ZYX)
+    n_workers : int
+        Process budget
+    progress_cb : callable, optional
+        Called once per completed step
+
+    Returns
+    -------
+    nd array
+        (N,4) shape array in napari's tracks layer format (ID, z, y, x)
+    """
+    data = np.asarray(segmentation)
+    n_frames = int(len(data))
+
+    starttime = time.time()
+    extended_centroids = [None] * n_frames
+    for task_i, result in iter_map_as_completed(calculate_centroids, data, n_workers):
+        extended_centroids[task_i] = result
+        if progress_cb is not None:
+            progress_cb()
+    time_centroids = time.time()
+    logger.info(f"calculating centroids took {time_centroids - starttime} seconds")
+
+    slice_pairs = [
+        (extended_centroids[i - 1], extended_centroids[i]) for i in range(1, n_frames)
+    ]
+    matches = [None] * len(slice_pairs)
+    for task_i, result in iter_map_as_completed(match_centroids, slice_pairs, n_workers):
+        matches[task_i] = result
+        if progress_cb is not None:
+            progress_cb()
+    time_matches = time.time()
+    logger.info(f"matching centroids took {time_matches - time_centroids} seconds")
+
+    if not matches:
+        return np.empty((0, 4), dtype=int)
+    tracks = _process_matches(matches)
+    logger.info(f"processing matches took {time.time() - time_matches} seconds")
+    if tracks.size == 0:
+        return np.empty((0, 4), dtype=int)
+    return tracks
+
+
 def _get_parameters(widget, model: str):
     """
     Get the parameters for the selected model
@@ -1198,38 +1307,11 @@ def _worker_track_segmentation(widget, data, reporter: DockProgressReporter):
     Coordinate tracking. Reports progress via ``reporter`` (side channel);
     returns the tracks array.
     """
-    starttime = time.time()
     QApplication.setOverrideCursor(Qt.WaitCursor)
     try:
-        n_workers = widget.parent.get_process_limit()
-        n_frames = int(len(data))
-
-        extended_centroids = [None] * n_frames
-        for task_i, result in iter_map_as_completed(
-            calculate_centroids, data, n_workers
-        ):
-            extended_centroids[task_i] = result
-            reporter.increment()
-        time3 = time.time()
-        logger.info(f"calculating centroids took {time3 - starttime} seconds")
-
-        slice_pairs = [
-            (extended_centroids[i - 1], extended_centroids[i])
-            for i in range(1, n_frames)
-        ]
-        matches = [None] * len(slice_pairs)
-        for task_i, result in iter_map_as_completed(
-            match_centroids, slice_pairs, n_workers
-        ):
-            matches[task_i] = result
-            reporter.increment()
-        time4 = time.time()
-        logger.info(f"matching centroids took {time4 - time3} seconds")
-
-        tracks = _process_matches(matches)
-        time5 = time.time()
-        logger.info(f"processing matches took {time5 - time4} seconds")
-        return tracks
+        return track_by_coordinates(
+            data, widget.parent.get_process_limit(), progress_cb=reporter.increment
+        )
     finally:
         QApplication.restoreOverrideCursor()
 

@@ -69,28 +69,20 @@ def write_zarr_data(file, raw_image, segmentation, tracks, reporter=None):
         exists = "raw_data" in root
 
     if not exists:
-        root.create_dataset(
-            "raw_data",
-            shape=raw_image.shape,
-            dtype="f8",
-            data=raw_image,
-        )
+        # ``create_array`` (unlike the removed ``create_dataset``) does not
+        # accept ``data`` on zarr's minimum supported version (3.0.8), so the
+        # array is created empty and filled via slice assignment, which works
+        # the same way across all zarr 3.x versions.
+        root.create_array("raw_data", shape=raw_image.shape, dtype="f8")
+        root["raw_data"][:] = raw_image
         if reporter is not None:
             reporter.increment()
-        root.create_dataset(
-            "segmentation_data",
-            shape=segmentation.shape,
-            dtype="i4",
-            data=segmentation,
-        )
+        root.create_array("segmentation_data", shape=segmentation.shape, dtype="i4")
+        root["segmentation_data"][:] = segmentation
         if reporter is not None:
             reporter.increment()
-        root.create_dataset(
-            "tracking_data",
-            shape=tracks.shape,
-            dtype="i4",
-            data=tracks,
-        )
+        root.create_array("tracking_data", shape=tracks.shape, dtype="i4")
+        root["tracking_data"][:] = tracks
         if reporter is not None:
             reporter.increment()
     else:

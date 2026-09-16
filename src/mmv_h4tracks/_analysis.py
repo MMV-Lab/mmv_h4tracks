@@ -940,7 +940,7 @@ class AnalysisWindow(QWidget):
             total=total,
         )
 
-    def _export(self, file, metrics, tracks, segmentation, reporter):
+    def _export(self, file, metrics, tracks, segmentation, reporter, filters=None):
         """
         Exports the selected metrics as csv
 
@@ -956,6 +956,9 @@ class AnalysisWindow(QWidget):
             labels volume when cell-based metrics are selected
         reporter : DockProgressReporter
             cumulative progress across selected metrics
+        filters : tuple, optional
+            ``(movement, track duration)`` filter texts; the line edits of this
+            tab are read if omitted
         """
         # Filter always needs path lengths. Progress for this pass is either the
         # selected "Accumulated distance" budget or the extra filter-prep steps.
@@ -965,7 +968,9 @@ class AnalysisWindow(QWidget):
             filtered_mask,
             min_movement,
             min_duration,
-        ) = self._filter_tracks_by_parameters(tracks, distances=distances)
+        ) = self._filter_tracks_by_parameters(
+            tracks, distances=distances, filters=filters
+        )
 
         direction = None
         if "Direction" in metrics:
@@ -989,7 +994,7 @@ class AnalysisWindow(QWidget):
         )
         save_csv(file, data)
 
-    def _filter_tracks_by_parameters(self, tracks, distances=None):
+    def _filter_tracks_by_parameters(self, tracks, distances=None, filters=None):
         """
         Filters the tracks by the given parameters
 
@@ -999,6 +1004,9 @@ class AnalysisWindow(QWidget):
             (N,4) shape array, which follows napari's trackslayer format (ID, z, y, x)
         distances : nd array, optional
             Precomputed accumulated distances; computed if omitted
+        filters : tuple, optional
+            ``(movement, track duration)`` filter texts; the line edits of this
+            tab are read if omitted
 
         Returns
         -------
@@ -1011,22 +1019,29 @@ class AnalysisWindow(QWidget):
         """
         if distances is None:
             distances = self._calculate_accumulated_distance(tracks)
-        if self.lineedit_movement.text() == "":
+        if filters is None:
+            filters = (
+                self.lineedit_movement.text(),
+                self.lineedit_track_duration.text(),
+            )
+        movement_text, duration_text = filters
+
+        if movement_text == "":
             min_movement = 0
             movement_mask = np.unique(tracks[:, 0])
         else:
             try:
-                min_movement = int(self.lineedit_movement.text())
+                min_movement = int(movement_text)
             except ValueError as exc:
                 raise ValueError("Movement minimum can't be converted to int") from exc
             movement_mask = distances[np.where(distances[:, 1] >= min_movement)[0], 0]
 
-        if self.lineedit_track_duration.text() == "":
+        if duration_text == "":
             min_duration = 0
             duration_mask = np.unique(tracks[:, 0])
         else:
             try:
-                min_duration = int(self.lineedit_track_duration.text())
+                min_duration = int(duration_text)
             except ValueError as exc:
                 raise ValueError("Minimum duration can't be converted to int") from exc
             indices = np.where(

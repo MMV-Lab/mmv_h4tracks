@@ -31,6 +31,7 @@ from napari.layers.labels.labels import Labels
 from napari.layers.tracks.tracks import Tracks
 
 from ._assistant import AssistantWindow
+from ._batch import BatchWindow
 from ._analysis import AnalysisWindow
 from ._evaluation import EvaluationWindow
 from ._constants import DEFAULT_TRACKS_LAYER_NAME, STATUS_READY, STATUS_INITIALIZING
@@ -237,6 +238,8 @@ class MMVH4TRACKS(QWidget):
         tabwidget.addTab(self.evaluation_window, "Evaluation")
         self.assistant_window = AssistantWindow(self)
         tabwidget.addTab(self.assistant_window, "Assistant")
+        self.batch_window = BatchWindow(self)
+        tabwidget.addTab(self.batch_window, "Batch")
 
         ### Organize objects via widgets
         # widget: parent widget of all content
