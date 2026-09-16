@@ -4,6 +4,7 @@ import numpy as np
 from qtpy.QtWidgets import (
     QWidget,
     QVBoxLayout,
+    QHBoxLayout,
     QLabel,
     QLineEdit,
     QComboBox,
@@ -29,6 +30,16 @@ import mmv_h4tracks._processing as processing
 
 # Plot/export metrics that progress by unique track time index (segmentation per cell/frame).
 _CELL_BASED_PLOT_METRICS = frozenset({"Size", "Perimeter", "Eccentricity"})
+
+# Plot chrome for _plot(): title/label pad, a fixed subplot margin, and a
+# pinned y-label position, all kept constant regardless of content so
+# zooming/panning never shifts the frame (see Selector, which relies on this
+# and does not touch the layout itself). Margins are picked generously
+# enough for long/negative/decimal y-tick labels - see test_analysis.py.
+PLOT_TITLE_PAD = 20
+PLOT_LABELPAD = 15
+PLOT_MARGINS = {"left": 0.22, "right": 0.92, "top": 0.84, "bottom": 0.14}
+PLOT_YLABEL_AXES_X = -0.26
 
 
 def _progress_increment(reporter, step: int = 1) -> None:
@@ -699,9 +710,19 @@ class AnalysisWindow(QWidget):
                 bottom=min(0, axes.get_ylim()[0]), top=max(0, axes.get_ylim()[1])
             )
 
-        axes.set_title(title, {"fontsize": 22, "color": "white"})
-        axes.set_xlabel(plot_dict["x_label"], fontsize=15)
-        axes.set_ylabel(plot_dict["y_label"], fontsize=15)
+        # Extra pad/labelpad reserves room for the off-screen indicator
+        # arrows (see Selector), which sit just outside the axes.
+        axes.set_title(title, {"fontsize": 22, "color": "white"}, pad=PLOT_TITLE_PAD)
+        axes.set_xlabel(plot_dict["x_label"], fontsize=15, labelpad=PLOT_LABELPAD)
+        axes.set_ylabel(plot_dict["y_label"], fontsize=15, labelpad=PLOT_LABELPAD)
+
+        # Fixed margin/position rather than computed adaptively (e.g. via
+        # tight_layout()) on every interaction: recomputing per zoom/pan made
+        # the frame visibly shift as tick labels changed width. A fixed
+        # layout never needs to move, at the cost of some unused whitespace
+        # for shorter labels.
+        fig.subplots_adjust(**PLOT_MARGINS)
+        axes.yaxis.set_label_coords(PLOT_YLABEL_AXES_X, 0.5)
 
         canvas = FigureCanvas(fig)
         self.parent.plot_window = QWidget()
@@ -711,9 +732,20 @@ class AnalysisWindow(QWidget):
         self.selector = Selector(self, axes, results)
 
         self.parent.plot_window.layout().addWidget(canvas)
+
+        button_row = QWidget()
+        button_row.setLayout(QHBoxLayout())
+        btn_home = QPushButton("Home")
+        btn_home.setToolTip("Reset the plot to its initial view")
+        btn_home.clicked.connect(self.selector.reset_view)
         btn_apply = QPushButton("Apply")
         btn_apply.clicked.connect(self.selector.apply)
-        self.parent.plot_window.layout().addWidget(btn_apply)
+        # Apply is the primary action and gets the extra layout space; Home
+        # stays at its natural (smaller) size.
+        button_row.layout().addWidget(btn_home)
+        button_row.layout().addWidget(btn_apply, 1)
+        self.parent.plot_window.layout().addWidget(button_row)
+
         self.parent.plot_window.show()
 
     def _sort_plot_data(self, metric, tracks, segmentation, reporter):
