@@ -18,8 +18,8 @@ def widget(create_widget):
         create_widget.plot_window = None
 
 
-def test_plot_adds_home_and_apply_buttons(widget):
-    """The plot window gets a smaller Home button next to a larger Apply button"""
+def test_plot_adds_reset_view_and_apply_buttons(widget):
+    """The plot window gets a smaller Reset view button next to a larger Apply button"""
     plot_dict = {
         "Name": "Speed [px/frame]",
         "Description": "Scatterplot Standard Deviation vs Average: Speed",
@@ -32,20 +32,20 @@ def test_plot_adds_home_and_apply_buttons(widget):
 
     buttons = widget.plot_window.findChildren(QPushButton)
     labels = [button.text() for button in buttons]
-    assert "Home" in labels
+    assert "Reset view" in labels
     assert "Apply" in labels
 
-    home = next(button for button in buttons if button.text() == "Home")
+    reset_view = next(button for button in buttons if button.text() == "Reset view")
     apply_btn = next(button for button in buttons if button.text() == "Apply")
-    # Apply has layout stretch and grows to fill the row; Home has none and
-    # stays at its natural (smaller) size.
-    row_layout = home.parent().layout()
-    assert row_layout.stretch(row_layout.indexOf(home)) == 0
+    # Apply has layout stretch and grows to fill the row; Reset view has none
+    # and stays at its natural (smaller) size.
+    row_layout = reset_view.parent().layout()
+    assert row_layout.stretch(row_layout.indexOf(reset_view)) == 0
     assert row_layout.stretch(row_layout.indexOf(apply_btn)) > 0
 
 
-def test_home_button_resets_the_view(widget):
-    """Clicking Home restores the view after zooming"""
+def test_reset_view_button_resets_the_view(widget):
+    """Clicking Reset view restores the view after zooming"""
     plot_dict = {
         "Name": "Speed [px/frame]",
         "Description": "Scatterplot Standard Deviation vs Average: Speed",
@@ -62,7 +62,7 @@ def test_home_button_resets_the_view(widget):
     assert selector.ax.get_xlim() != home_xlim
 
     buttons = widget.plot_window.findChildren(QPushButton)
-    home = next(button for button in buttons if button.text() == "Home")
-    home.click()
+    reset_view = next(button for button in buttons if button.text() == "Reset view")
+    reset_view.click()
 
     assert selector.ax.get_xlim() == home_xlim

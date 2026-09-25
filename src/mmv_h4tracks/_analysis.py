@@ -735,13 +735,13 @@ class AnalysisWindow(QWidget):
 
         button_row = QWidget()
         button_row.setLayout(QHBoxLayout())
-        btn_home = QPushButton("Home")
+        btn_home = QPushButton("Reset view")
         btn_home.setToolTip("Reset the plot to its initial view")
         btn_home.clicked.connect(self.selector.reset_view)
         btn_apply = QPushButton("Apply")
         btn_apply.clicked.connect(self.selector.apply)
-        # Apply is the primary action and gets the extra layout space; Home
-        # stays at its natural (smaller) size.
+        # Apply is the primary action and gets the extra layout space; Reset
+        # view stays at its natural (smaller) size.
         button_row.layout().addWidget(btn_home)
         button_row.layout().addWidget(btn_apply, 1)
         self.parent.plot_window.layout().addWidget(button_row)
