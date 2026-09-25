@@ -21,6 +21,7 @@ from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from skimage import measure
 
 from ._concurrency import starmap_parallel
+from ._constants import METRIC_NAMES
 from ._qt_utils import apply_napari_dark_theme, awaiting_user_dialog
 
 from mmv_h4tracks._logger import handle_exception
@@ -122,25 +123,17 @@ class AnalysisWindow(QWidget):
         )
 
         # Checkboxes
-        checkbox_speed = QCheckBox("Speed")
-        checkbox_size = QCheckBox("Size")
-        checkbox_direction = QCheckBox("Direction")
-        checkbox_euclidean_distance = QCheckBox("Euclidean distance")
-        checkbox_accumulated_distance = QCheckBox("Accumulated distance")
-        checkbox_velocity = QCheckBox("Velocity")
-        checkbox_perimeter = QCheckBox("Perimeter")
-        checkbox_eccentricity = QCheckBox("Eccentricity")
+        checkboxes_by_name = {name: QCheckBox(name) for name in METRIC_NAMES}
+        checkbox_speed = checkboxes_by_name["Speed"]
+        checkbox_size = checkboxes_by_name["Size"]
+        checkbox_direction = checkboxes_by_name["Direction"]
+        checkbox_euclidean_distance = checkboxes_by_name["Euclidean distance"]
+        checkbox_accumulated_distance = checkboxes_by_name["Accumulated distance"]
+        checkbox_velocity = checkboxes_by_name["Velocity"]
+        checkbox_perimeter = checkboxes_by_name["Perimeter"]
+        checkbox_eccentricity = checkboxes_by_name["Eccentricity"]
 
-        self.checkboxes = [
-            checkbox_speed,
-            checkbox_size,
-            checkbox_direction,
-            checkbox_euclidean_distance,
-            checkbox_accumulated_distance,
-            checkbox_velocity,
-            checkbox_perimeter,
-            checkbox_eccentricity,
-        ]
+        self.checkboxes = list(checkboxes_by_name.values())
 
         # Line Edits
         self.lineedit_movement = QLineEdit("")

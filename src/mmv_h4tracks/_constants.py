@@ -45,3 +45,15 @@ MIN_OVERLAP = 0.7
 
 # Prefix for custom cellpose models
 CUSTOM_MODEL_PREFIX = "custom_"
+
+# Analysis metrics offered for export (Analysis tab and Batch processing tab)
+METRIC_NAMES = (
+    "Speed",
+    "Size",
+    "Direction",
+    "Euclidean distance",
+    "Accumulated distance",
+    "Velocity",
+    "Perimeter",
+    "Eccentricity",
+)

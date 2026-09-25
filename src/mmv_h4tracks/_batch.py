@@ -15,6 +15,7 @@ from qtpy.QtWidgets import (
     QCheckBox,
 )
 
+from ._constants import METRIC_NAMES
 from ._logger import notify
 from ._qt_utils import apply_napari_dark_theme
 from ._reader import open_dialog, load_tiff
@@ -195,10 +196,23 @@ class BatchWindow(QWidget):
         self.checkbox_metrics = QCheckBox("Compute metrics")
         self.checkbox_metrics.setChecked(True)
         self.checkbox_metrics.setToolTip(
-            "Speed, size, direction, ... (as in the Analysis tab)\n"
+            "Speed, size, direction, ... (selected below)\n"
             "Requires tracks, exported as csv next to the zarr file"
         )
-        self.checkbox_tracking.toggled.connect(self.checkbox_metrics.setEnabled)
+        self.checkbox_tracking.toggled.connect(self._on_tracking_toggled)
+        self.checkbox_metrics.toggled.connect(self._update_metrics_group_visible)
+
+        # Which metrics to compute, independent of the Analysis tab's selection
+        self.metric_checkboxes = {name: QCheckBox(name) for name in METRIC_NAMES}
+        for checkbox in self.metric_checkboxes.values():
+            checkbox.setChecked(True)
+        self.metrics_group = QGroupBox("Metrics")
+        self.metrics_group.setLayout(QGridLayout())
+        for index, name in enumerate(METRIC_NAMES):
+            row, column = divmod(index, 2)
+            self.metrics_group.layout().addWidget(
+                self.metric_checkboxes[name], row, column
+            )
 
         # Line edits for the metric filters, kept in sync with the Analysis tab
         analysis_window = self.parent.analysis_window
@@ -260,6 +274,7 @@ class BatchWindow(QWidget):
         content = QWidget()
         content.setLayout(QVBoxLayout())
         content.layout().addWidget(batch_group)
+        content.layout().addWidget(self.metrics_group)
         content.layout().addStretch(1)
 
         self.layout().addWidget(content)
@@ -272,10 +287,33 @@ class BatchWindow(QWidget):
             self.combobox_tracker,
             self.checkbox_tracking,
             self.checkbox_metrics,
+            self.metrics_group,
             self.lineedit_movement,
             self.lineedit_track_duration,
             self.btn_run,
         ]
+
+        # Initial visibility: tracking is on and metrics are checked.
+        self._update_metrics_group_visible()
+
+    def _on_tracking_toggled(self, tracking):
+        """
+        Enable/disable "Compute metrics" with tracking; metrics require
+        tracks, so unchecking tracking also unchecks metrics.
+
+        Parameters
+        ----------
+        tracking : bool
+            Whether "Compute tracks" is checked
+        """
+        self.checkbox_metrics.setEnabled(tracking)
+        if not tracking:
+            self.checkbox_metrics.setChecked(False)
+        self._update_metrics_group_visible()
+
+    def _update_metrics_group_visible(self, *_args):
+        """Show the per-metric checkboxes only while metrics will be computed."""
+        self.metrics_group.setVisible(self.checkbox_metrics.isChecked())
 
     def _set_inputs_enabled(self, enabled):
         """
@@ -303,7 +341,7 @@ class BatchWindow(QWidget):
         # These two only apply if tracks are computed
         tracking = self.checkbox_tracking.isChecked()
         self.combobox_tracker.setEnabled(tracking)
-        self.checkbox_metrics.setEnabled(tracking)
+        self._on_tracking_toggled(tracking)
 
     def _select_source(self):
         folder = open_dialog(
@@ -357,12 +395,21 @@ class BatchWindow(QWidget):
 
         # Read all GUI state here: the batch itself runs on a worker thread.
         tracking = self.checkbox_tracking.isChecked()
+        metrics_requested = tracking and self.checkbox_metrics.isChecked()
+        metric_names = [
+            name for name in METRIC_NAMES if self.metric_checkboxes[name].isChecked()
+        ]
+        if metrics_requested and not metric_names:
+            notify("Select at least one metric, or uncheck Compute metrics.")
+            return
+
         settings = {
             "parameters": parameters,
             "n_processes": self.parent.get_process_limit(),
             "tracking": tracking,
             "tracker": self.combobox_tracker.currentText(),
-            "metrics": tracking and self.checkbox_metrics.isChecked(),
+            "metrics": metrics_requested,
+            "metric_names": metric_names,
             "output_dir": Path(output),
             "filters": (
                 self.lineedit_movement.text(),
@@ -473,10 +520,9 @@ class BatchWindow(QWidget):
             logger.warning("%s: no tracks found, skipping metrics", file.name)
             return
         analysis_window = self.parent.analysis_window
-        metrics = [checkbox.text() for checkbox in analysis_window.checkboxes]
         analysis_window._export(
             (str(csv_path),),
-            metrics,
+            settings["metric_names"],
             tracks,
             segmentation,
             None,
