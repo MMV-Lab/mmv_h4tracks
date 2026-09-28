@@ -178,7 +178,12 @@ def classify_mmvh4tracks_training_dir(path: Path) -> str:
     """
     Classify a training export directory for startup handling.
 
-    Returns one of: ``empty``, ``masks_only``, ``interrupted``, ``incomplete``.
+    Returns one of: ``empty``, ``masks_only``, ``interrupted``, ``incomplete``,
+    ``completed``. ``completed`` means Cellpose already finished writing
+    weights under ``models/`` — the previous run got that far but the plugin
+    never registered the result (e.g. it closed before the "save weights"
+    step), so training must not be repeated; the existing weights should be
+    picked up instead.
     """
     if not path.is_dir():
         return "empty"
@@ -196,7 +201,11 @@ def classify_mmvh4tracks_training_dir(path: Path) -> str:
         raw = m.with_name(m.stem[: -len("_masks")] + m.suffix)
         if not raw.is_file():
             return "incomplete"
-    return "interrupted"
+    try:
+        find_cellpose_cli_weights(path)
+    except FileNotFoundError:
+        return "interrupted"
+    return "completed"
 
 
 def parse_layer_prefix_and_frames_from_masks_dir(
@@ -588,8 +597,37 @@ def train_cellpose(
                     log.removeHandler(progress_handler)
         _cellpose_io.logger_setup = _saved_logger_setup
 
+    return collect_completed_training_result(export_dir, model_basename)
+
+
+def collect_completed_training_result(
+    export_dir: Path, model_basename: str | None = None
+) -> CellposeCliTrainingResult:
+    """
+    Build a ``CellposeCliTrainingResult`` from weights already sitting under
+    ``export_dir/models`` (normalizing the name and computing the diameter
+    hint), without running Cellpose training.
+
+    Used both right after a training run and to pick up a training export
+    whose weights already finished but were never registered as a custom
+    model (e.g. the plugin closed before the "save weights" step).
+
+    Parameters
+    ----------
+    export_dir : Path
+        Training export directory (matches the plugin's export layout)
+    model_basename : str, optional
+        If given, the weights file is renamed to this basename first (see
+        ``rename_cellpose_weights``)
+
+    Returns
+    -------
+    CellposeCliTrainingResult
+    """
+    export_dir = Path(export_dir)
     weights = find_cellpose_cli_weights(export_dir)
-    weights = rename_cellpose_weights(weights, model_basename)
+    if model_basename:
+        weights = rename_cellpose_weights(weights, model_basename)
     diam = _diameter_hint_from_cellpose_checkpoint(weights)
     return CellposeCliTrainingResult(
         export_dir=export_dir.resolve(),

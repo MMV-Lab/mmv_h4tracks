@@ -36,6 +36,24 @@ def open_dialog(parent, filetype="*.zarr", directory=""):
         )
     return filepath
 
+def load_tiff(path):
+    """
+    Read a tif/tiff file into a numpy array.
+
+    Parameters
+    ----------
+    path : str or Path
+        Path of the file to read
+
+    Returns
+    -------
+    np.ndarray
+        The image data
+    """
+    from bioio import BioImage
+
+    return BioImage(path).data
+
 
 def napari_get_reader(path):
     """

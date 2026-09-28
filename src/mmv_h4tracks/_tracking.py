@@ -355,64 +355,14 @@ class TrackingWindow(QWidget):
         """
         QApplication.setOverrideCursor(Qt.WaitCursor)
         self.reset_button_labels()
-
-        n_workers = self.parent.get_process_limit()
-
-        track_id = 1
-        tracks = np.ndarray([])
-        for start_slice in range(len(segmentation) - MIN_TRACK_LENGTH):
-            threads_input = []
-            # Convert slice to numpy array to ensure np.unique works correctly
-            slice_data = np.asarray(segmentation[start_slice])
-            for label_id in np.unique(slice_data):
-                if label_id == 0:
-                    continue
-                if track_id > 1:
-                    # calculate centroid of the cell
-                    centroid = ndimage.center_of_mass(
-                        slice_data,
-                        labels=slice_data,
-                        index=label_id,
-                    )
-                    centroid = [
-                        start_slice,
-                        int(np.rint(centroid[0])),
-                        int(np.rint(centroid[1])),
-                    ]
-                    # check if the cell is already tracked
-                    tracked = False
-                    for track in tracks:
-                        if np.all(centroid == track[1:4]):
-                            tracked = True
-                    if tracked:
-                        continue
-                threads_input.append([segmentation, start_slice, label_id])
-
-            track_cells = starmap_parallel(
-                track_by_overlap, threads_input, n_workers
+        try:
+            return (
+                yield from iter_overlap_tracking(
+                    segmentation, self.parent.get_process_limit()
+                )
             )
-
-            for entry in track_cells:
-                if entry is None:
-                    continue
-                for line in entry:
-                    if len(tracks.shape) > 0:
-                        tracks = np.r_[tracks, [[track_id] + line]]
-                    else:
-                        tracks = np.array([[track_id] + line])
-                track_id += 1
-
-            yield start_slice
-
-        if len(tracks.shape) == 0:
+        finally:
             QApplication.restoreOverrideCursor()
-            return None
-
-        tracks = np.array(tracks)
-        df = pd.DataFrame(tracks, columns=["ID", "Z", "Y", "X"])
-        df.sort_values(["ID", "Z"], ascending=True, inplace=True)
-        QApplication.restoreOverrideCursor()
-        return df.values
 
     def _add_auto_track_callback(self):
         """
@@ -1584,6 +1534,78 @@ class TrackingWindow(QWidget):
             tracks_layer.data = tracks
             if filtered_graph:
                 tracks_layer.graph = filtered_graph
+
+
+def iter_overlap_tracking(segmentation, n_workers):
+    """
+    Overlap-track all cells of a label volume.
+
+    Generator: yields once per start slice so callers can drive a progress bar,
+    and returns the tracks array (``None`` if no track was found).
+
+    Parameters
+    ----------
+    segmentation : nd array
+        3D label volume (ZYX)
+    n_workers : int
+        Process budget
+
+    Returns
+    -------
+    nd array or None
+        (N,4) shape array in napari's tracks layer format (ID, z, y, x)
+    """
+    track_id = 1
+    tracks = np.ndarray([])
+    for start_slice in range(len(segmentation) - MIN_TRACK_LENGTH):
+        threads_input = []
+        # Convert slice to numpy array to ensure np.unique works correctly
+        slice_data = np.asarray(segmentation[start_slice])
+        for label_id in np.unique(slice_data):
+            if label_id == 0:
+                continue
+            if track_id > 1:
+                # calculate centroid of the cell
+                centroid = ndimage.center_of_mass(
+                    slice_data,
+                    labels=slice_data,
+                    index=label_id,
+                )
+                centroid = [
+                    start_slice,
+                    int(np.rint(centroid[0])),
+                    int(np.rint(centroid[1])),
+                ]
+                # check if the cell is already tracked
+                tracked = False
+                for track in tracks:
+                    if np.all(centroid == track[1:4]):
+                        tracked = True
+                if tracked:
+                    continue
+            threads_input.append([segmentation, start_slice, label_id])
+
+        track_cells = starmap_parallel(track_by_overlap, threads_input, n_workers)
+
+        for entry in track_cells:
+            if entry is None:
+                continue
+            for line in entry:
+                if len(tracks.shape) > 0:
+                    tracks = np.r_[tracks, [[track_id] + line]]
+                else:
+                    tracks = np.array([[track_id] + line])
+            track_id += 1
+
+        yield start_slice
+
+    if len(tracks.shape) == 0:
+        return None
+
+    tracks = np.array(tracks)
+    df = pd.DataFrame(tracks, columns=["ID", "Z", "Y", "X"])
+    df.sort_values(["ID", "Z"], ascending=True, inplace=True)
+    return df.values
 
 
 def track_by_overlap(

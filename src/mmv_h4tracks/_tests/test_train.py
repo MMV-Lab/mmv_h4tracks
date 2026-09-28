@@ -234,6 +234,40 @@ def test_find_cellpose_cli_weights_empty_models(tmp_path):
         find_cellpose_cli_weights(tmp_path)
 
 
+def test_collect_completed_training_result_picks_up_existing_weights(tmp_path):
+    """
+    A training export whose weights are already sitting under models/ (e.g.
+    the plugin closed before registering them) can be turned into a result
+    without re-running Cellpose training.
+    """
+    from mmv_h4tracks._train import collect_completed_training_result
+
+    root = tmp_path / "exp"
+    md = root / "models"
+    md.mkdir(parents=True)
+    weights = md / "cellpose_residual_on_style_on_concatenation_off"
+    weights.write_bytes(b"w")
+
+    result = collect_completed_training_result(root)
+
+    assert result.export_dir == root.resolve()
+    assert result.source_weights_path.is_file()
+    assert result.diam_mean == 30.0
+
+
+def test_collect_completed_training_result_renames_when_given_basename(tmp_path):
+    from mmv_h4tracks._train import collect_completed_training_result
+
+    root = tmp_path / "exp"
+    md = root / "models"
+    md.mkdir(parents=True)
+    (md / "cellpose_residual_on_style_on_concatenation_off").write_bytes(b"w")
+
+    result = collect_completed_training_result(root, "2026_07_31_14_10_05")
+
+    assert result.source_weights_path.name == "2026_07_31_14_10_05"
+
+
 def test_prune_cellpose_training_export_dir_keeps_only_masks(tmp_path):
     root = tmp_path / "exp"
     root.mkdir()
@@ -290,6 +324,14 @@ def test_classify_mmvh4tracks_training_dir(tmp_path):
 
     (root / "L_frame_00000_flows.tif").write_bytes(b"f")
     assert classify_mmvh4tracks_training_dir(root) == "interrupted"
+
+    # Weights already finished under models/: must not be classified as
+    # "interrupted" (that would discard or retrain over a completed model).
+    (root / "models").mkdir()
+    (root / "models" / "cellpose_residual_on_style_on_concatenation_off").write_bytes(
+        b"w"
+    )
+    assert classify_mmvh4tracks_training_dir(root) == "completed"
 
 
 def test_parse_layer_prefix_and_frames_from_masks_dir(tmp_path):

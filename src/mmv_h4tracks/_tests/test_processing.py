@@ -224,3 +224,57 @@ def test_split_noncontinuous_tracks_already_continuous():
     tracks = np.array([[1, 0, 0, 0], [1, 1, 0, 0], [1, 2, 0, 0]])
     out = processing.split_noncontinuous_tracks(tracks.copy())
     assert np.array_equal(out, tracks)
+
+
+def test_scan_training_temp_registers_completed_training_without_retraining(
+    create_widget, tmp_path, monkeypatch
+):
+    """
+    A training export whose weights already finished under models/ - but was
+    never registered, e.g. because the plugin closed before the "save
+    weights" step - must be picked up directly on the next startup scan, not
+    silently discarded or retrained from scratch.
+    """
+    from qtpy.QtWidgets import QMessageBox
+
+    from mmv_h4tracks._train import MMV_TRAIN_DIR_PREFIX
+
+    widget = create_widget
+    monkeypatch.setattr("tempfile.gettempdir", lambda: str(tmp_path))
+
+    train_dir = tmp_path / f"{MMV_TRAIN_DIR_PREFIX}resume_test"
+    train_dir.mkdir()
+    (train_dir / "L_frame_00000.tif").write_bytes(b"r")
+    (train_dir / "L_frame_00000_masks.tif").write_bytes(b"m")
+    models_dir = train_dir / "models"
+    models_dir.mkdir()
+    (models_dir / "cellpose_residual_on_style_on_concatenation_off").write_bytes(b"w")
+
+    monkeypatch.setattr(
+        QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.Yes)
+    )
+
+    def fail_retrain(*args, **kwargs):
+        raise AssertionError("training must not be re-run for a completed export")
+
+    monkeypatch.setattr(processing, "start_cellpose_training_worker", fail_retrain)
+
+    calls = []
+
+    def fake_complete(self, result, model_name, train_frames, layer_prefix):
+        calls.append((result, model_name, train_frames, layer_prefix))
+
+    monkeypatch.setattr(
+        type(widget.segmentation_window),
+        "_complete_cellpose_training_after_worker",
+        fake_complete,
+    )
+
+    processing.scan_mmvh4tracks_training_temp_on_startup(widget)
+
+    assert len(calls) == 1
+    result, model_name, train_frames, layer_prefix = calls[0]
+    assert model_name == "resume_test"
+    assert layer_prefix == "L"
+    assert train_frames == (0,)
+    assert result.source_weights_path.is_file()
