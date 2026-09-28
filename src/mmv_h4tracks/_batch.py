@@ -191,10 +191,10 @@ class BatchWindow(QWidget):
 
         # QCheckBoxes
         self.checkbox_tracking = QCheckBox("Compute tracks")
-        self.checkbox_tracking.setChecked(True)
+        self.checkbox_tracking.setChecked(False)
         self.checkbox_tracking.toggled.connect(self.combobox_tracker.setEnabled)
         self.checkbox_metrics = QCheckBox("Compute metrics")
-        self.checkbox_metrics.setChecked(True)
+        self.checkbox_metrics.setChecked(False)
         self.checkbox_metrics.setToolTip(
             "Speed, size, direction, ... (selected below)\n"
             "Requires tracks, exported as csv next to the zarr file"
@@ -293,8 +293,11 @@ class BatchWindow(QWidget):
             self.btn_run,
         ]
 
-        # Initial visibility: tracking is on and metrics are checked.
-        self._update_metrics_group_visible()
+        # Sync dependents to the unchecked defaults above (toggled only fires
+        # on a change, not on the initial state).
+        tracking = self.checkbox_tracking.isChecked()
+        self.combobox_tracker.setEnabled(tracking)
+        self._on_tracking_toggled(tracking)
 
     def _on_tracking_toggled(self, tracking):
         """
