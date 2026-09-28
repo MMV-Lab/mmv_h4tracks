@@ -1479,11 +1479,14 @@ def _process_matches(matches):
 def scan_mmvh4tracks_training_temp_on_startup(main_widget) -> None:
     """
     After Cellpose warm-up: clean stale training temp dirs; offer to resume
-    interrupted training.
+    interrupted training, or to register training that already finished
+    (weights already sit under ``models/``) but was never picked up because
+    the plugin closed before the "save weights" step.
     """
     from ._train import (
         _safe_rmtree,
         classify_mmvh4tracks_training_dir,
+        collect_completed_training_result,
         iter_mmvh4tracks_train_directories,
         parse_layer_prefix_and_frames_from_masks_dir,
         parse_model_fragment_from_train_dir_name,
@@ -1491,24 +1494,34 @@ def scan_mmvh4tracks_training_temp_on_startup(main_widget) -> None:
 
     seg = main_widget.segmentation_window
     dirs = list(iter_mmvh4tracks_train_directories())
-    interrupted: list[Path] = []
+    pending: list[tuple[str, Path]] = []
     for d in dirs:
         kind = classify_mmvh4tracks_training_dir(d)
         if kind in ("empty", "masks_only", "incomplete"):
             _safe_rmtree(d)
-        elif kind == "interrupted":
-            interrupted.append(d)
+        elif kind in ("interrupted", "completed"):
+            pending.append((kind, d))
 
-    for d in interrupted:
+    for kind, d in pending:
         mtime = datetime.fromtimestamp(d.stat().st_mtime)
         day_str = mtime.strftime("%Y-%m-%d %H:%M")
         fragment = parse_model_fragment_from_train_dir_name(d.name) or d.name
+        if kind == "completed":
+            question = (
+                f"Training on data {fragment} on {day_str} already finished, "
+                "but the plugin closed before the model was registered.\n\n"
+                "Register it now?"
+            )
+        else:
+            question = (
+                f"It seems training on data {fragment} on {day_str} was interrupted.\n\n"
+                "Would you like to try again?"
+            )
         with awaiting_user_dialog(main_widget):
             reply = QMessageBox.question(
                 main_widget,
                 "napari",
-                f"It seems training on data {fragment} on {day_str} was interrupted.\n\n"
-                "Would you like to try again?",
+                question,
                 QMessageBox.Yes | QMessageBox.No,
                 QMessageBox.No,
             )
@@ -1519,7 +1532,7 @@ def scan_mmvh4tracks_training_temp_on_startup(main_widget) -> None:
         if is_custom_model_display_name_taken(seg, model_name):
             notify(
                 f"A custom model named {model_name!r} already exists. "
-                "Removing interrupted export."
+                f"Removing {'finished' if kind == 'completed' else 'interrupted'} export."
             )
             _safe_rmtree(d)
             continue
@@ -1528,6 +1541,19 @@ def scan_mmvh4tracks_training_temp_on_startup(main_widget) -> None:
             _safe_rmtree(d)
             continue
         layer_prefix, train_frames = parsed
+
+        if kind == "completed":
+            try:
+                result = collect_completed_training_result(d)
+            except FileNotFoundError as exc:
+                notify(str(exc))
+                _safe_rmtree(d)
+                continue
+            seg._complete_cellpose_training_after_worker(
+                result, model_name, train_frames, layer_prefix
+            )
+            return
+
         start_cellpose_training_worker(
             seg,
             d,
