@@ -172,13 +172,19 @@ class MMVH4TRACKS(QWidget):
 
         self.status_label = QLabel(STATUS_READY)
         self.status_label.setWordWrap(False)
-        self.status_label.setAlignment(Qt.AlignLeft | Qt.AlignTop)
+        # Vertically centered: most messages are one line, and centering keeps
+        # them from sitting stranded at the top of the fixed-height box; a
+        # rare 3-line message still fills the box either way.
+        self.status_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         self.status_label.setTextFormat(Qt.PlainText)
         # Ignore sizeHint so long status text cannot widen the dock.
         self.status_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         self.status_label.setMinimumWidth(0)
         self.status_label.setStyleSheet(
-            "color: #aaaaaa; background-color: #000000; padding: 4px 6px;"
+            "color: #f2f2f2;"
+            "background-color: #000000;"
+            "border-left: 3px solid #4a90d9;"
+            "padding: 4px 6px;"
         )
         line_h = self.status_label.fontMetrics().lineSpacing()
         self.status_label.setFixedHeight(line_h * 3 + 8)
