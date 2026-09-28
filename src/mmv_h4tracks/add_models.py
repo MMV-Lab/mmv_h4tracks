@@ -42,6 +42,9 @@ class ModelWindow(QWidget):
         label_name.setToolTip("The name your model will be displayed as")
         label_file = QLabel("File")
         label_diameter = QLabel("diameter")
+        label_diameter.setToolTip(
+            "Leave blank to use the diameter the model was trained with"
+        )
         label_channels = QLabel("channels")
         label_batch_size = QLabel("batch_size")
         self.advanced_options.append(label_batch_size)
@@ -212,9 +215,12 @@ class ModelWindow(QWidget):
 
         QApplication.setOverrideCursor(Qt.WaitCursor)
         params = {
-            "diameter": float(self.lineedit_diameter.text()),
             "channels": [int(i) for i in self.lineedit_channels.text().split(",")],
         }
+
+        diameter = self.lineedit_diameter.text().strip()
+        if diameter != "":
+            params["diameter"] = float(diameter)
 
         batch_size = int(self.lineedit_batch_size.text())
         if batch_size != 8:
