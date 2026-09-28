@@ -30,6 +30,7 @@ from napari.layers.image.image import Image
 from napari.layers.labels.labels import Labels
 from napari.layers.tracks.tracks import Tracks
 
+from ._action_cam import ActionCamWindow
 from ._assistant import AssistantWindow
 from ._batch import BatchWindow
 from ._analysis import AnalysisWindow
@@ -240,6 +241,11 @@ class MMVH4TRACKS(QWidget):
         tabwidget.addTab(self.assistant_window, "Assistant")
         self.batch_window = BatchWindow(self)
         tabwidget.addTab(self.batch_window, "Batch")
+        # Action Cam opens on demand as its own napari dock widget (see
+        # open_action_cam) rather than a tab, via a button in the Analysis
+        # tab - it doesn't need a permanent slot in the dock.
+        self.action_cam_window = None
+        self._action_cam_dock = None
 
         ### Organize objects via widgets
         # widget: parent widget of all content
@@ -1096,6 +1102,21 @@ class MMVH4TRACKS(QWidget):
     def clear_status(self):
         """Reset the status line to the idle message."""
         self.status_label.setText(STATUS_READY)
+
+    def open_action_cam(self):
+        """
+        Open the Action Cam as a napari dock widget, creating it on first use
+        and reusing (just re-showing) it afterwards so a previously loaded
+        track and cached raw/segmentation data aren't lost when it's closed
+        and reopened.
+        """
+        if self.action_cam_window is None:
+            self.action_cam_window = ActionCamWindow(self)
+            self._action_cam_dock = self.viewer.window.add_dock_widget(
+                self.action_cam_window, area="right", name="Action Cam"
+            )
+            return
+        self._action_cam_dock.show()
 
     def set_plugin_busy(self, busy: bool):
         """

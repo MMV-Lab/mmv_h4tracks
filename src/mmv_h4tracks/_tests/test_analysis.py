@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from qtpy.QtWidgets import QPushButton
+from qtpy.QtWidgets import QAbstractButton, QPushButton
 
 
 @pytest.fixture
@@ -66,3 +66,55 @@ def test_reset_view_button_resets_the_view(widget):
     reset_view.click()
 
     assert selector.ax.get_xlim() == home_xlim
+
+
+@pytest.fixture
+def action_cam_button(widget):
+    buttons = widget.analysis_window.findChildren(QPushButton)
+    return next(b for b in buttons if b.text() == "Open Action Cam")
+
+
+def _close_action_cam(widget):
+    if getattr(widget, "action_cam_window", None) is not None:
+        widget.viewer.window.remove_dock_widget(widget.action_cam_window)
+        widget.action_cam_window = None
+        widget._action_cam_dock = None
+
+
+def test_action_cam_button_opens_the_dock_widget(widget, action_cam_button):
+    """Clicking "Open Action Cam" must create and dock an ActionCamWindow,
+    not just switch to an existing tab - there is no tab anymore."""
+    assert widget.action_cam_window is None
+
+    try:
+        action_cam_button.click()
+        assert widget.action_cam_window is not None
+        assert widget._action_cam_dock is not None
+    finally:
+        _close_action_cam(widget)
+
+
+def test_action_cam_button_reuses_the_panel_on_a_second_click(widget, action_cam_button):
+    """Reopening must not lose a previously loaded track - reuse the same
+    instance instead of reconstructing it (unlike the Plot window, which is
+    deliberately rebuilt fresh each time)."""
+    try:
+        action_cam_button.click()
+        first_instance = widget.action_cam_window
+
+        action_cam_button.click()
+        assert widget.action_cam_window is first_instance
+    finally:
+        _close_action_cam(widget)
+
+
+def test_action_cam_button_is_disabled_while_the_plugin_is_busy(widget, action_cam_button):
+    """The button must follow the same convention as every other button:
+    set_plugin_busy sweeps QAbstractButton children of the main widget."""
+    assert action_cam_button in widget.findChildren(QAbstractButton)
+
+    widget.set_plugin_busy(True)
+    assert not action_cam_button.isEnabled()
+
+    widget.set_plugin_busy(False)
+    assert action_cam_button.isEnabled()
