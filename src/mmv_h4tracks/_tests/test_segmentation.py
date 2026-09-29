@@ -296,8 +296,20 @@ def widget_with_single_3d_seg(create_widget):
     ("widget_with_single_2d_seg", (5, 5)),
     ("widget_with_single_3d_seg", (1, 5, 5)),
 ])
-def test_remove_label_multiscale_single_resolution(request, fixture_name, event_position):
+def test_remove_label_multiscale_single_resolution(
+    request, monkeypatch, fixture_name, event_position
+):
     """Test _remove_label with multiscale and single resolution 2D/3D segmentation."""
+    # A warning triggered somewhere in here (likely: editing a multiscale
+    # Labels layer) surfaces as a real Qt notification toast via napari's own
+    # warnings.showwarning hook - independent of the viewer's own show=False,
+    # and only on the very first hit of that warning per process. No-op
+    # .show() before fixture construction/the call under test so it can't
+    # flash regardless of which of the two triggers it.
+    from qtpy.QtWidgets import QWidget
+
+    monkeypatch.setattr(QWidget, "show", lambda self: None)
+
     widget = request.getfixturevalue(fixture_name)
     event = create_mock_event(event_position)
     
