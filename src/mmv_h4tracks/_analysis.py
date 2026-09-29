@@ -94,6 +94,7 @@ class AnalysisWindow(QWidget):
         btn_plot = QPushButton("Plot")
         btn_export = QPushButton("Export")
         self.btn_select_all = QPushButton("Select all")
+        btn_action_cam = QPushButton("Open Action Cam")
 
         btn_plot.setToolTip(
             "Plot selected metric\n" "Only displayed tracks are plotted"
@@ -101,10 +102,14 @@ class AnalysisWindow(QWidget):
         btn_export.setToolTip(
             "Export selected metrics as csv\n" "All tracks are exported"
         )
+        btn_action_cam.setToolTip(
+            "Follow one tracked cell, cropped and centered, in its own dock panel"
+        )
 
         btn_plot.clicked.connect(self._start_plot_worker)
         btn_export.clicked.connect(self._start_export_worker)
         self.btn_select_all.clicked.connect(self._select_all_metrics)
+        btn_action_cam.clicked.connect(self.parent.open_action_cam)
 
         # Comboboxes
         self.combobox_plots = QComboBox()
@@ -183,11 +188,16 @@ class AnalysisWindow(QWidget):
         export.layout().addWidget(h_spacer_4, 7, 0, 1, -1)
         export.layout().addWidget(btn_export, 8, 0, 1, -1)
 
+        action_cam = QGroupBox("Action Cam")
+        action_cam.setLayout(QVBoxLayout())
+        action_cam.layout().addWidget(btn_action_cam)
+
         ### Organize objects via widgets
         content = QWidget()
         content.setLayout(QVBoxLayout())
         content.layout().addWidget(plot)
         content.layout().addWidget(export)
+        content.layout().addWidget(action_cam)
         content.layout().addStretch(1)
 
         self.layout().addWidget(content)

@@ -30,6 +30,7 @@ from napari.layers.image.image import Image
 from napari.layers.labels.labels import Labels
 from napari.layers.tracks.tracks import Tracks
 
+from ._action_cam import ActionCamWindow
 from ._assistant import AssistantWindow
 from ._batch import BatchWindow
 from ._analysis import AnalysisWindow
@@ -246,6 +247,11 @@ class MMVH4TRACKS(QWidget):
         tabwidget.addTab(self.assistant_window, "Assistant")
         self.batch_window = BatchWindow(self)
         tabwidget.addTab(self.batch_window, "Batch")
+        # Action Cam opens on demand as its own napari dock widget (see
+        # open_action_cam) rather than a tab, via a button in the Analysis
+        # tab - it doesn't need a permanent slot in the dock.
+        self.action_cam_window = None
+        self._action_cam_dock = None
 
         ### Organize objects via widgets
         # widget: parent widget of all content
@@ -1102,6 +1108,35 @@ class MMVH4TRACKS(QWidget):
     def clear_status(self):
         """Reset the status line to the idle message."""
         self.status_label.setText(STATUS_READY)
+
+    def open_action_cam(self):
+        """
+        Open the Action Cam as its own floating window (not merged into a
+        dock edge, to avoid it being mistaken for part of the main layout),
+        creating it on first use and reusing it afterwards so a previously
+        loaded track and cached raw/segmentation data aren't lost when it's
+        closed and reopened. Safe to call repeatedly: leaves it open if it
+        already is, reopens it if it isn't, and never errors - including if
+        the previous window was actually destroyed rather than just hidden.
+        """
+        if self.action_cam_window is not None:
+            try:
+                self._action_cam_dock.show()
+                self._action_cam_dock.raise_()
+                return
+            except RuntimeError:
+                # The previous dock widget was destroyed (not just closed/
+                # hidden) - fall through and create a fresh one below.
+                self.action_cam_window = None
+                self._action_cam_dock = None
+
+        self.action_cam_window = ActionCamWindow(self)
+        self._action_cam_dock = self.viewer.window.add_dock_widget(
+            self.action_cam_window, name="Action Cam"
+        )
+        # add_dock_widget() docks it first; float it right away so it never
+        # visually merges into the main window's dock areas.
+        self._action_cam_dock.setFloating(True)
 
     def set_plugin_busy(self, busy: bool):
         """
