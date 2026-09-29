@@ -413,8 +413,17 @@ class TrackingWindow(QWidget):
                 raise ValueError("2D image can not be tracked.")
             position = tuple(int(round(p)) for p in event.position[-ndim:])
 
-            selected_cell = label_layer.get_value(position)
-            if selected_cell is None or selected_cell == 0:
+            # Read directly out of segmentation rather than
+            # label_layer.get_value(position): get_value resolves against the
+            # layer's *currently displayed* slice, not the frame embedded in
+            # position, so it can silently pick a label from the wrong frame
+            # whenever they differ.
+            try:
+                selected_cell = segmentation[position]
+            except IndexError:
+                notify("Clicked position is outside the image.")
+                return
+            if selected_cell == 0:
                 notify("The background can not be tracked.")
                 return
 
@@ -625,12 +634,17 @@ class TrackingWindow(QWidget):
                     raise ValueError("2D image can not be tracked.")
                 position = tuple(int(round(p)) for p in event.position[-ndim:])
                 z = int(position[0])
-                selected_id = label_layer.get_value(position)
-                if selected_id == 0:
-                    raise ValueError("The background can not be tracked.")
                 # Convert to numpy array to handle dask arrays from OME-Zarr
                 # This is critical for lazy-loaded data
                 frame_data = np.asarray(data_array[z])
+                # Read directly out of the frame being used rather than
+                # label_layer.get_value(position): get_value resolves against
+                # the layer's *currently displayed* slice, not the frame
+                # embedded in position, so it can silently pick a label from
+                # the wrong frame whenever they differ.
+                selected_id = frame_data[position[1:]]
+                if selected_id == 0:
+                    raise ValueError("The background can not be tracked.")
                 centroid = ndimage.center_of_mass(
                     frame_data,
                     labels=frame_data,
@@ -833,12 +847,17 @@ class TrackingWindow(QWidget):
                     raise ValueError("2D image can not be tracked.")
                 position = tuple(int(round(p)) for p in event.position[-ndim:])
                 z = position[0]
-                selected_id = label_layer.get_value(position)
-                if selected_id == 0:
-                    raise ValueError("The background can not be tracked.")
                 # Convert to numpy array to handle dask arrays from OME-Zarr
                 # This is critical for lazy-loaded data
                 frame_data = np.asarray(data_array[z])
+                # Read directly out of the frame being used rather than
+                # label_layer.get_value(position): get_value resolves against
+                # the layer's *currently displayed* slice, not the frame
+                # embedded in position, so it can silently pick a label from
+                # the wrong frame whenever they differ.
+                selected_id = frame_data[position[1:]]
+                if selected_id == 0:
+                    raise ValueError("The background can not be tracked.")
                 centroid = ndimage.center_of_mass(
                     frame_data,
                     labels=frame_data,

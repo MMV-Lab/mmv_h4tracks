@@ -3,11 +3,31 @@
 import numpy as np
 import pytest
 
-from qtpy.QtWidgets import QAbstractButton, QPushButton
+from qtpy.QtCore import Qt
+from qtpy.QtWidgets import QAbstractButton, QDockWidget, QPushButton, QWidget
+
+_original_set_floating = QDockWidget.setFloating
+
+
+def _set_floating_without_showing(self, floating):
+    # setFloating() transitions the dock in/out of its own top-level window
+    # via Qt's internal C++ show logic, not a plain .show() call, so
+    # monkeypatching QWidget.show (below) doesn't stop it from flashing on
+    # screen. WA_DontShowOnScreen is honored by Qt at the point it actually
+    # maps a window, regardless of what triggered that - set it first.
+    self.setAttribute(Qt.WA_DontShowOnScreen, True)
+    return _original_set_floating(self, floating)
 
 
 @pytest.fixture
-def widget(create_widget):
+def widget(create_widget, monkeypatch):
+    # Both the plot window and the Action Cam dock call .show() on a
+    # top-level widget, which briefly flashes a real window on screen even
+    # when hidden again immediately afterwards (the OS still maps/paints it
+    # once). Neither is needed for these tests, which only exercise widget
+    # logic - no-op .show() for their duration instead.
+    monkeypatch.setattr(QWidget, "show", lambda self: None)
+    monkeypatch.setattr(QDockWidget, "setFloating", _set_floating_without_showing)
     yield create_widget
     # _plot() shows plot_window as an unparented top-level window; the shared
     # cleanup in fixture_helpers only closes it as *setup* for the next test,

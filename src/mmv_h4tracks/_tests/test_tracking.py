@@ -1312,9 +1312,18 @@ def widget_with_single_3d_seg_tracks(create_widget):
 @patch("mmv_h4tracks._tracking.handle_exception")
 @patch("mmv_h4tracks._tracking.notify")
 def test_store_cell_for_link_multiscale_single_resolution(
-    mock_notify, mock_handle_exception, request, fixture_name, event_position
+    mock_notify, mock_handle_exception, request, monkeypatch, fixture_name, event_position
 ):
     """Test store_cell_for_link callback with multiscale and single resolution 3D segmentation."""
+    # A warning triggered while constructing/using the multiscale fixture
+    # surfaces as a real Qt notification toast via napari's own
+    # warnings.showwarning hook - independent of the viewer's own show=False,
+    # and only on the first hit of that warning per process (see
+    # test_remove_label_multiscale_single_resolution for the same fix).
+    from qtpy.QtWidgets import QWidget
+
+    monkeypatch.setattr(QWidget, "show", lambda self: None)
+
     widget = request.getfixturevalue(fixture_name)
     tracking_window = widget.tracking_window
     
@@ -1355,9 +1364,15 @@ def test_store_cell_for_link_multiscale_single_resolution(
 @patch("mmv_h4tracks._tracking.handle_exception")
 @patch("mmv_h4tracks._tracking.notify")
 def test_store_cell_for_unlink_multiscale_single_resolution(
-    mock_notify, mock_handle_exception, request, fixture_name, event_position
+    mock_notify, mock_handle_exception, request, monkeypatch, fixture_name, event_position
 ):
     """Test store_cell_for_unlink callback with multiscale and single resolution 3D segmentation."""
+    # See test_store_cell_for_link_multiscale_single_resolution: suppresses
+    # the same napari warning-toast flash.
+    from qtpy.QtWidgets import QWidget
+
+    monkeypatch.setattr(QWidget, "show", lambda self: None)
+
     widget = request.getfixturevalue(fixture_name)
     tracking_window = widget.tracking_window
     

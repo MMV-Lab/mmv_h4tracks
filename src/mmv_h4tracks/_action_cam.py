@@ -105,6 +105,7 @@ class ActionCamWindow(QWidget):
         self.setLayout(QVBoxLayout())
         apply_napari_dark_theme(self)
 
+        self._track_id = None
         self._frames = np.empty(0, dtype=int)
         self._centroids = np.empty((0, 2))
         self._pos = 0
@@ -176,10 +177,15 @@ class ActionCamWindow(QWidget):
         # Lock the width to the wider of "Play"/"Pause" so toggling the label
         # doesn't resize the button and shift the slider's start position.
         # Measured after the stylesheet above, since its padding affects the
-        # size hint.
+        # size hint. Measure both explicitly rather than assuming which one
+        # is wider, and pad by a couple of pixels: sizeHint() itself isn't
+        # perfectly stable between calls (observed +/-1px), so a razor-thin
+        # margin can still come up short.
         self.btn_play_pause.setText("Pause")
-        self.btn_play_pause.setMinimumWidth(self.btn_play_pause.sizeHint().width())
+        pause_hint = self.btn_play_pause.sizeHint().width()
         self.btn_play_pause.setText("Play")
+        play_hint = self.btn_play_pause.sizeHint().width()
+        self.btn_play_pause.setMinimumWidth(max(pause_hint, play_hint) + 4)
 
         self.slider_frame = QSlider(Qt.Horizontal)
         self.slider_frame.setEnabled(False)
@@ -417,6 +423,7 @@ class ActionCamWindow(QWidget):
             notify(f"No track with ID {track_id} in the selected Tracks layer.")
             return
         rows = rows[np.argsort(rows[:, 1])]
+        self._track_id = track_id
         self._frames = rows[:, 1].astype(int)
         self._centroids = rows[:, 2:4].astype(float)
 
@@ -634,7 +641,7 @@ class ActionCamWindow(QWidget):
         was_playing = self._timer.isActive()
         self._timer.stop()
 
-        track_id = self.lineedit_track_id.text().strip() or "clip"
+        track_id = self._track_id if self._track_id is not None else "clip"
         image_layer_name = self._raw_layer_name or "image"
         default_name = f"{image_layer_name}_ID_{track_id}.mp4"
 

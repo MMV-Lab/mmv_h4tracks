@@ -4,19 +4,40 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
+from qtpy.QtCore import Qt
+from qtpy.QtWidgets import QDockWidget, QWidget
 
 import mmv_h4tracks._action_cam as action_cam_module
 
 FRAME_SHAPE = (100, 100)
 N_FRAMES = 6
 
+_original_set_floating = QDockWidget.setFloating
+
+
+def _set_floating_without_showing(self, floating):
+    # setFloating() transitions the dock in/out of its own top-level window
+    # via Qt's internal C++ show logic, not a plain .show() call, so
+    # monkeypatching QWidget.show (below) doesn't stop it from flashing on
+    # screen. WA_DontShowOnScreen is honored by Qt at the point it actually
+    # maps a window, regardless of what triggered that - set it first.
+    self.setAttribute(Qt.WA_DontShowOnScreen, True)
+    return _original_set_floating(self, floating)
+
 
 @pytest.fixture
-def action_cam_window(create_widget):
+def action_cam_window(create_widget, monkeypatch):
     """The Action Cam dock widget, opened on a clean main widget with
     synthetic layers loaded."""
     widget = create_widget
     viewer = widget.viewer
+
+    # The dock widget is shown by default, which briefly flashes a real
+    # window on screen for the whole module (this fixture backs every test
+    # in this file). Hiding it afterwards doesn't help - the OS still
+    # maps/paints it once - so no-op .show() instead.
+    monkeypatch.setattr(QWidget, "show", lambda self: None)
+    monkeypatch.setattr(QDockWidget, "setFloating", _set_floating_without_showing)
 
     raw = np.zeros((N_FRAMES, *FRAME_SHAPE), dtype=np.uint16)
     segmentation = np.zeros((N_FRAMES, *FRAME_SHAPE), dtype=np.int32)

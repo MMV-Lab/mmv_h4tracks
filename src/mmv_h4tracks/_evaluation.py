@@ -387,7 +387,11 @@ class EvaluationWindow(QWidget):
         overlap = _label_overlap(gt_seg, eval_seg)
         n_pixels_pred = np.sum(overlap, axis=0, keepdims=True)
         n_pixels_gt = np.sum(overlap, axis=1, keepdims=True)
-        iou = overlap / (n_pixels_pred + n_pixels_gt - overlap)
+        # Background x background pairs (no overlap, denominator 0) are a
+        # known/expected 0/0 case, corrected for below - suppress the
+        # resulting RuntimeWarning rather than let it mask real ones.
+        with np.errstate(invalid="ignore"):
+            iou = overlap / (n_pixels_pred + n_pixels_gt - overlap)
         iou[np.isnan(iou)] = 0.0
         return iou
 

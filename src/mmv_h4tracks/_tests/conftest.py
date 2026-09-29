@@ -2,12 +2,47 @@
 
 from __future__ import annotations
 
+import logging
+
 import pytest
 from qtpy.QtWidgets import QMessageBox
 
 from mmv_h4tracks import MMVH4TRACKS
 from mmv_h4tracks._custom_models import CustomModelStore, set_custom_model_store
 from mmv_h4tracks._tests.fixture_helpers import reset_widget
+
+_NOISY_PRODUCTION_LOGGER_NAMES = ("mmv_h4tracks._batch", "mmv_h4tracks._processing")
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _quiet_production_loggers():
+    """
+    Route _batch.py/_processing.py's log output through pytest's own log
+    capture instead of straight to the terminal.
+
+    Both attach their own StreamHandler with propagate=False (so their
+    output doesn't collide with Cellpose's root-logger setup in production -
+    see _train.py's logging.basicConfig(force=True) during training). That
+    same isolation means pytest's log-capturing (which hooks the root
+    logger) never sees their records, so real batch-processing/segmentation
+    runs in the test suite print straight to the console for every test,
+    pass or fail. Safe to flip here since conftest.py never loads outside
+    pytest - production behavior (and the reason for propagate=False there)
+    is unaffected.
+    """
+    originals = {}
+    for name in _NOISY_PRODUCTION_LOGGER_NAMES:
+        logger = logging.getLogger(name)
+        originals[name] = (logger.propagate, list(logger.handlers))
+        logger.propagate = True
+        for handler in list(logger.handlers):
+            logger.removeHandler(handler)
+    yield
+    for name, (propagate, handlers) in originals.items():
+        logger = logging.getLogger(name)
+        logger.propagate = propagate
+        for handler in handlers:
+            logger.addHandler(handler)
 
 
 @pytest.fixture(scope="session", autouse=True)
