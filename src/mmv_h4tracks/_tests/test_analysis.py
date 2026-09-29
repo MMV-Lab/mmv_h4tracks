@@ -108,6 +108,41 @@ def test_action_cam_button_reuses_the_panel_on_a_second_click(widget, action_cam
         _close_action_cam(widget)
 
 
+def test_action_cam_opens_as_a_floating_window(widget, action_cam_button):
+    """Not merged into a dock edge, so it can't be mistaken for part of the
+    main layout."""
+    try:
+        action_cam_button.click()
+        assert widget._action_cam_dock.isFloating() is True
+    finally:
+        _close_action_cam(widget)
+
+
+def test_open_action_cam_recovers_if_the_previous_window_was_destroyed(
+    widget, monkeypatch
+):
+    """A third click (etc.) must never error, whether the panel is still
+    open, was hidden/closed, or its underlying Qt object was actually
+    destroyed (e.g. by however the OS/napari cleaned up its close button)."""
+    try:
+        widget.open_action_cam()
+        first_instance = widget.action_cam_window
+
+        def _raise_deleted(*args, **kwargs):
+            raise RuntimeError(
+                "wrapped C/C++ object of type QtViewerDockWidget has been deleted"
+            )
+
+        monkeypatch.setattr(widget._action_cam_dock, "show", _raise_deleted)
+
+        widget.open_action_cam()  # must not raise
+
+        assert widget.action_cam_window is not None
+        assert widget.action_cam_window is not first_instance
+    finally:
+        _close_action_cam(widget)
+
+
 def test_action_cam_button_is_disabled_while_the_plugin_is_busy(widget, action_cam_button):
     """The button must follow the same convention as every other button:
     set_plugin_busy sweeps QAbstractButton children of the main widget."""

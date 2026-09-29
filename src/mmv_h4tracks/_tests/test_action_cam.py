@@ -428,3 +428,339 @@ def test_changing_the_image_layer_invalidates_the_cache(action_cam_window, monke
 
     assert calls.count("raw") == 1
     assert calls.count("raw2") == 1
+
+
+def test_overlay_checkboxes_default_to_off(action_cam_window):
+    assert action_cam_window.checkbox_show_segmentation.isChecked() is False
+    assert action_cam_window.checkbox_show_track_path.isChecked() is False
+
+
+def test_play_button_is_highlighted(action_cam_window):
+    """The Play/Pause button is the panel's primary control and should stand
+    out visually from the plain buttons around it."""
+    assert action_cam_window.btn_play_pause.styleSheet() != ""
+    other_buttons = [
+        action_cam_window.btn_pick_cell,
+        action_cam_window.btn_export,
+    ]
+    for button in other_buttons:
+        assert button.styleSheet() != action_cam_window.btn_play_pause.styleSheet()
+
+
+def test_render_frames_for_export_matches_the_track_and_restores_position(
+    action_cam_window,
+):
+    """No overlays active (the default) - single-channel, not touched at all."""
+    action_cam_window._load_track(1)
+    action_cam_window.slider_frame.setValue(2)  # not frame 0
+    assert action_cam_window._overlays_active() is False
+
+    frames = action_cam_window._render_frames_for_export()
+
+    assert len(frames) == len(action_cam_window._frames)
+    for frame in frames:
+        assert frame.ndim == 2
+        assert frame.dtype == action_cam_window._raw.dtype
+    # Live view must be left exactly where it was.
+    assert action_cam_window._pos == 2
+
+
+def test_render_frames_for_export_uses_rgb_only_when_an_overlay_is_active(
+    action_cam_window,
+):
+    """Color is only needed once an overlay is drawn on top of the crop."""
+    action_cam_window._load_track(1)
+    action_cam_window.checkbox_show_track_path.setChecked(True)
+    try:
+        frames = action_cam_window._render_frames_for_export()
+        assert len(frames) == len(action_cam_window._frames)
+        for frame in frames:
+            assert frame.ndim == 3 and frame.shape[2] == 3
+            assert frame.dtype == np.uint8
+    finally:
+        action_cam_window.checkbox_show_track_path.setChecked(False)
+
+
+def test_render_frames_for_export_has_no_letterbox_padding(action_cam_window):
+    """Regression: capturing the interactive canvas directly exported
+    whatever aspect ratio the panel happened to have on screen, letterboxing
+    the (always square) crop with grey bars on the sides. Exported frames
+    must be exactly crop-sized, not panel-sized."""
+    action_cam_window._load_track(1)
+    radius = action_cam_window.spinbox_crop_radius.value()
+    expected_side = 2 * radius
+
+    frames = action_cam_window._render_frames_for_export()
+
+    for frame in frames:
+        assert abs(frame.shape[0] - expected_side) <= 1
+        assert abs(frame.shape[1] - expected_side) <= 1
+
+
+def test_write_tiff_stack_round_trips(action_cam_window, tmp_path):
+    action_cam_window._load_track(2)
+    frames = action_cam_window._render_frames_for_export()
+
+    path = tmp_path / "clip.tiff"
+    action_cam_window._write_tiff_stack(path, frames)
+
+    assert path.is_file()
+    import tifffile
+
+    stack = tifffile.imread(str(path))
+    assert stack.shape[0] == len(frames)
+
+
+def test_write_tiff_stack_preserves_native_dtype_without_overlays(
+    action_cam_window, tmp_path
+):
+    """No color needed -> no reason to lose bit depth either."""
+    action_cam_window._load_track(2)
+    frames = action_cam_window._render_frames_for_export()
+    assert frames[0].dtype == np.uint16  # the fixture's raw array dtype
+
+    path = tmp_path / "clip.tiff"
+    action_cam_window._write_tiff_stack(path, frames)
+
+    import tifffile
+
+    assert tifffile.imread(str(path)).dtype == np.uint16
+
+
+def test_write_tiff_stack_compresses_the_raw_only_case(action_cam_window, tmp_path):
+    action_cam_window._load_track(2)
+    frames = action_cam_window._render_frames_for_export()
+    assert frames[0].ndim == 2  # no overlays -> raw-only path
+
+    path = tmp_path / "clip.tiff"
+    action_cam_window._write_tiff_stack(path, frames)
+
+    import tifffile
+
+    with tifffile.TiffFile(str(path)) as tif:
+        assert tif.pages[0].compression.name.lower() in ("adobe_deflate", "deflate")
+
+
+def test_write_tiff_stack_does_not_compress_the_overlay_case(
+    action_cam_window, tmp_path
+):
+    action_cam_window._load_track(2)
+    action_cam_window.checkbox_show_track_path.setChecked(True)
+    try:
+        frames = action_cam_window._render_frames_for_export()
+        assert frames[0].ndim == 3  # overlay active -> RGB path
+
+        path = tmp_path / "clip.tiff"
+        action_cam_window._write_tiff_stack(path, frames)
+
+        import tifffile
+
+        with tifffile.TiffFile(str(path)) as tif:
+            assert tif.pages[0].compression.name.lower() == "none"
+    finally:
+        action_cam_window.checkbox_show_track_path.setChecked(False)
+
+
+def test_overlays_active_reflects_both_checkboxes(action_cam_window):
+    action_cam_window.checkbox_show_segmentation.setChecked(False)
+    action_cam_window.checkbox_show_track_path.setChecked(False)
+    assert action_cam_window._overlays_active() is False
+
+    action_cam_window.checkbox_show_segmentation.setChecked(True)
+    assert action_cam_window._overlays_active() is True
+    action_cam_window.checkbox_show_segmentation.setChecked(False)
+
+    action_cam_window.checkbox_show_track_path.setChecked(True)
+    assert action_cam_window._overlays_active() is True
+    action_cam_window.checkbox_show_track_path.setChecked(False)
+
+
+def test_to_uint8_scales_per_frame(action_cam_window):
+    frame = np.array([[0, 100], [200, 1000]], dtype=np.uint16)
+    scaled = action_cam_window._to_uint8(frame)
+    assert scaled.dtype == np.uint8
+    assert scaled.min() == 0
+    assert scaled.max() == 255
+
+
+def test_to_uint8_handles_a_constant_frame(action_cam_window):
+    frame = np.full((4, 4), 500, dtype=np.uint16)
+    scaled = action_cam_window._to_uint8(frame)
+    assert scaled.dtype == np.uint8
+    assert np.all(scaled == 0)
+
+
+def test_write_mp4_creates_a_nonempty_file(action_cam_window, tmp_path):
+    action_cam_window._load_track(2)
+    frames = action_cam_window._render_frames_for_export()
+
+    path = tmp_path / "clip.mp4"
+    action_cam_window._write_mp4(path, frames, fps=5)
+
+    assert path.is_file()
+    assert path.stat().st_size > 0
+
+
+def test_start_export_requires_a_loaded_track(action_cam_window, monkeypatch):
+    # action_cam_window is reused across this file's tests; force the
+    # "nothing loaded" state explicitly rather than assuming it.
+    action_cam_window._frames = np.empty(0, dtype=int)
+    notified = []
+    monkeypatch.setattr(action_cam_module, "notify", notified.append)
+
+    action_cam_window._start_export()
+
+    assert notified and "load a track" in notified[0].lower()
+
+
+def test_start_export_suggests_a_default_filename(action_cam_window, monkeypatch, tmp_path):
+    action_cam_window._load_track(1)
+    captured = {}
+
+    def fake_get_save_file_name(*args, **kwargs):
+        # Whether getSaveFileName ends up called bound or unbound depends on
+        # binding details we don't want this test to depend on - just record
+        # everything passed and search it below, rather than assuming which
+        # positional index the suggested filename lands at.
+        captured["values"] = list(args) + list(kwargs.values())
+        return ("", "")  # cancelled - just checking what was suggested
+
+    monkeypatch.setattr(
+        action_cam_module.QFileDialog, "getSaveFileName", fake_get_save_file_name
+    )
+
+    action_cam_window._start_export()
+
+    suggested_name = next(
+        v for v in captured["values"] if isinstance(v, str) and v.endswith(".mp4")
+    )
+    # [image layer name]_ID_[cell/track id] - the image layer in the fixture
+    # is named "raw", the loaded track is 1.
+    assert suggested_name == "raw_ID_1.mp4"
+
+
+def test_start_export_writes_the_chosen_format(action_cam_window, monkeypatch, tmp_path):
+    action_cam_window._load_track(1)
+    target = tmp_path / "my_clip.mp4"
+    monkeypatch.setattr(
+        action_cam_module.QFileDialog,
+        "getSaveFileName",
+        lambda *args, **kwargs: (str(target), "MP4 video (*.mp4)"),
+    )
+    notified = []
+    monkeypatch.setattr(action_cam_module, "notify", notified.append)
+
+    action_cam_window._start_export()
+
+    assert target.is_file()
+    assert notified and "Exported" in notified[0]
+
+
+def test_start_export_cancelled_dialog_writes_nothing(action_cam_window, monkeypatch, tmp_path):
+    action_cam_window._load_track(1)
+    monkeypatch.setattr(
+        action_cam_module.QFileDialog,
+        "getSaveFileName",
+        lambda *args, **kwargs: ("", ""),
+    )
+
+    action_cam_window._start_export()
+
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_start_export_pauses_and_resumes_playback(action_cam_window, monkeypatch, tmp_path):
+    action_cam_window._load_track(1)
+    target = tmp_path / "clip.mp4"
+    monkeypatch.setattr(
+        action_cam_module.QFileDialog,
+        "getSaveFileName",
+        lambda *args, **kwargs: (str(target), "MP4 video (*.mp4)"),
+    )
+
+    action_cam_window._toggle_play_pause()
+    assert action_cam_window._timer.isActive()
+
+    action_cam_window._start_export()
+
+    assert action_cam_window._timer.isActive()
+    action_cam_window._toggle_play_pause()  # leave it stopped for later tests
+
+
+def test_draw_track_path_fades_and_truncates_after_30_frames(action_cam_window):
+    """Regression: the path used to show the whole track travelled so far,
+    unbounded - now it fades out and stops growing after
+    TRACK_PATH_FADE_FRAMES frames."""
+    n = 50
+    action_cam_window._centroids = np.array([[i, i] for i in range(n)], dtype=float)
+
+    line_collection = action_cam_window._draw_track_path(
+        action_cam_window._axes, n - 1, y0=0, x0=0
+    )
+
+    try:
+        assert line_collection is not None
+        segments = line_collection.get_segments()
+        assert len(segments) == action_cam_module.TRACK_PATH_FADE_FRAMES - 1
+
+        # get_edgecolors() (the Collection base class API), not the
+        # LineCollection-specific get_color()/get_colors() aliases whose
+        # exact spelling varies across matplotlib versions.
+        colors = line_collection.get_edgecolors()
+        assert len(colors) == len(segments)
+        assert colors[0][3] == pytest.approx(0.1, abs=0.01)  # oldest: faint
+        assert colors[-1][3] == pytest.approx(1.0, abs=0.01)  # current: opaque
+    finally:
+        line_collection.remove()
+
+
+def test_draw_track_path_returns_none_for_a_single_point(action_cam_window):
+    action_cam_window._centroids = np.array([[5.0, 5.0]])
+    result = action_cam_window._draw_track_path(
+        action_cam_window._axes, 0, y0=0, x0=0
+    )
+    assert result is None
+
+
+def test_draw_track_path_shows_the_whole_short_track(action_cam_window):
+    """A track shorter than the fade window is shown in full, not truncated."""
+    action_cam_window._load_track(1)  # 5 frames, well under the fade window
+
+    line_collection = action_cam_window._draw_track_path(
+        action_cam_window._axes, len(action_cam_window._frames) - 1, y0=0, x0=0
+    )
+
+    try:
+        assert line_collection is not None
+        assert len(line_collection.get_segments()) == len(action_cam_window._frames) - 1
+    finally:
+        line_collection.remove()
+
+
+def test_draw_segmentation_outline_uses_an_image_overlay_not_a_scatter(
+    action_cam_window,
+):
+    """Regression: a fixed-point-size scatter marker looked a very different
+    relative size between the live view (crop upscaled to a much bigger
+    canvas) and export (crop rendered at its native pixel size) - an image
+    overlay scales exactly with the crop instead, avoiding the mismatch."""
+    from matplotlib.image import AxesImage
+
+    action_cam_window._load_track(1)
+    frame = action_cam_window._frames[0]
+    y0, y1, x0, x1 = action_cam_window._current_crop_bounds(0)
+
+    artist = action_cam_window._draw_segmentation_outline(
+        frame, y0, y1, x0, x1, index=0
+    )
+
+    try:
+        assert artist is not None
+        assert isinstance(artist, AxesImage)
+        overlay = artist.get_array()
+        assert overlay.shape[:2] == (y1 - y0, x1 - x0)
+        # Some pixels are the opaque outline color, most are transparent.
+        assert (overlay[..., 3] == 255).any()
+        assert (overlay[..., 3] == 0).any()
+    finally:
+        artist.remove()

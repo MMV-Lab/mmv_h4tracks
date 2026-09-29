@@ -1105,18 +1105,32 @@ class MMVH4TRACKS(QWidget):
 
     def open_action_cam(self):
         """
-        Open the Action Cam as a napari dock widget, creating it on first use
-        and reusing (just re-showing) it afterwards so a previously loaded
-        track and cached raw/segmentation data aren't lost when it's closed
-        and reopened.
+        Open the Action Cam as its own floating window (not merged into a
+        dock edge, to avoid it being mistaken for part of the main layout),
+        creating it on first use and reusing it afterwards so a previously
+        loaded track and cached raw/segmentation data aren't lost when it's
+        closed and reopened. Safe to call repeatedly: leaves it open if it
+        already is, reopens it if it isn't, and never errors - including if
+        the previous window was actually destroyed rather than just hidden.
         """
-        if self.action_cam_window is None:
-            self.action_cam_window = ActionCamWindow(self)
-            self._action_cam_dock = self.viewer.window.add_dock_widget(
-                self.action_cam_window, area="right", name="Action Cam"
-            )
-            return
-        self._action_cam_dock.show()
+        if self.action_cam_window is not None:
+            try:
+                self._action_cam_dock.show()
+                self._action_cam_dock.raise_()
+                return
+            except RuntimeError:
+                # The previous dock widget was destroyed (not just closed/
+                # hidden) - fall through and create a fresh one below.
+                self.action_cam_window = None
+                self._action_cam_dock = None
+
+        self.action_cam_window = ActionCamWindow(self)
+        self._action_cam_dock = self.viewer.window.add_dock_widget(
+            self.action_cam_window, name="Action Cam"
+        )
+        # add_dock_widget() docks it first; float it right away so it never
+        # visually merges into the main window's dock areas.
+        self._action_cam_dock.setFloating(True)
 
     def set_plugin_busy(self, busy: bool):
         """
