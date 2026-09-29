@@ -631,15 +631,16 @@ def _run_on_gui_thread(parent, fn) -> None:
 
 
 def _apply_dock_progress_widgets(parent, *, n: int, total: int, desc: str) -> None:
-    """Update bar + status together on the GUI thread."""
+    """Update bar + status together on the GUI thread.
+
+    The step count (n/total) is left to the progress bar's own percentage;
+    the status text is just the description, not a duplicate "n/total".
+    """
     if total > 0:
         pct = int(round(100.0 * n / total))
         parent.set_progress_value(pct)
-        parent.progress_bar.setFormat("%p%")
-        parent.set_status_text(f"{desc} {n}/{total}")
-    else:
-        parent.progress_bar.setFormat("%p%")
-        parent.set_status_text(desc)
+    parent.progress_bar.setFormat("%p%")
+    parent.set_status_text(desc)
     _paint_dock_progress(parent)
 
 
@@ -772,7 +773,7 @@ def run_with_dock_progress(
             _stop_worker_progress_reporter(worker)
             try:
                 if finish_desc and mode == "reporter":
-                    parent.set_status_text(f"{finish_desc} {bar_total}/{bar_total}")
+                    parent.set_status_text(finish_desc)
                     parent.set_progress_value(100)
                     parent.progress_bar.setFormat("%p%")
                     _paint_dock_progress(parent)
